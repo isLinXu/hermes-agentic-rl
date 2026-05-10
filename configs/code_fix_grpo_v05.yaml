@@ -1,0 +1,47 @@
+# v0.5 Code Fix + GPT-2 GRPO
+# SWE-bench style: fix buggy Python functions, reward = test pass rate
+
+algo: grpo
+
+backend:
+  name: hf
+  model_name_or_path: gpt2
+  device: mps
+  dtype: float32
+  with_value_head: false
+
+environment:
+  type: code_fix
+  dataset_size: 100
+  dataset_seed: 42
+  max_level: 2
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 100
+  group_size: 4
+  prompts_per_iter: 2
+  lr: 5e-5
+  max_new_tokens: 256
+  temperature: 0.7
+  clip_eps: 0.2
+  kl_coef: 0.04
+  entropy_coef: 0.02
+  use_reference: false
+  log_every: 1
+  save_every: 50
+  seed: 42
+  loss_agg: mean_token
+  grad_clip: 1.0
+  # v0.5 enhancements
+  per_token_advantage: true
+  advantage_norm: whiten
+  interleave_sft_every: 10
+  interleave_sft_samples: 32
+  interleave_sft_lr: 1e-4
+  batch_generate: true
+
+dashboard:
+  enabled: false

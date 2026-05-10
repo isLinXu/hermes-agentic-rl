@@ -1,0 +1,266 @@
+{
+  "model": "openai-community/gpt2",
+  "device": "mps",
+  "sft_samples": 200,
+  "sft_epochs": 3,
+  "grpo_iters": 50,
+  "grpo_group": 4,
+  "grpo_lr": 5e-05,
+  "elapsed": 557.2841007709503,
+  "first_reward": 0.0,
+  "last_reward": 0.0,
+  "best_reward": 0.0,
+  "delta": 0.0,
+  "curve": [
+    {
+      "iter": 0,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 1,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 2,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 3,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 4,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 5,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 6,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 7,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 8,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 9,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 10,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 11,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 12,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 13,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 14,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 15,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 16,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 17,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 18,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 19,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 20,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 21,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 22,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 23,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 24,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 25,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 26,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 27,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 28,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 29,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 30,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 31,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 32,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 33,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 34,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 35,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 36,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 37,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 38,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 39,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 40,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 41,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 42,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 43,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 44,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 45,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 46,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 47,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 48,
+      "reward": 0.0,
+      "loss": 0.0
+    },
+    {
+      "iter": 49,
+      "reward": 0.0,
+      "loss": 0.0
+    }
+  ]
+}

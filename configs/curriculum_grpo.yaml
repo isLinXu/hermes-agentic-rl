@@ -1,0 +1,40 @@
+# Curriculum learning — easy echo → harder sim-tool.
+# Promotes to level 1 once the 20-rollout moving-mean reward exceeds 0.4.
+# Run:  python -m hermes_agentic_rl.cli.main train-rl \
+#           --config configs/curriculum_grpo.yaml
+
+algo: grpo
+
+backend:
+  name: tiny
+  dim: 48
+  n_heads: 4
+  n_layers: 2
+  max_len: 192
+  seed: 0
+
+environment:
+  type: curriculum
+  window: 20
+  promote_threshold: 0.4
+  allow_demote: false
+  levels:
+    - type: echo
+    - type: sim_tool
+      dataset_size: 12
+      dataset_seed: 0
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 30
+  group_size: 6
+  prompts_per_iter: 2
+  lr: 0.005
+  max_new_tokens: 16
+  temperature: 1.0
+  clip_eps: 0.2
+  entropy_coef: 0.01
+  log_every: 3
+  seed: 7

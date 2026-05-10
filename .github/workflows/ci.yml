@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install (CPU torch + test extras)
+        run: |
+          python -m pip install --upgrade pip
+          # CPU-only torch to keep CI fast
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -e '.[rl,test]'
+
+      - name: Run test suite
+        run: |
+          pytest tests -q --maxfail=1 --disable-warnings
+
+  lint:
+    name: Lint (ruff + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dev tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff==0.6.9 mypy==1.11.2
+          pip install -e '.[rl]' --no-deps
+          # pull in torch runtime deps so mypy doesn't panic on missing stubs
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install PyYAML>=6.0
+
+      - name: ruff (lint)
+        run: ruff check hermes_agentic_rl tests
+
+      - name: ruff (format check)
+        run: ruff format --check hermes_agentic_rl tests
+
+      - name: mypy (type check)
+        run: mypy hermes_agentic_rl
+        continue-on-error: true  # non-blocking until stubs converge

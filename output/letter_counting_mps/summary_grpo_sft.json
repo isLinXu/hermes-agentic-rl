@@ -1,0 +1,415 @@
+{
+  "model": "openai-community/gpt2",
+  "device": "mps",
+  "sft_ckpt": "/Users/gatilin/PycharmProjects/hermes-agentic-rl/output/letter_counting/policy_sft.pt",
+  "iters": 100,
+  "group": 4,
+  "lr": 2e-05,
+  "elapsed": 718.3290841579437,
+  "first": 0.1875,
+  "last": 0.0,
+  "best": 0.5625,
+  "delta": -0.1875,
+  "curve": [
+    {
+      "iter": 0,
+      "reward": 0.1875
+    },
+    {
+      "iter": 1,
+      "reward": 0.0625
+    },
+    {
+      "iter": 2,
+      "reward": 0.125
+    },
+    {
+      "iter": 3,
+      "reward": 0.1875
+    },
+    {
+      "iter": 4,
+      "reward": 0.4375
+    },
+    {
+      "iter": 5,
+      "reward": 0.5625
+    },
+    {
+      "iter": 6,
+      "reward": 0.4375
+    },
+    {
+      "iter": 7,
+      "reward": 0.5
+    },
+    {
+      "iter": 8,
+      "reward": 0.1875
+    },
+    {
+      "iter": 9,
+      "reward": 0.3125
+    },
+    {
+      "iter": 10,
+      "reward": 0.25
+    },
+    {
+      "iter": 11,
+      "reward": 0.0625
+    },
+    {
+      "iter": 12,
+      "reward": 0.0625
+    },
+    {
+      "iter": 13,
+      "reward": 0.0
+    },
+    {
+      "iter": 14,
+      "reward": 0.125
+    },
+    {
+      "iter": 15,
+      "reward": 0.0
+    },
+    {
+      "iter": 16,
+      "reward": 0.0
+    },
+    {
+      "iter": 17,
+      "reward": 0.0
+    },
+    {
+      "iter": 18,
+      "reward": 0.0
+    },
+    {
+      "iter": 19,
+      "reward": 0.0
+    },
+    {
+      "iter": 20,
+      "reward": 0.0
+    },
+    {
+      "iter": 21,
+      "reward": 0.0625
+    },
+    {
+      "iter": 22,
+      "reward": 0.0
+    },
+    {
+      "iter": 23,
+      "reward": 0.125
+    },
+    {
+      "iter": 24,
+      "reward": 0.0
+    },
+    {
+      "iter": 25,
+      "reward": 0.0
+    },
+    {
+      "iter": 26,
+      "reward": 0.0
+    },
+    {
+      "iter": 27,
+      "reward": 0.0
+    },
+    {
+      "iter": 28,
+      "reward": 0.0
+    },
+    {
+      "iter": 29,
+      "reward": 0.0
+    },
+    {
+      "iter": 30,
+      "reward": 0.0
+    },
+    {
+      "iter": 31,
+      "reward": 0.0
+    },
+    {
+      "iter": 32,
+      "reward": 0.0
+    },
+    {
+      "iter": 33,
+      "reward": 0.0
+    },
+    {
+      "iter": 34,
+      "reward": 0.0
+    },
+    {
+      "iter": 35,
+      "reward": 0.0
+    },
+    {
+      "iter": 36,
+      "reward": 0.0
+    },
+    {
+      "iter": 37,
+      "reward": 0.0
+    },
+    {
+      "iter": 38,
+      "reward": 0.0
+    },
+    {
+      "iter": 39,
+      "reward": 0.0
+    },
+    {
+      "iter": 40,
+      "reward": 0.0
+    },
+    {
+      "iter": 41,
+      "reward": 0.0
+    },
+    {
+      "iter": 42,
+      "reward": 0.0
+    },
+    {
+      "iter": 43,
+      "reward": 0.0
+    },
+    {
+      "iter": 44,
+      "reward": 0.0625
+    },
+    {
+      "iter": 45,
+      "reward": 0.0
+    },
+    {
+      "iter": 46,
+      "reward": 0.0
+    },
+    {
+      "iter": 47,
+      "reward": 0.0625
+    },
+    {
+      "iter": 48,
+      "reward": 0.0
+    },
+    {
+      "iter": 49,
+      "reward": 0.0
+    },
+    {
+      "iter": 50,
+      "reward": 0.0
+    },
+    {
+      "iter": 51,
+      "reward": 0.0
+    },
+    {
+      "iter": 52,
+      "reward": 0.0
+    },
+    {
+      "iter": 53,
+      "reward": 0.0
+    },
+    {
+      "iter": 54,
+      "reward": 0.0
+    },
+    {
+      "iter": 55,
+      "reward": 0.0
+    },
+    {
+      "iter": 56,
+      "reward": 0.0
+    },
+    {
+      "iter": 57,
+      "reward": 0.0625
+    },
+    {
+      "iter": 58,
+      "reward": 0.0
+    },
+    {
+      "iter": 59,
+      "reward": 0.0
+    },
+    {
+      "iter": 60,
+      "reward": 0.0625
+    },
+    {
+      "iter": 61,
+      "reward": 0.0
+    },
+    {
+      "iter": 62,
+      "reward": 0.0
+    },
+    {
+      "iter": 63,
+      "reward": 0.0
+    },
+    {
+      "iter": 64,
+      "reward": 0.0
+    },
+    {
+      "iter": 65,
+      "reward": 0.0
+    },
+    {
+      "iter": 66,
+      "reward": 0.0
+    },
+    {
+      "iter": 67,
+      "reward": 0.0
+    },
+    {
+      "iter": 68,
+      "reward": 0.0
+    },
+    {
+      "iter": 69,
+      "reward": 0.0
+    },
+    {
+      "iter": 70,
+      "reward": 0.0
+    },
+    {
+      "iter": 71,
+      "reward": 0.0
+    },
+    {
+      "iter": 72,
+      "reward": 0.0
+    },
+    {
+      "iter": 73,
+      "reward": 0.0
+    },
+    {
+      "iter": 74,
+      "reward": 0.0
+    },
+    {
+      "iter": 75,
+      "reward": 0.0
+    },
+    {
+      "iter": 76,
+      "reward": 0.0
+    },
+    {
+      "iter": 77,
+      "reward": 0.0
+    },
+    {
+      "iter": 78,
+      "reward": 0.0
+    },
+    {
+      "iter": 79,
+      "reward": 0.0
+    },
+    {
+      "iter": 80,
+      "reward": 0.0
+    },
+    {
+      "iter": 81,
+      "reward": 0.0
+    },
+    {
+      "iter": 82,
+      "reward": 0.0
+    },
+    {
+      "iter": 83,
+      "reward": 0.0
+    },
+    {
+      "iter": 84,
+      "reward": 0.0
+    },
+    {
+      "iter": 85,
+      "reward": 0.0
+    },
+    {
+      "iter": 86,
+      "reward": 0.0
+    },
+    {
+      "iter": 87,
+      "reward": 0.0
+    },
+    {
+      "iter": 88,
+      "reward": 0.0
+    },
+    {
+      "iter": 89,
+      "reward": 0.0
+    },
+    {
+      "iter": 90,
+      "reward": 0.0
+    },
+    {
+      "iter": 91,
+      "reward": 0.0
+    },
+    {
+      "iter": 92,
+      "reward": 0.0625
+    },
+    {
+      "iter": 93,
+      "reward": 0.0625
+    },
+    {
+      "iter": 94,
+      "reward": 0.0
+    },
+    {
+      "iter": 95,
+      "reward": 0.0
+    },
+    {
+      "iter": 96,
+      "reward": 0.0
+    },
+    {
+      "iter": 97,
+      "reward": 0.0
+    },
+    {
+      "iter": 98,
+      "reward": 0.0
+    },
+    {
+      "iter": 99,
+      "reward": 0.0
+    }
+  ]
+}

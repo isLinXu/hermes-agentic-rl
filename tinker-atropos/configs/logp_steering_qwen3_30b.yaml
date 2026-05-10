@@ -1,0 +1,31 @@
+# Logprob-steering self-distillation on Qwen3-30B-A3B (MoE)
+# Uses WildChat first turns + Bataille/Deleuze steering prompt
+# Teacher = same model with system prompt, student = model without
+
+env:
+  tokenizer_name: "Qwen/Qwen3-30B-A3B"
+  group_size: 4
+  batch_size: 512
+  max_batches_offpolicy: 3
+  use_wandb: true
+  rollout_server_url: "http://localhost:8000"
+  total_steps: 75
+  steps_per_eval: 10000
+  max_token_length: 4096
+  max_num_workers: 128
+  wandb_name: "logp-steering-bataille"
+
+openai:
+  - model_name: "Qwen/Qwen3-30B-A3B"
+    base_url: "http://localhost:8001/v1"
+    api_key: "x"
+    num_requests_for_eval: 256
+
+tinker:
+  lora_rank: 32
+  learning_rate: 4e-5
+  max_token_trainer_length: 4096
+  checkpoint_dir: "./checkpoints/logp_steering_qwen3_30b/"
+  save_checkpoint_interval: 10
+  wandb_project: "logp-steering"
+  wandb_run_name: "emoji-qwen3-30b"

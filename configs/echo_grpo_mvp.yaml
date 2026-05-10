@@ -1,0 +1,31 @@
+# MVP GRPO configuration — echo task on TinyCausalLM (CPU-friendly).
+# Run:  python -m hermes_agentic_rl.cli.main train-rl --config configs/echo_grpo_mvp.yaml
+# This actually owns a policy and updates parameters (unlike `train`, which
+# exports rollouts as JSONL for downstream consumption).
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  max_len: 128
+  seed: 0
+
+environment:
+  type: echo
+  # dataset_path omitted → use built-in default dataset (4 echo pairs)
+
+train_rl:
+  n_iters: 60
+  group_size: 8
+  prompts_per_iter: 2
+  lr: 0.005
+  max_new_tokens: 8
+  temperature: 1.0
+  clip_eps: 0.2
+  kl_coef: 0.0
+  entropy_coef: 0.0
+  use_reference: false
+  log_every: 10
+  save_every: 0
+  seed: 123

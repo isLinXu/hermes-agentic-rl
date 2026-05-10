@@ -1,0 +1,65 @@
+# v0.6 示例配置：GRPO + K3 KL + Checkpoint + 多后端指标
+#
+# 运行：
+#   python -m hermes_agentic_rl.cli.main train-rl \
+#       --config configs/echo_grpo_v06.yaml \
+#       --output outputs/echo_grpo_v06
+#
+# 中断后自动从最新 checkpoint 续训：
+#   python -m hermes_agentic_rl.cli.main train-rl \
+#       --config configs/echo_grpo_v06.yaml --output outputs/echo_grpo_v06
+# (因为 auto_resume: true，已保存的 checkpoint 会被自动加载。)
+
+algo: grpo
+
+environment:
+  type: echo
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  seed: 0
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 60
+  group_size: 8
+  prompts_per_iter: 2
+  lr: 5e-3
+  max_new_tokens: 8
+  temperature: 1.0
+
+  # --- v0.6: KL estimator (K3 = 无偏、非负、低方差) ---
+  use_reference: true
+  kl_coef: 0.005
+  kl_estimator: k3
+
+  # --- v0.6: Checkpoint + auto-resume ---
+  checkpoint_every: 10       # 每 10 iter 保存一次 {model, optim, rng, stats}
+  keep_last_checkpoints: 3
+  auto_resume: true          # 若 output_dir/checkpoints 已存在，自动续训
+
+  log_every: 5
+  seed: 0
+  grad_clip: 1.0
+
+# --- v0.6: 统一指标后端（JSONL + 可选 TB/W&B）---
+# jsonl: 默认写到 output_dir/metrics.jsonl
+# tensorboard: 需要 `pip install tensorboard`
+# wandb: 需要在外部先 `wandb.init()`（未 init 则自动 no-op）
+metrics:
+  jsonl: true
+  stdout: false
+  tensorboard: true
+  # wandb:
+  #   prefix: train
+
+# 可选：实时 dashboard（纯 stdlib HTTP + Chart.js）
+# dashboard:
+#   enabled: true
+#   host: 127.0.0.1
+#   port: 8765
