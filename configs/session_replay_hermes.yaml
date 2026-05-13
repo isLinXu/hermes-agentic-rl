@@ -1,0 +1,19 @@
+input_path: outputs/hermes_sessions.jsonl
+output_path: outputs/session_replay.jsonl
+# quarantine_path: outputs/session_replay_quarantine.jsonl
+# quality_report_path: outputs/session_replay_quality_report.json
+
+backend:
+  # Use the tokenizer family you plan to train with.
+  name: tiny
+  # Example HF alternative:
+  # name: hf
+  # model_name_or_path: gpt2
+  # trust_remote_code: false
+
+# Optional replay quality gates applied before samples are written.
+# data_quality:
+#   min_prompt_tokens: 1
+#   min_response_tokens: 8
+#   max_abs_reward: 5.0
+#   dedupe_within_scan: true

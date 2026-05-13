@@ -1,0 +1,70 @@
+algo: grpo
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  max_len: 1024
+  device: mps
+  dtype: float32
+  seed: 0
+
+environment:
+  type: hermes_reasoning_traces
+  dataset_name: lambda/hermes-agent-reasoning-traces
+  dataset_config: kimi
+  dataset_split: train
+  dataset_limit: 128
+  streaming: true
+  shuffle: true
+  seed: 0
+  revision: main
+  cache_dir: null
+  rows_api_only: true
+  rows_api_timeout: 60.0
+  rows_api_retries: 3
+  history_window_messages: 16
+  max_prompt_chars: 800
+  include_system_prompt: true
+  reward_weight: 1.0
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 16
+  group_size: 4
+  prompts_per_iter: 4
+  lr: 0.003
+  max_new_tokens: 48
+  temperature: 1.0
+  update_epochs: 1
+  minibatch_size: 4
+  log_every: 1
+  seed: 0
+  advantage_eps: 1.0e-6
+  bootstrap_sft_rounds: 2
+  bootstrap_sft_samples: 8
+  bootstrap_sft_lr: 0.0005
+  bootstrap_sft_epochs: 1
+  interleave_sft_every: 4
+  interleave_sft_samples: 8
+  interleave_sft_lr: 0.0003
+  interleave_sft_epochs: 1
+  interleave_sft_batch_size: 8
+  save_every: 8
+  checkpoint_every: 8
+  keep_last_checkpoints: 2
+
+metrics:
+  jsonl: true
+  stdout: true
+  tensorboard: true
+  wandb:
+    enabled: true
+    project: hermes-agentic-rl
+    name: hermes-reasoning-traces-real-train
+    prefix: train
+    mode: online
+    tags: [grpo, hermes_reasoning_traces, real-dataset]

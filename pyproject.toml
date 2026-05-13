@@ -1,0 +1,184 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-agentic-rl"
+version = "0.6.0.dev0"
+description = "Agentic RL framework for hermes-agent (GRPO + PPO + multi-turn + curriculum + dashboard + resumable checkpoints + K3 KL + pluggable metrics)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+# Real RL training (GRPO/PPO) needs torch. CPU build is fine for the MVP.
+rl = ["torch>=2.1"]
+# HF dataset loading / offline real-trace training.
+data = ["datasets>=2.19", "pyarrow>=14"]
+# Observability stack (TensorBoard + W&B).
+metrics = ["tensorboard>=2.14", "wandb>=0.17"]
+# HF backend (AutoModelForCausalLM) — optional.
+hf = ["torch>=2.1", "transformers>=4.40"]
+# Hermes integration is pulled in separately by the user.
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.24",
+    "coverage[toml]>=7.4",
+]
+# Documentation build stack. Keep upper bounds so CI docs do not unexpectedly
+# jump across major Sphinx/MyST compatibility boundaries.
+docs = ["sphinx>=7.3,<9", "sphinx-autodoc-typehints>=2.3,<3", "myst-parser>=3.0,<5"]
+# Development tooling (CI, linting, type-checking).
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.24",
+    "coverage[toml]>=7.4",
+    "ruff==0.6.9",
+    "mypy==1.11.2",
+    "types-PyYAML>=6.0.12",
+    "pre-commit>=3.7",
+    "pip-audit>=2.8",
+    "build>=1.2",
+    "twine>=5.1",
+]
+
+[project.scripts]
+hermes-agentic-rl = "hermes_agentic_rl.cli.main:main"
+
+[tool.setuptools.packages.find]
+include = ["hermes_agentic_rl*"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "7.4"
+testpaths = ["tests"]
+filterwarnings = [
+    # treat unexpected warnings as hard errors; keep explicit exceptions below
+    "ignore::DeprecationWarning:hermes_agentic_rl.*",
+]
+addopts = [
+    "--strict-markers",
+    "-ra",
+]
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: exercises multiple subsystems or local external fixtures",
+    "slow: longer-running tests that are skipped in fast local loops",
+]
+
+# ---------------------------------------------------------------------------
+# coverage.py — used by CI and local coverage runs.
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["hermes_agentic_rl"]
+omit = [
+    "*/__init__.py",
+    "*/tests/*",
+    "*/subprojects/*",
+    "*/atropos/*",
+    "*/outputs/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 45
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+# ---------------------------------------------------------------------------
+# ruff — linting + formatting (replaces black + isort + flake8)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    ".venv*",
+    "atropos",
+    "atropos-main.zip",
+    "tinker-atropos",
+    "tinker-atropos-main.zip",
+    "subprojects/hermes-agent",
+    "outputs",
+    "output",
+    "hermes_agentic_rl.egg-info",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear (common bug patterns)
+    "UP",   # pyupgrade (use modern python idioms)
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",   # line too long (already enforced by formatter)
+    "B008",   # function-call-in-default-argument (clashes with dataclass field())
+    "SIM108", # allow explicit if/else instead of ternary where clearer
+    "B904",   # raise-without-from-inside-except (legacy tolerated)
+    "B023",   # function-uses-loop-variable (intentional closures in trainers)
+    "B007",   # unused loop control variable
+    "SIM105", # contextlib.suppress vs try/except pass (both fine)
+    "RUF002", # full-width unicode in docstrings (Chinese comments are fine)
+    "RUF003", # full-width unicode in comments (Chinese comments are fine)
+    "RUF005", # `[*x, y]` vs `x + [y]` (style)
+    "UP038",  # `isinstance(x, X | Y)` — keep 3.10+ `(X, Y)` form for compat
+    "SIM118", # `k in d.keys()` (explicit form OK)
+    "SIM102", # nested if (clearer in some spots)
+    "E741",   # ambiguous names (legacy `l` / `I` in a few tests)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: allow unused imports for importorskip side-effects; allow longer lines.
+"tests/**" = ["F401", "E402"]
+# __init__.py: re-export, unused-import is intentional.
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ---------------------------------------------------------------------------
+# mypy — static type checking (runs as a blocking full-package CI gate)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+check_untyped_defs = true
+# Soft start: accept dynamic typing initially, progressively tighten.
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+no_implicit_optional = true
+strict_equality = true
+files = ["hermes_agentic_rl"]
+exclude = [
+    "tests",
+    "atropos",
+    "tinker-atropos",
+    "outputs?",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "atroposlib.*",
+    "transformers.*",
+    "wandb.*",
+    "torch.utils.tensorboard.*",
+]
+ignore_missing_imports = true

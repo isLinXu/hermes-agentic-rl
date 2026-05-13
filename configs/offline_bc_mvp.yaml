@@ -1,0 +1,25 @@
+# Offline BC warmup on a toy dataset.
+#
+# Run:
+#   python -m hermes_agentic_rl.cli.main --config configs/offline_bc_mvp.yaml offline
+#
+# data_path JSONL row format:
+#   {"prompt_ids": [...], "response_ids": [...], "reward": 1.0}
+
+algo: bc
+data_path: data/bc_samples.jsonl
+save_path: output/bc_policy.pt
+
+backend:
+  seed: 0
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+
+algo_config:
+  n_epochs: 3
+  batch_size: 4
+  lr: 5.0e-3
+  grad_clip: 1.0
+  seed: 0
+  log_every: 1

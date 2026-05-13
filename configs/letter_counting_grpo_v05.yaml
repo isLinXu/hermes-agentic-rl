@@ -1,0 +1,49 @@
+# v0.5 Letter Counting + GPT-2 GRPO (MPS)
+# Full enhancements: interleaved SFT, per-token advantage, batch generate
+
+algo: grpo
+
+backend:
+  name: hf
+  model_name_or_path: gpt2
+  device: mps
+  dtype: float32
+  with_value_head: false
+
+environment:
+  type: letter_counting
+  dataset_size: 200
+  dataset_seed: 42
+  max_level: 10
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 100
+  group_size: 4
+  prompts_per_iter: 2
+  lr: 5e-5
+  max_new_tokens: 128
+  temperature: 0.8
+  clip_eps: 0.2
+  kl_coef: 0.04
+  entropy_coef: 0.02
+  use_reference: false
+  log_every: 1
+  save_every: 50
+  seed: 42
+  loss_agg: mean_token
+  grad_clip: 1.0
+  # v0.5 enhancements
+  per_token_advantage: true
+  advantage_norm: whiten
+  interleave_sft_every: 10
+  interleave_sft_samples: 32
+  interleave_sft_lr: 1e-4
+  batch_generate: true
+
+dashboard:
+  enabled: false
+  host: 127.0.0.1
+  port: 8765
