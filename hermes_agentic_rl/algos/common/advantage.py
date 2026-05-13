@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+
+def group_normalize_advantage(
+    rewards: Sequence[float],
+    eps: float = 1e-6,
+) -> list[float]:
+    """GRPO-style group normalization: (r - mean) / (std + eps).
+
+    When a group has size 1 or zero variance, falls back to (r - mean) to keep
+    the signal but avoid divide-by-zero. Returns advantages with the same order
+    as `rewards`.
+    """
+    n = len(rewards)
+    if n == 0:
+        return []
+    mean = sum(rewards) / n
+    if n == 1:
+        return [0.0]
+    var = sum((r - mean) ** 2 for r in rewards) / n
+    std = var ** 0.5
+    if std < eps:
+        # All rewards identical → advantage = 0 (no learning signal, but that's
+        # fine: GRPO just won't update on this group this step).
+        return [0.0 for _ in rewards]
+    return [(r - mean) / (std + eps) for r in rewards]

@@ -1,0 +1,54 @@
+# Multi-turn GRPO — SimToolEnv with the calc tool.
+# Exercises: tool-call parsing, tool-result injection, per-turn records,
+#            group-normalized advantages on a sparse reward (0.4/0.3/0.3
+#            decomposition defined in SimToolRewardComponent).
+# Run:  python -m hermes_agentic_rl.cli.main train-rl \
+#           --config configs/sim_tool_grpo_multiturn.yaml
+
+algo: grpo
+
+backend:
+  name: tiny
+  dim: 48
+  n_heads: 4
+  n_layers: 2
+  max_len: 192
+  seed: 0
+
+environment:
+  type: sim_tool
+  dataset_size: 12
+  dataset_seed: 0
+
+agent_loop:
+  type: multi_turn
+  max_turns: 2
+  max_new_tokens_per_turn: 48
+
+train_rl:
+  n_iters: 20
+  group_size: 6
+  prompts_per_iter: 2
+  lr: 0.005
+  temperature: 0.0
+  max_new_tokens: 48
+  update_epochs: 2
+  minibatch_size: 6
+  clip_eps: 0.2
+  kl_coef: 0.0
+  entropy_coef: 0.01
+  log_every: 2
+  seed: 42
+  multi_turn: true       # emit per-turn RolloutRecords
+  multi_turn_credit:
+    mode: hybrid
+    gamma: 0.9
+    final_reward_weight: 0.7
+    local_reward_weight: 0.3
+  bootstrap_sft_rounds: 20
+  bootstrap_sft_samples: 16
+  bootstrap_sft_lr: 0.05
+  interleave_sft_every: 1
+  interleave_sft_samples: 8
+  interleave_sft_lr: 0.01
+  loss_agg: mean_token

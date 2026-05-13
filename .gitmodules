@@ -1,0 +1,11 @@
+[submodule "subprojects/hermes-agent"]
+	path = subprojects/hermes-agent
+	url = https://github.com/NousResearch/hermes-agent.git
+[submodule "subprojects/atropos"]
+	path = subprojects/atropos
+	url = https://github.com/NousResearch/atropos.git
+	branch = main
+[submodule "subprojects/tinker-atropos"]
+	path = subprojects/tinker-atropos
+	url = https://github.com/NousResearch/tinker-atropos.git
+	branch = main

@@ -51,6 +51,21 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Local training / experiment artifacts
+output/
+outputs/
+wandb/
+data/hermes_reasoning_traces/
+.thumbs/
+docs/sphinx/_build/
+*.parquet
+*.arrow
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+events.out.tfevents.*
+
 # Translations
 *.mo
 *.pot

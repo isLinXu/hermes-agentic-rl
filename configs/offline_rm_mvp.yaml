@@ -1,0 +1,30 @@
+# Offline reward-model training (Bradley-Terry) on preference pairs.
+#
+# Run:
+#   python -m hermes_agentic_rl.cli.main --config configs/offline_rm_mvp.yaml offline
+#
+# The saved file contains the reward head state_dict (head only).
+# To use the trained RM as a reward component in RL:
+#   from hermes_agentic_rl.rewards.reward_model import RewardModel, RewardModelComponent
+#   rm = RewardModel(backend, freeze_base=True)
+#   rm.head.load_state_dict(torch.load("output/rm_head.pt"))
+#   reward_manager = RewardManager([RewardModelComponent(rm, weight=1.0)])
+
+algo: rm
+data_path: data/dpo_pairs.jsonl
+save_path: output/rm_head.pt
+
+backend:
+  seed: 0
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+
+algo_config:
+  n_epochs: 3
+  batch_size: 4
+  lr: 1.0e-3
+  freeze_base: true
+  grad_clip: 1.0
+  seed: 0
+  log_every: 1

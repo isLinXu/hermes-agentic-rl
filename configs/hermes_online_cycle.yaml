@@ -1,0 +1,85 @@
+runtime:
+  integration: hermes
+  # Uses the local subproject by default; keep this explicit for reproducibility.
+  repo_path: subprojects/hermes-agent
+  api_key_envs:
+    - NEWAPI_API_KEY
+    - LKEAP_API_KEY
+    - OPENAI_API_KEY
+  provider: openai
+  base_url: https://ai.shukelongda.cn/v1
+  model: gpt-5.4-mini
+  max_agent_turns: 20
+  enabled_toolsets:
+    - terminal
+    - file
+  session_sidecar:
+    enabled: true
+    session_log_path: outputs/hermes_online_cycle/sessions.jsonl
+    replay_output_path: outputs/hermes_online_cycle/replay.jsonl
+    flush_interval_sec: 0.25
+    max_batch_size: 8
+
+environment:
+  dataset_path: data/minimal_terminal_tasks.jsonl
+  system_prompt: null
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+
+judge:
+  components:
+    - name: session_user_feedback_reward
+      weight: 0.5
+    - name: session_tool_feedback_reward
+      weight: 0.3
+    - name: session_toolcall_reward
+      weight: 0.2
+
+online_cycle:
+  cycles: 1
+  limit: 4
+  seed: 0
+
+  # Optional: backfill from session logs with quality gates instead of training
+  # directly from the append-only sidecar replay file.
+  # session_replay:
+  #   output_path: outputs/hermes_online_cycle/replay.filtered.jsonl
+  #   quarantine_path: outputs/hermes_online_cycle/replay_quarantine.jsonl
+  #   quality_report_path: outputs/hermes_online_cycle/replay_quality_report.json
+  #   data_quality:
+  #     min_prompt_tokens: 2
+  #     min_response_tokens: 2
+  #     dedupe_within_scan: true
+
+  session_train_worker:
+    algo: bc
+    save_path: outputs/hermes_online_cycle/policy.pt
+    state_path: outputs/hermes_online_cycle/worker_state.json
+    quarantine_path: outputs/hermes_online_cycle/worker_quarantine.jsonl
+    train:
+      n_epochs: 1
+      batch_size: 8
+      lr: 0.001
+      min_reward: 0.0
+      max_records_per_update: 256
+      poll_interval_sec: 1.0
+    metrics:
+      jsonl: outputs/hermes_online_cycle/worker_metrics.jsonl
+      wandb:
+        enabled: true
+        project: hermes-agentic-rl
+        name: hermes-online-cycle
+        prefix: train
+        mode: online
+        tags: [hermes, online-cycle, bc]
+
+  session_eval_export:
+    output_path: outputs/hermes_online_cycle/self_evolution_dataset
+    source: hermes-session
+    train_ratio: 0.7
+    val_ratio: 0.2
+    min_reward: 0.0
