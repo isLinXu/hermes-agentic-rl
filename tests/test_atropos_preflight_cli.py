@@ -9,16 +9,19 @@ def test_atropos_preflight_cli_outputs_json_and_fails_when_tinker_missing(
     monkeypatch,
     capsys,
 ):
-    # Preflight inspects current working directory for `atropos/` and `tinker-atropos/`.
+    # Preflight inspects current working directory for subproject checkouts.
     # Create minimal placeholders so we can test output shape without pulling huge repos.
-    (tmp_path / "atropos").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "tinker-atropos" / "tinker_atropos").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "tinker-atropos" / "tinker_atropos" / "__init__.py").write_text("", encoding="utf-8")
-    (tmp_path / "tinker-atropos" / "tinker_atropos" / "config.py").write_text(
-        "class TinkerAtroposConfig: pass\n", encoding="utf-8"
+    atropos_dir = tmp_path / "subprojects" / "atropos"
+    tinker_dir = tmp_path / "subprojects" / "tinker-atropos"
+    atropos_dir.mkdir(parents=True, exist_ok=True)
+    (tinker_dir / "tinker_atropos").mkdir(parents=True, exist_ok=True)
+    (tinker_dir / "tinker_atropos" / "__init__.py").write_text("", encoding="utf-8")
+    (tinker_dir / "tinker_atropos" / "config.py").write_text(
+        "class TinkerAtroposConfig: pass\n",
+        encoding="utf-8",
     )
-    (tmp_path / "atropos" / "atroposlib").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "atropos" / "atroposlib" / "__init__.py").write_text("", encoding="utf-8")
+    (atropos_dir / "atroposlib").mkdir(parents=True, exist_ok=True)
+    (atropos_dir / "atroposlib" / "__init__.py").write_text("", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(

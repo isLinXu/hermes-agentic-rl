@@ -6,6 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+_ATROPOS_RELATIVE_PATHS = (
+    Path("subprojects/atropos"),
+    Path("atropos"),
+)
+_TINKER_ATROPOS_RELATIVE_PATHS = (
+    Path("subprojects/tinker-atropos"),
+    Path("tinker-atropos"),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AtroposPreflightResult:
@@ -32,10 +41,18 @@ def _module_exists(name: str) -> bool:
 
 
 def _maybe_add_sys_path(path: Path) -> None:
-    # Ensure local vendored repos can be imported without pip install.
+    # Ensure local subprojects can be imported without pip install.
     p = str(path.resolve())
     if p not in sys.path:
         sys.path.insert(0, p)
+
+
+def _first_existing(base_dir: Path, candidates: tuple[Path, ...]) -> Path | None:
+    for relative in candidates:
+        candidate = (base_dir / relative).resolve()
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
@@ -48,10 +65,8 @@ def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
     """
 
     base_dir = base_dir.resolve()
-    atropos_dir = (base_dir / "atropos") if (base_dir / "atropos").exists() else None
-    tinker_atropos_dir = (
-        (base_dir / "tinker-atropos") if (base_dir / "tinker-atropos").exists() else None
-    )
+    atropos_dir = _first_existing(base_dir, _ATROPOS_RELATIVE_PATHS)
+    tinker_atropos_dir = _first_existing(base_dir, _TINKER_ATROPOS_RELATIVE_PATHS)
 
     if atropos_dir is not None:
         _maybe_add_sys_path(atropos_dir)
@@ -71,9 +86,9 @@ def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
 
     missing: list[str] = []
     if atropos_dir is None:
-        missing.append("local_dir:atropos")
+        missing.append("local_dir:subprojects/atropos")
     if tinker_atropos_dir is None:
-        missing.append("local_dir:tinker-atropos")
+        missing.append("local_dir:subprojects/tinker-atropos")
     if not python_ok["atroposlib"]:
         missing.append("python:atroposlib")
     if not python_ok["tinker_atropos.config"]:
@@ -83,8 +98,8 @@ def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
 
     return AtroposPreflightResult(
         base_dir=base_dir,
-        atropos_dir=atropos_dir.resolve() if atropos_dir else None,
-        tinker_atropos_dir=tinker_atropos_dir.resolve() if tinker_atropos_dir else None,
+        atropos_dir=atropos_dir,
+        tinker_atropos_dir=tinker_atropos_dir,
         python_ok=python_ok,
         missing=missing,
     )

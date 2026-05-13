@@ -30,6 +30,7 @@ model，并通过 held-out benchmark 验证改进。
 - [下一步优化](#下一步优化)
 - [能力矩阵](#能力矩阵)
 - [快速开始](#快速开始)
+- [外部子项目](#外部子项目)
 - [密钥与环境变量](#密钥与环境变量)
 - [训练模式](#训练模式)
 - [关键配置](#关键配置)
@@ -54,6 +55,7 @@ model，并通过 held-out benchmark 验证改进。
 | 如果你想... | 从这里开始 |
 |---|---|
 | 先检查仓库和 Hermes 子项目是否接好 | `python -m hermes_agentic_rl.cli.main hermes-preflight` |
+| 检查 Atropos 与 Tinker-Atropos 是否接好 | `python -m hermes_agentic_rl.cli.main atropos-preflight` |
 | 快速做一个小型 on-policy 训练 | `configs/hermes_reasoning_traces_grpo_smoke.yaml` |
 | 在本地 parquet shard 上用 MPS 训练 | `configs/hermes_reasoning_traces_parquet_mps_filtered.yaml` |
 | 验证 RL 是否真的带来提升 | `configs/hermes_reasoning_traces_eval_rl.yaml` |
@@ -144,12 +146,13 @@ flowchart LR
 | 定向 self-evolution | `self-evolution-batch` | 批量 replay、worker 训练、验证集导出和方向级 summary。 |
 | Self-evolution 导出 | `session-eval-export` | 写出 `task_input` / `expected_behavior` JSONL split。 |
 | 可观测性 | `metrics:` | JSONL、stdout、TensorBoard、W&B、可选 live dashboard。 |
+| 外部子项目 | `subprojects/*` | Hermes-agent、Atropos 与 Tinker-Atropos 的上游 checkout。 |
 
 ## 快速开始
 
 ```bash
 python -m pip install -e '.[rl,data,metrics]'
-git submodule update --init --recursive
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
 python -m hermes_agentic_rl.cli.main hermes-preflight
 ```
 
@@ -167,6 +170,28 @@ python -m hermes_agentic_rl.cli.main hermes-preflight
 ```bash
 export HERMES_AGENT_REPO=/path/to/hermes-agent
 ```
+
+## 外部子项目
+
+外部仓库统一以 git submodule 形式放在 `subprojects/` 下，不再作为根目录的一等源代码
+vendored 进本仓库。
+
+| 路径 | 上游 | 用途 |
+|---|---|---|
+| `subprojects/hermes-agent` | `NousResearch/hermes-agent` | 真实 Hermes runtime 与 session replay 集成。 |
+| `subprojects/atropos` | `NousResearch/atropos` | 可选 Atropos environment adapter 与兼容性测试。 |
+| `subprojects/tinker-atropos` | `NousResearch/tinker-atropos` | 可选 Tinker-Atropos 预检与 trainer 集成检查。 |
+
+clone 或切换分支后执行：
+
+```bash
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
+python -m hermes_agentic_rl.cli.main hermes-preflight
+python -m hermes_agentic_rl.cli.main atropos-preflight
+```
+
+框架代码会把这些目录视为外部项目。CI 只初始化顶层 submodule，lint、typing、
+package 和 docs gate 聚焦本仓库自己的 adapter、trainer、reward、config 和测试。
 
 ## 密钥与环境变量
 

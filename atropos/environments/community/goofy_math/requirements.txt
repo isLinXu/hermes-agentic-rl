@@ -1,4 +1,0 @@
-datasets
-latex2sympy2_extended
-math_verify
-wandb

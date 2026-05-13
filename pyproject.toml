@@ -109,7 +109,9 @@ extend-exclude = [
     "atropos-main.zip",
     "tinker-atropos",
     "tinker-atropos-main.zip",
+    "subprojects/atropos",
     "subprojects/hermes-agent",
+    "subprojects/tinker-atropos",
     "outputs",
     "output",
     "hermes_agentic_rl.egg-info",
@@ -170,6 +172,9 @@ files = ["hermes_agentic_rl"]
 exclude = [
     "tests",
     "atropos",
+    "subprojects/atropos",
+    "subprojects/hermes-agent",
+    "subprojects/tinker-atropos",
     "tinker-atropos",
     "outputs?",
 ]

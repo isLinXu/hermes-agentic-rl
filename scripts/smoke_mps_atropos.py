@@ -15,19 +15,18 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
-sys.path.insert(0, str(PROJECT / "atropos"))
+sys.path.insert(0, str(PROJECT / "subprojects" / "atropos"))
 
 
 async def main():
-    import torch
-    from hermes_agentic_rl.backends.hf import HFCausalLMBackend, HFBackendConfig
+    from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
+    from hermes_agentic_rl.core.reward_manager import RewardManager
+    from hermes_agentic_rl.core.types import Trajectory
     from hermes_agentic_rl.envs.atropos_letter_counting import (
         AtroposLetterCountingEnv,
         AtroposLetterCountingReward,
     )
     from hermes_agentic_rl.peft.lora import LoRAConfig, inject_lora
-    from hermes_agentic_rl.core.reward_manager import RewardManager
-    from hermes_agentic_rl.core.types import Trajectory
 
     MODEL = "HuggingFaceTB/SmolLM2-360M-Instruct"
     DEVICE = "mps"
@@ -82,7 +81,10 @@ async def main():
 
     # ---- 5. Atropos env ----
     print("\n=== 5. AtroposLetterCountingEnv ===")
-    env = AtroposLetterCountingEnv(backend._hf_tok, base_dir=str(PROJECT / "atropos"))
+    env = AtroposLetterCountingEnv(
+        backend._hf_tok,
+        base_dir=str(PROJECT / "subprojects" / "atropos"),
+    )
     await env.setup()
     item = await env.get_next_item()
     print(f"  item keys: {list(item.keys())}")

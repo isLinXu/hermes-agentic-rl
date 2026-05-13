@@ -1,3 +1,0 @@
-# EVM Environment specific dependencies
-# (openai, pydantic, requests, gymnasium, numpy are provided by atroposlib)
-pyyaml>=6.0

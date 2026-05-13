@@ -32,6 +32,7 @@ benchmarks.
 - [Where We Improve Next](#where-we-improve-next)
 - [Capabilities](#capabilities)
 - [Quick Start](#quick-start)
+- [External Subprojects](#external-subprojects)
 - [Secrets and Environment](#secrets-and-environment)
 - [Training Modes](#training-modes)
 - [Key Configurations](#key-configurations)
@@ -56,6 +57,7 @@ benchmarks.
 | If you want to... | Start here |
 |---|---|
 | Check repo and Hermes subproject wiring | `python -m hermes_agentic_rl.cli.main hermes-preflight` |
+| Check Atropos and Tinker-Atropos wiring | `python -m hermes_agentic_rl.cli.main atropos-preflight` |
 | Train a small on-policy policy quickly | `configs/hermes_reasoning_traces_grpo_smoke.yaml` |
 | Train on a local parquet shard with MPS | `configs/hermes_reasoning_traces_parquet_mps_filtered.yaml` |
 | Verify whether RL improved behavior | `configs/hermes_reasoning_traces_eval_rl.yaml` |
@@ -155,12 +157,13 @@ stable entry points.
 | Directional self-evolution | `self-evolution-batch` | Batch replay, worker training, validation splits, and per-direction summaries. |
 | Self-evolution export | `session-eval-export` | Writes `task_input` / `expected_behavior` JSONL splits. |
 | Observability | `metrics:` | JSONL, stdout, TensorBoard, W&B, and optional live dashboard. |
+| External subprojects | `subprojects/*` | Upstream checkouts for Hermes-agent, Atropos, and Tinker-Atropos. |
 
 ## Quick Start
 
 ```bash
 python -m pip install -e '.[rl,data,metrics]'
-git submodule update --init --recursive
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
 python -m hermes_agentic_rl.cli.main hermes-preflight
 ```
 
@@ -179,6 +182,29 @@ that path when needed:
 ```bash
 export HERMES_AGENT_REPO=/path/to/hermes-agent
 ```
+
+## External Subprojects
+
+External repositories are managed as git submodules under `subprojects/`, not
+vendored as first-party source at the repository root.
+
+| Path | Upstream | Used for |
+|---|---|---|
+| `subprojects/hermes-agent` | `NousResearch/hermes-agent` | Real Hermes runtime and session replay integration. |
+| `subprojects/atropos` | `NousResearch/atropos` | Optional Atropos environment adapters and compatibility tests. |
+| `subprojects/tinker-atropos` | `NousResearch/tinker-atropos` | Optional Tinker-Atropos preflight and trainer integration checks. |
+
+After cloning or switching branches, run:
+
+```bash
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
+python -m hermes_agentic_rl.cli.main hermes-preflight
+python -m hermes_agentic_rl.cli.main atropos-preflight
+```
+
+The framework code treats these as external projects. CI initializes the
+top-level submodules, while linting, typing, packaging, and docs gates focus on this
+repository's adapters, trainers, rewards, configs, and tests.
 
 ## Secrets and Environment
 

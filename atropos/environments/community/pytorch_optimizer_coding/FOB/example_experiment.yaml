@@ -1,4 +1,0 @@
-task:
-  name: mnist
-optimizer:
-  name: adamw_baseline
