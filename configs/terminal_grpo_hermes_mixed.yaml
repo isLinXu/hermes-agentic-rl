@@ -1,0 +1,37 @@
+runtime:
+  integration: hermes
+  api_key_envs:
+    - NEWAPI_API_KEY
+    - LKEAP_API_KEY
+    - OPENAI_API_KEY
+  provider: openai
+  base_url: https://api.lkeap.cloud.tencent.com/v1
+  model: deepseek-v3.2
+  temperature: 0.7
+  max_agent_turns: 20
+  terminal_backend: local
+  terminal_timeout: 120
+  enabled_toolsets:
+    - terminal
+    - file
+
+environment:
+  type: terminal_task_env
+  dataset_path: data/terminal_tasks_50_mixed.jsonl
+  system_prompt: null
+
+reward:
+  aggregator: weighted_sum
+  components:
+    - name: outcome_reward
+      weight: 0.2
+    - name: toolcall_reward
+      weight: 0.2
+    - name: filesystem_verifier_reward
+      weight: 0.6
+
+trainer:
+  type: atropos_grpo
+  export_training_path: outputs/train_samples_hermes_mixed.jsonl
+  min_verifier_pass_ratio: 0.6
+  workdir_base: outputs/workdirs/hermes_mixed

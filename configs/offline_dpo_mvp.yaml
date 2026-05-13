@@ -1,0 +1,41 @@
+# Offline DPO on a toy preference dataset.
+#
+# Run:
+#   python -m hermes_agentic_rl.cli.main --config configs/offline_dpo_mvp.yaml offline
+#
+# data_path is a JSONL of DPOPair rows, one per line:
+#   {"prompt_ids": [...], "chosen_ids": [...], "rejected_ids": [...]}
+#
+# For a quick smoke dataset, run the snippet at the bottom of this file in Python.
+
+algo: dpo
+data_path: data/dpo_pairs.jsonl
+save_path: output/dpo_policy.pt
+
+backend:
+  seed: 0
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  max_len: 128
+
+algo_config:
+  n_epochs: 3
+  batch_size: 4
+  lr: 5.0e-4
+  beta: 0.1
+  grad_clip: 1.0
+  seed: 0
+  log_every: 1
+
+# --- Python snippet to build a toy dataset ---
+#
+# from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
+# from hermes_agentic_rl.offline import DPOPair, ReplayBuffer
+# b = TinyCausalLMBackend(TinyBackendConfig(seed=0, dim=32, n_heads=4, n_layers=2))
+# tok = b.tokenizer
+# buf = ReplayBuffer()
+# for q, yes, no in [("Is sky blue?", "yes", "no"), ("Is fire cold?", "no", "yes")]:
+#     p = [tok.bos_id] + tok.encode(q)
+#     buf.add_pair(DPOPair(prompt_ids=p, chosen_ids=tok.encode(yes), rejected_ids=tok.encode(no)))
+# buf.save_jsonl("data/dpo_pairs.jsonl")

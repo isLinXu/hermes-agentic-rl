@@ -1,0 +1,6 @@
+input_path: outputs/hermes_sessions.jsonl
+output_path: outputs/hermes_eval_dataset
+source: hermes-session
+train_ratio: 0.5
+val_ratio: 0.25
+min_reward: 0.0

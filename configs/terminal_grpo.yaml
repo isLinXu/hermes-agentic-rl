@@ -1,0 +1,34 @@
+runtime:
+  integration: fake
+  provider: openai
+  model: demo-model
+  temperature: 0.7
+  max_agent_turns: 20
+  terminal_backend: local
+  terminal_timeout: 120
+  enabled_toolsets:
+    - terminal
+    - file
+
+environment:
+  type: terminal_task_env
+  dataset_path: data/minimal_terminal_tasks.jsonl
+  system_prompt: null
+
+reward:
+  aggregator: weighted_sum
+  # Verifier-first: heuristic outcome_reward is easy to game ("done" keyword
+  # alone scores full reward). Keep it at low weight and let the filesystem
+  # verifier dominate. The old (0.7/0.3) default is preserved under
+  # configs/legacy/ for reproducing historical behavior.
+  components:
+    - name: outcome_reward
+      weight: 0.1
+    - name: toolcall_reward
+      weight: 0.1
+    - name: filesystem_verifier_reward
+      weight: 0.8
+
+trainer:
+  type: atropos_grpo
+  export_training_path: outputs/train_samples.jsonl
