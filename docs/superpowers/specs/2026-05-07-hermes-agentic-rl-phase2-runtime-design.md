@@ -20,7 +20,7 @@
 - 从真实 Hermes session 自动抽样训练数据
 - LLM judge、PRM、多数投票判分
 - benchmark runner
-- 异步 judge 服务或 `OpenClaw-RL` 式四段侧车架构
+- 异步 judge 服务或 Hermes-native 四段侧车架构
 
 ## 背景与问题定义
 第一阶段已经完成：

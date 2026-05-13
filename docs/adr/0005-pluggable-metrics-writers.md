@@ -11,7 +11,7 @@ recorder, but users wanted:
 - Persistent JSONL for post-mortem analysis (without a running server).
 - TensorBoard scalars for publication / sharing.
 - W&B integration that doesn't break the training loop if wandb isn't
-  installed or no run is active.
+  installed or init fails.
 - Multiple destinations simultaneously (JSONL + dashboard).
 
 ## Decision
@@ -23,7 +23,7 @@ primitive:
 JsonlMetricsWriter        stdlib; appends one JSON line per iter
 StdoutMetricsWriter       stdlib; prints formatted line
 TensorBoardMetricsWriter  optional torch.utils.tensorboard; no-op if missing
-WandbMetricsWriter        optional wandb.log; no-op if init not called
+WandbMetricsWriter        optional wandb.init/log; auto-init if configured
 MultiMetricsWriter        composes N writers, isolates failures
 ```
 
@@ -38,6 +38,8 @@ kill training**.
 - `pyproject.toml` runtime deps stay at `PyYAML>=6.0`. TB/W&B are
   optional extras; their absence silently disables the writer.
 - Dashboard, JSONL, and TB can all run in the same training.
+- W&B can now be fully configured from YAML, including project/name/tags and
+  run config capture, without requiring user code to call `wandb.init()`.
 - User-defined callables (for research experiments) compose cleanly via
   `MultiMetricsWriter([my_callback, JsonlMetricsWriter(…)])`.
 

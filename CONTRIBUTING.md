@@ -1,69 +1,41 @@
-# Contributing to hermes-agentic-rl
+# Contributing
 
-## Dev setup
+Thanks for helping harden `hermes-agentic-rl`.
 
-```bash
-# editable install + dev tooling
-make install-dev
-# or, explicitly:
-pip install -e '.[rl,dev]'
-pre-commit install
-```
-
-## Workflow
+## Local setup
 
 ```bash
-make format     # ruff --fix + ruff format
-make lint       # ruff check + format --check (matches CI)
-make typecheck  # mypy (non-blocking)
-make test       # full pytest
-make ci         # all three (what CI runs)
-make smoke      # end-to-end GRPO on tiny backend
+python -m pip install -e '.[dev]'
+python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+python -m pip install -e '.[rl,data,metrics,test]'
 ```
 
-Before pushing:
+## Quality gates
+
+Run these before opening a PR:
+
 ```bash
-make ci
+python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py
+python -m mypy --follow-imports=skip hermes_agentic_rl
+python -m pytest tests -q --cov=hermes_agentic_rl --cov-report=term-missing --cov-report=xml
+pip-audit -r requirements-lock.txt
 ```
 
-## Conventions
+## Lock refresh
 
-- **One behavior change per PR.** Refactors and feature additions should
-  be separate commits; aggregate them only if they share a rationale.
-- **Add tests for every behavior change.** The bar is a test that would
-  *have caught the bug* — not a test that simply exercises the code.
-- **No new runtime dependencies without an ADR.** Runtime deps stay at
-  `PyYAML`; `torch` + `transformers` are opt-in extras.
-- **Keep config defaults backward-compatible.** Each v0.N introduces new
-  config fields default-off, so v0.(N-1) configs still run verbatim.
-- **Record high-impact decisions as ADRs.** Copy the template in
-  `docs/adr/README.md`, append the next number, update the index table.
-
-## Tests
-
-- Fast: `make test` runs the whole suite (~40s).
-- Parallel: `make test-fast` (requires `pytest-xdist`).
-- Filter: `pytest tests -k grpo -v`.
-- Docker: `make docker-test` runs the suite inside the CPU image.
-
-## Commit style
-
-Prefer short imperative subject lines (≤72 chars):
-
-```
-trainers: add auto_resume and checkpoint_every to OnPolicyTrainer
-algos/grpo: switch kl_coef regularizer to K3 estimator
-docs: ADR 0005 — pluggable metrics writers
+```bash
+uv pip compile --universal pyproject.toml --extra dev --extra docs --output-file requirements-lock.txt
 ```
 
-When a commit changes the CLI surface or config schema, note it in the
-first body paragraph and update `docs/configuration.md` in the same PR.
+## Docs
 
-## Release
+```bash
+sphinx-build -W --keep-going -b html docs/sphinx docs/sphinx/_build/html
+```
 
-`pyproject.toml` version bumps follow
-[SemVer](https://semver.org/) with a `devN` suffix during pre-release:
+## Notes
 
-- `0.6.0.dev0` → `0.6.0` (drop suffix when branch-cut)
-- Always update `README.md` top matter and the `docs/adr/README.md` table
-  in the same commit as the version bump.
+- Keep secrets in environment variables, not in configs.
+- Prefer held-out `eval-rl` checks over training reward when judging progress.
+- Avoid changing `subprojects/hermes-agent` unless the change is explicitly
+  about the subproject itself.

@@ -1,387 +1,444 @@
+<div align="center">
+
 # hermes-agentic-rl
 
-> **0.6.0-dev** — Agentic RL framework for Hermes-Agent.
->
-> 0.2 closed the rollout → reward → gradient → parameter-update loop (GRPO MVP).
-> 0.3 added PPO + GAE, multi-turn tool-use, curriculum learning, and a stdlib
-> dashboard. 0.4 added the full RLHF stack (LoRA, BC / DPO, Bradley-Terry RM,
-> multi-process rollout, eval harness + A/B, version manager, Lagrangian
-> safety). 0.5 added **atropos interop**: any
-> [atropos](https://github.com/NousResearch/atropos) environment
-> (GSM8K / math / tool-use / SWE-RL / 50+ more) can now drive a hermes trainer
-> directly — zero HTTP server, zero vLLM, zero GPU required. **0.6 closes the
-> production engineering gaps**: resumable checkpoints with `auto_resume`,
-> Schulman K3 (unbiased, non-negative) KL estimator for GRPO/PPO, pluggable
-> metrics backends (JSONL + TensorBoard + W&B with graceful degradation),
-> and CLI-level RewardModel injection for RLHF fine-tuning.
+**Hermes-native reinforcement learning for agent behavior, tool use, and
+session-driven improvement.**
 
-## 0.6 feature matrix
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-| Area | Module | What it gives you |
-|---|---|---|
-| Resumable training | `trainers.checkpoint.CheckpointManager` + `OnPolicyTrainerConfig.{checkpoint_every, auto_resume, resume_from, keep_last_checkpoints}` | Full `{model, optimizer, rng, stats, config}` bundle with atomic writes + automatic pruning. `auto_resume: true` in YAML picks up where the last run left off, including stats history. |
-| KL estimators | `algos.common.kl.kl_from_logprobs` + `GRPOConfig.kl_estimator`, `PPOConfig.kl_estimator` | K1 (legacy, unbiased, signed), K2 (low variance), **K3** (Schulman 2020: `exp(-r) - 1 + r`, unbiased AND non-negative). Recommended default for new runs: `kl_estimator: k3`. |
-| Metrics backends | `monitor.writers.{JsonlMetricsWriter, TensorBoardMetricsWriter, WandbMetricsWriter, MultiMetricsWriter, build_writer_from_config}` | Pluggable `metrics:` YAML section composes jsonl / stdout / tensorboard / wandb writers. Each writer is isolation-fault-safe: if TB isn't installed or wandb.init wasn't called, the writer becomes a silent no-op — training never dies on a metrics IO error. |
-| RewardModel CLI | `cli.train_rl._build_reward_model_component` | `reward_model:` YAML block loads a pre-trained Bradley-Terry RM head (`head_path: rm_head.pt`) and composes it into the RewardManager alongside existing components. Works with both Tiny and HF backends. |
-| HF backend fixes | `backends.hf.HFCausalLMBackend._set_mode` | `score()` and `score_with_value()` now consistently use `model.train()` only when `torch.is_grad_enabled()` — dropout/LayerNorm behavior is finally deterministic across GRPO (score) and PPO (score_with_value) paths. |
-| Tests | 120 → **143** (all green) | +5 checkpoint/resume, +7 KL estimators, +7 metrics writers, +4 RewardModel CLI. |
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![License](https://img.shields.io/badge/license-Apache--2.0-green)
+![Algorithms](https://img.shields.io/badge/RL-GRPO%20%7C%20PPO%20%7C%20BC%20%7C%20DPO-orange)
+![Observability](https://img.shields.io/badge/metrics-W%26B%20%7C%20TensorBoard%20%7C%20JSONL-informational)
 
-See `configs/echo_grpo_v06.yaml` for a full annotated v0.6 example.
+</div>
 
-## 0.5 interop layer: `integrations.atropos_env_import`
+`hermes-agentic-rl` turns Hermes-agent session experience into a measurable
+training loop: collect trajectories, judge behavior, build replay data, update
+trainable policies or reward models, and verify improvements on held-out
+benchmarks.
 
-`HermesAPIServer` is a drop-in replacement for atropos's `APIServer` that
-delegates all generation to any `LLMBackend` (Tiny / HF / your own). atropos's
-`ServerManager.managed_server()` picks it up because it's structurally a
-non-OpenAI server — so real `ManagedServer` (tokens + logprobs) works too.
+> This repository is the learning layer around Hermes-agent. It is built for
+> Hermes-native agentic RL, not as a generic chat-model fine-tuning wrapper.
 
-```python
-from atroposlib.envs.base import BaseEnvConfig
-from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
-from hermes_agentic_rl.core.reward_manager import RewardManager
-from hermes_agentic_rl.integrations import (
-    AtroposEnvAdapter, AtroposEnvAdapterConfig, AtroposRewardComponent,
-)
-from hermes_agentic_rl.trainers import GRPOTrainer, GRPOTrainerConfig
-from my_pkg.my_atropos_env import MyEnv  # any atroposlib.envs.base.BaseEnv
+## Contents
 
-backend = TinyCausalLMBackend(TinyBackendConfig(seed=0, dim=32, n_heads=4, n_layers=2))
-env_cfg = BaseEnvConfig(group_size=4, tokenizer_name="gpt2", max_token_length=256)
-adapter = AtroposEnvAdapter(env_cls=MyEnv, env_config=env_cfg, backend=backend,
-                            adapter_config=AtroposEnvAdapterConfig(max_new_tokens=32))
-rm = RewardManager([AtroposRewardComponent(adapter)])
-trainer = GRPOTrainer(backend, adapter, rm,
-                      cfg=GRPOTrainerConfig(n_iters=20, group_size=4,
-                                            prompts_per_iter=4, lr=3e-4,
-                                            max_new_tokens=32, seed=0))
-trainer.train()
+- [Project Snapshot](#project-snapshot)
+- [Recommended Paths](#recommended-paths)
+- [Why This Exists](#why-this-exists)
+- [Trainable Surfaces](#trainable-surfaces)
+- [Closed Loop](#closed-loop)
+- [Where We Improve Next](#where-we-improve-next)
+- [Capabilities](#capabilities)
+- [Quick Start](#quick-start)
+- [Secrets and Environment](#secrets-and-environment)
+- [Training Modes](#training-modes)
+- [Key Configurations](#key-configurations)
+- [CLI Reference](#cli-reference)
+- [Architecture](#architecture)
+- [Verification](#verification)
+- [Docs](#docs)
+
+## Project Snapshot
+
+| Dimension | What this project provides |
+|---|---|
+| Agent focus | Tool use, terminal-command actions, multi-turn recovery, protocol adherence |
+| Training paths | `train-rl` for GRPO/PPO, `online-cycle` for Hermes replay plus worker training |
+| Trainable surfaces | Tiny/HF policy backends, PPO value heads, LoRA adapters, reward-model heads, BC/DPO workers |
+| Data sources | Hugging Face traces, local parquet shards, real Hermes session logs, replay JSONL |
+| Evaluation | Held-out grouped trace benchmarks, checkpoint ranking, paired A/B comparisons |
+| Observability | W&B, TensorBoard, JSONL metrics, live dashboard, structured reward components |
+
+## Recommended Paths
+
+| If you want to... | Start here |
+|---|---|
+| Check repo and Hermes subproject wiring | `python -m hermes_agentic_rl.cli.main hermes-preflight` |
+| Train a small on-policy policy quickly | `configs/hermes_reasoning_traces_grpo_smoke.yaml` |
+| Train on a local parquet shard with MPS | `configs/hermes_reasoning_traces_parquet_mps_filtered.yaml` |
+| Verify whether RL improved behavior | `configs/hermes_reasoning_traces_eval_rl.yaml` |
+| Batch self-evolution validation by direction | `configs/self_evolution_batch.yaml` |
+| Run Hermes, replay, worker training, and export in one loop | `configs/hermes_online_cycle.yaml` |
+
+## Why This Exists
+
+`hermes-agent` is the execution layer: it runs tasks, calls tools, interacts
+with runtimes, and leaves behind session traces. `hermes-agentic-rl` is the
+learning layer around it: it turns those traces into rollouts, rewards, replay
+buffers, preference pairs, reward-model data, checkpoints, and held-out
+benchmarks.
+
+The goal is not to make an agent "smarter" in the abstract. The goal is to
+improve the agent's behavior distribution on concrete Hermes-style tasks:
+
+- choosing when to answer directly and when to call a tool;
+- emitting valid tool-call and terminal-command formats;
+- using tool results across multiple turns instead of drifting;
+- preferring trajectories that complete the task under a measurable reward;
+- preserving evidence through W&B, JSONL metrics, TensorBoard, checkpoints,
+  and held-out eval instead of trusting training reward alone.
+
+Hermes-agent is the actor. `hermes-agentic-rl` is the feedback loop that makes
+that actor more reliable, controllable, and auditable. When the backend is
+local, HF-backed, Tiny, LoRA-adapted, or equipped with a reward model, this
+framework updates trainable parameters. When Hermes uses a remote
+OpenAI-compatible model, the framework can still collect traces, evaluate
+behavior, train local workers or reward models, and export self-evolution
+data, but it will not change remote weights unless the provider exposes a
+training path.
+
+## Trainable Surfaces
+
+The framework updates trainable components inside or around the policy stack:
+
+- the policy backend itself, such as `TinyCausalLMBackend` or
+  `HFCausalLMBackend`;
+- a PPO value head when `with_value_head=True`;
+- LoRA adapter parameters when LoRA is injected;
+- a reward-model head during preference or RM training;
+- BC/DPO worker weights in the online replay loop.
+
+That means `train-rl` can improve a local or HF-backed policy, and
+`online-cycle` can improve local worker models and reward models.
+
+## Closed Loop
+
+```mermaid
+flowchart LR
+    A["Hermes task / dataset item"] --> B["Policy or Hermes runtime rollout"]
+    B --> C["Session trace / trajectory"]
+    C --> D["Reward and judge components"]
+    D --> E["Replay samples / preference pairs"]
+    E --> F["GRPO / PPO / BC / DPO / RM training"]
+    F --> G["Checkpoint"]
+    G --> H["Held-out eval and paired A/B"]
+    H -->|metrics + caveats| I["W&B / TensorBoard / JSONL"]
+    H -->|promote or iterate| A
 ```
 
-Two generation modes, auto-selected:
+## Where We Improve Next
 
-- **Direct**: backend & atropos share the same vocab (e.g. `HFCausalLMBackend`
-  pointed at the same tokenizer). Token ids flow through unmodified. This is
-  the high-fidelity path you'd use for real training.
-- **Text-level bridge**: backend has a different vocab (e.g. `TinyCausalLM`
-  with a char tokenizer). The server decodes HF prompt → re-encodes with the
-  backend's tokenizer → runs `generate` → re-encodes response back to HF vocab
-  so atropos consumers stay happy. Logprob alignment is approximate but the
-  whole pipeline runs end-to-end on CPU with no real language model.
+The next gains should stay benchmark-first:
 
-See `examples/run_atropos_env_with_hermes.py` for a runnable end-to-end demo.
+- strengthen held-out benchmarks for tool-call validity, command correctness,
+  task success, and paired A/B checkpoint comparisons;
+- move from tiny validation runs to LoRA or HF-backed trainable policies so RL can
+  affect a model with enough capacity to learn valid Hermes actions;
+- improve reward shaping for executable tool calls, especially JSON validity,
+  tool-name matching, argument-value similarity, stop behavior, and multi-turn
+  credit assignment;
+- continue dataset filtering and curriculum design so early training targets
+  are short, executable, and aligned with the model's action space;
+- scale runtime performance with batched rollout/scoring, MPS/GPU profiling,
+  and optional distributed workers after reward and eval signals are stable.
 
-## 0.4 feature matrix
+Recent checkpoint sweeps, W&B links, and caveats live in
+[Experiment Notes](docs/experiments.md) so this README can stay focused on
+stable entry points.
 
-| Area | Module | What it gives you |
+## Capabilities
+
+| Area | Entry point | Status |
 |---|---|---|
-| Distributed rollouts | `distributed.MPRolloutPool` | N-process worker pool via stdlib `multiprocessing`; learner broadcasts weights each iter, workers return rollout records. No Ray needed. |
-| LoRA | `peft.{LoRAConfig, LoRALinear, inject_lora}` | Low-rank adapters injected into any `nn.Linear` in a backend; `save`/`load`/`merge_into_base` for zero-cost deploy. ~10% trainable params. |
-| HF backend | `backends.HFCausalLMBackend` *(optional extra `hf`)* | Drop-in `LLMBackend` on top of `AutoModelForCausalLM` with value-head support for PPO. |
-| Offline BC | `offline.BCTrainer` | NLL warm-start from a `ReplayBuffer` of `(prompt, response)` demonstrations. |
-| Offline DPO | `offline.DPOTrainer` | Direct Preference Optimization on `DPOPair` buffers; frozen ref policy auto-snapshot. |
-| Reward model | `rewards.reward_model.{RewardModel, RewardModelTrainer, RewardModelComponent}` | Bradley-Terry scalar RM, plugs into `RewardManager` as a component. |
-| Eval harness | `eval.{EvalHarness, leaderboard_markdown}` | Deterministic N-rollout evaluation → aggregate metrics + per-component breakdown. |
-| A/B testing | `eval.{run_ab, paired_welch_t}` | Paired Welch t-test with Gaussian p-value approx; no scipy required. |
-| Version manager | `eval.VersionManager` | On-disk checkpoint registry + exclusive tags (`production` / `canary` / free-form). |
-| Safety (RCPO) | `rewards.lagrangian.LagrangianController` | Cost-limited policy optimization with dual-variable updates; opt-in on any OnPolicyTrainer. |
-| CLI | `offline` subcommand | `--config configs/offline_{bc,dpo,rm}_mvp.yaml offline` end-to-end. |
-| Tests | 94 → **114** (all green) | +LoRA, +BC/DPO, +RM, +Eval/AB/VersionManager, +Lagrangian, +MP pool. |
+| Real Hermes runtime | `runtime.integration: hermes` | Loads from `runtime.repo_path`, `HERMES_AGENT_REPO`, or `subprojects/hermes-agent`. |
+| Local RL validation run | `train-rl` | CPU-friendly Tiny backend with GRPO/PPO and W&B/TensorBoard metrics. |
+| Real dataset RL | `configs/hermes_reasoning_traces_grpo_smoke.yaml` | Uses `lambda/hermes-agent-reasoning-traces`. |
+| Held-out RL benchmark | `eval-rl` | Baseline vs checkpoint on grouped held-out traces with structured metrics. |
+| Online Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export. |
+| Directional self-evolution | `self-evolution-batch` | Batch replay, worker training, validation splits, and per-direction summaries. |
+| Self-evolution export | `session-eval-export` | Writes `task_input` / `expected_behavior` JSONL splits. |
+| Observability | `metrics:` | JSONL, stdout, TensorBoard, W&B, and optional live dashboard. |
 
-Every v0.2/v0.3 API, config, and CLI remains 100% backward compatible.
-
----
-
-## What's new in 0.2 (vs. 0.1)
-
-v0.1 was a minimal rollout collector: it had no `nn.Module`, no optimizer, no
-log-probs, and no gradients. `AtroposGrpoTrainer` despite its name only wrote
-JSONL. The refactor in this release corrects all of that:
-
-| Area | 0.1 state | 0.2-dev state |
-|---|---|---|
-| LLM backend | ❌ none | ✅ `backends.TinyCausalLMBackend` (CPU-friendly, ~30K params) + stable `LLMBackend` protocol |
-| MDP semantics | ❌ only `get_next_item` | ✅ `mdp/` with `Observation`, `Action`, `PromptStateEncoder` |
-| Agent loop | Black-box `AIAgent.run_conversation` | ✅ `PolicyAgentLoop` carries **token-level `old_logprobs`** end-to-end |
-| RL algorithm | ❌ none | ✅ `algos.GRPO` — group-normalized advantage + clipped surrogate + optional KL-to-ref |
-| Trainer | JSONL writer mislabeled as "GRPO" | ✅ `trainers.GRPOTrainer` — owns policy + AdamW + updates params |
-| Exporter | fused into `AtroposGrpoTrainer` | ✅ split out to `exporters.AtroposJsonlExporter`; old name kept as deprecated alias |
-| CLI | `rollout`, `train` | ✅ `rollout`, `train`, **new `train-rl`** |
-| Tests | 67 | 82 (all green) |
-
-## Quick start — real RL training (MVP)
+## Quick Start
 
 ```bash
-pip install -e '.[rl]'    # adds torch
+python -m pip install -e '.[rl,data,metrics]'
+git submodule update --init --recursive
+python -m hermes_agentic_rl.cli.main hermes-preflight
+```
+
+Expected preflight shape:
+
+```json
+{
+  "repo_source": "subproject",
+  "missing": []
+}
+```
+
+`hermes-agent` is expected at `subprojects/hermes-agent` by default. Override
+that path when needed:
+
+```bash
+export HERMES_AGENT_REPO=/path/to/hermes-agent
+```
+
+## Secrets and Environment
+
+Do not write API keys into YAML files. The Hermes adapter supports both a
+single `runtime.api_key_env` and ordered `runtime.api_key_envs`.
+
+For the OpenAI-compatible NewAPI endpoint used by the online cycle example:
+
+```bash
+export NEWAPI_API_KEY='...'
+```
+
+The example config also falls back to `LKEAP_API_KEY` and `OPENAI_API_KEY`.
+
+For W&B:
+
+```bash
+wandb login
+# or
+export WANDB_API_KEY='...'
+```
+
+## Training Modes
+
+### Real Dataset Training
+
+This runs GRPO on the public Hermes reasoning trace dataset with the Tiny
+backend. It is intentionally small enough for a CPU-friendly validation run
+while still using real trace data.
+
+```bash
 python -m hermes_agentic_rl.cli.main train-rl \
-    --config configs/echo_grpo_mvp.yaml \
-    --output outputs/train_rl_mvp
+  --config configs/hermes_reasoning_traces_grpo_smoke.yaml \
+  --output outputs/hermes_reasoning_traces_real_smoke
 ```
 
-Expected output (60 iters, ~15s on CPU):
+Main outputs:
 
+- `outputs/hermes_reasoning_traces_real_smoke/train_rl_summary.json`
+- `outputs/hermes_reasoning_traces_real_smoke/metrics.jsonl`
+- `outputs/hermes_reasoning_traces_real_smoke/tb/`
+- `outputs/hermes_reasoning_traces_real_smoke/wandb/`
+
+The config logs reward statistics, prompt/response token lengths, optimizer
+step counts, reward component scores, and gradient/parameter norms.
+
+### Local Parquet on MPS
+
+For a local `lambda/hermes-agent-reasoning-traces` parquet shard, use the MPS
+config. The loader reads parquet rows with `pyarrow`, expands each
+conversation into assistant-turn supervised/RL samples, and restores the
+`tools` JSON payload into tool schema data.
+
+```bash
+mkdir -p data/hermes_reasoning_traces
+ln -sf /Users/gatilin/Downloads/train.parquet \
+  data/hermes_reasoning_traces/train.parquet
+
+export WANDB_API_KEY='...'
+PYTORCH_ENABLE_MPS_FALLBACK=1 python -m hermes_agentic_rl.cli.main train-rl \
+  --config configs/hermes_reasoning_traces_parquet_mps.yaml \
+  --output outputs/hermes_reasoning_traces_parquet_mps_run
 ```
-[train-rl] backend=tiny params=26624 iters=60 group=8 lr=0.005
-[grpo] iter=0  mean_reward=0.0224 loss=-0.0000 ... clip_frac=0.0000
-[grpo] iter=10 mean_reward=0.0315 ...
-[grpo] iter=50 mean_reward=0.1050 ...
-[train-rl] DONE last_mean_reward=0.0348 best=0.1117 delta=+0.0124
+
+For a stronger next ablation, use the filtered config:
+
+```bash
+PYTORCH_ENABLE_MPS_FALLBACK=1 python -m hermes_agentic_rl.cli.main train-rl \
+  --config configs/hermes_reasoning_traces_parquet_mps_filtered.yaml \
+  --output outputs/hermes_reasoning_traces_parquet_mps_filtered_hybrid
 ```
 
-The MVP task is a trivial "echo" env: the policy must say a target string.
-A random tiny policy gets ~0.02; after training, reward trends upward and
-peaks 3–5× higher. This proves the full RL loop is mechanically correct.
+For terminal-command curriculum training:
 
-To plug in a real LLM, implement `LLMBackend` over `transformers` (or any
-other library) — the `generate / score / trainable_parameters` contract is
-stable, and the rest of the stack (GRPO, rollout manager, reward manager) is
-unchanged.
+```bash
+PYTORCH_ENABLE_MPS_FALLBACK=1 python -m hermes_agentic_rl.cli.main train-rl \
+  --config configs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2.yaml \
+  --output outputs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2
+```
+
+`assistant_response_adapter: terminal_command_tool_call` lets the policy emit
+only a terminal command string. Reward and eval wrap that string back into a
+Hermes-compatible terminal tool call, separating executable structure from
+command-content learning.
+
+### Held-Out Evaluation
+
+To answer "did RL actually improve the model?", use a held-out benchmark pass
+instead of training reward alone. The eval command keeps all turns from the
+same `source_trace_id` in the same split, runs baseline and checkpoint
+policies on the exact same items, and logs reward, success rate,
+finished-naturally rate, and structured tool-call metadata.
+
+```bash
+python -m hermes_agentic_rl.cli.main eval-rl \
+  --config configs/hermes_reasoning_traces_eval_rl.yaml
+```
+
+The recommended gate before promoting a checkpoint is to compare held-out
+reward deltas, paired A/B results, `tool_call_parse_ok`, `tool_name_match`, and
+argument-overlap metrics.
+
+For the command-action stage:
+
+```bash
+python -m hermes_agentic_rl.cli.main eval-rl \
+  --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
+```
+
+### Online Hermes Cycle
+
+`online-cycle` is the end-to-end online path:
+
+1. Run real Hermes on task prompts.
+2. Write raw session traces and replay samples with the session sidecar.
+3. Train a local worker from replay, using `bc`, `dpo`, or `rm` worker configs.
+4. Export the same traces as a self-evolution dataset.
+5. Log worker metrics to JSONL and W&B.
+
+```bash
+export NEWAPI_API_KEY='...'
+
+python -m hermes_agentic_rl.cli.main online-cycle \
+  --config configs/hermes_online_cycle.yaml \
+  --once \
+  --limit 1
+```
+
+Main outputs:
+
+- `outputs/hermes_online_cycle/sessions.jsonl`
+- `outputs/hermes_online_cycle/replay.jsonl`
+- `outputs/hermes_online_cycle/policy.pt`
+- `outputs/hermes_online_cycle/worker_state.json`
+- `outputs/hermes_online_cycle/worker_metrics.jsonl`
+- `outputs/hermes_online_cycle/self_evolution_dataset/`
+
+### Self-Evolution Export
+
+To convert existing Hermes session traces into evaluation/self-evolution data:
+
+```bash
+python -m hermes_agentic_rl.cli.main session-eval-export \
+  --config configs/session_eval_export_hermes.yaml
+```
+
+Output shape:
+
+- `train.jsonl`
+- `val.jsonl`
+- `holdout.jsonl`
+- `manifest.json`
+
+Each record contains `task_input`, `expected_behavior`, difficulty/category
+metadata, reward when available, and source session identifiers.
+
+### Batch Self-Evolution Validation
+
+To optimize the agent in explicit directions, run the batch self-evolution
+pipeline. It replays Hermes session traces, trains a local worker for each
+direction, and exports a direction-specific self-evolution dataset.
+
+```bash
+python -m hermes_agentic_rl.cli.main self-evolution-batch \
+  --config configs/self_evolution_batch.yaml
+```
+
+Main outputs:
+
+- `outputs/hermes_self_evolution_batch/batch_summary.json`
+- `outputs/hermes_self_evolution_batch/<direction>/replay.jsonl`
+- `outputs/hermes_self_evolution_batch/<direction>/policy.pt`
+- `outputs/hermes_self_evolution_batch/<direction>/worker_state.json`
+- `outputs/hermes_self_evolution_batch/<direction>/self_evolution_dataset/`
+
+Use this when you want to compare optimization directions such as tool-call
+reliability, recovery behavior, or completion quality in one repeatable run.
+
+## Key Configurations
+
+| Config | Purpose |
+|---|---|
+| `configs/hermes_reasoning_traces_grpo_smoke.yaml` | Real HF dataset GRPO validation run with W&B/TensorBoard metrics. |
+| `configs/hermes_reasoning_traces_grpo.yaml` | Larger real dataset GRPO run. |
+| `configs/hermes_reasoning_traces_parquet_mps.yaml` | Local parquet reasoning trace training on Apple MPS. |
+| `configs/hermes_reasoning_traces_parquet_mps_filtered.yaml` | Filtered local parquet MPS run for shorter tool-call targets. |
+| `configs/hermes_reasoning_traces_parquet_mps_terminal_curriculum.yaml` | Terminal-command curriculum stage with a fixed JSON scaffold. |
+| `configs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2.yaml` | Stage-2 terminal command action-space training on MPS. |
+| `configs/hermes_reasoning_traces_eval_rl.yaml` | Held-out benchmark comparing baseline vs RL checkpoint on grouped traces. |
+| `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | Held-out benchmark for stage-2 command-action checkpoints. |
+| `configs/self_evolution_batch.yaml` | Batch directional self-evolution replay, worker training, and export. |
+| `configs/hermes_online_cycle.yaml` | Real Hermes online rollout plus replay worker and self-evolution export. |
+| `configs/hermes_runtime_sidecar.yaml` | Runtime sidecar example for session/replay capture. |
+| `configs/session_train_worker.yaml` | BC worker over replay JSONL. |
+| `configs/session_dpo_worker.yaml` | DPO worker over scored replay pairs. |
+| `configs/session_rm_worker.yaml` | Reward-model worker over scored replay pairs. |
+
+## CLI Reference
+
+```bash
+python -m hermes_agentic_rl.cli.main hermes-preflight
+python -m hermes_agentic_rl.cli.main rollout --config <config> --output outputs/trajectory.json
+python -m hermes_agentic_rl.cli.main train --config <config>
+python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
+python -m hermes_agentic_rl.cli.main eval-rl --config <config>
+python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
+python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
+python -m hermes_agentic_rl.cli.main session-replay --config <config>
+python -m hermes_agentic_rl.cli.main session-train-worker --config <config> --once
+python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
+```
 
 ## Architecture
 
-```
+```text
 hermes_agentic_rl/
-├── backends/        # LLMBackend protocol: generate, score (differentiable), params
-│   ├── base.py
-│   └── tiny.py      # self-contained 2-layer Transformer (CPU MVP)
-├── mdp/             # Observation, Action, PromptStateEncoder
-├── agent_loop/      # PolicyAgentLoop: exposes token-level old_logprobs
-├── algos/           # GRPO + common (advantage, clipped surrogate)
-│   ├── grpo.py
-│   └── common/
-├── trainers/
-│   ├── base.py           # legacy exporter-style trainer interface
-│   └── grpo_trainer.py   # ⭐ real GRPO trainer: owns policy + optimizer
-├── exporters/
-│   └── atropos_jsonl.py  # JSONL writer (the real home of the old name)
-├── envs/
-│   ├── terminal_task_env.py  # filesystem-verifier tasks (needs real Hermes)
-│   └── echo_task_env.py      # ⭐ MVP learnable task, zero external deps
-├── rewards/         # outcome, toolcall, filesystem_verifier, aggregate
-├── runtime/         # fake + hermes adapters (AIAgent.run_conversation)
-├── core/            # types, RolloutManager, RewardManager, TrainerBridge
-└── cli/
-    ├── main.py         # rollout / train / train-rl dispatch
-    └── train_rl.py     # ⭐ new RL entrypoint
+  runtime/       Hermes and fake runtime adapters
+  framework/     EnvTrainingPipeline and SessionTrainingPipeline
+  collectors/    Session sidecar, replay export, quality filters
+  envs/          Echo, simulated tool, curriculum, Hermes reasoning traces
+  trainers/      GRPO/PPO on-policy trainers
+  eval/          Held-out eval, leaderboard, paired A/B comparison
+  offline/       BC, DPO, reward-model training
+  rewards/       Outcome, tool-call, filesystem, feedback, RM components
+  monitor/       JSONL, TensorBoard, W&B, dashboard writers
+  cli/           Rollout, train, train-rl, eval-rl, self-evolution-batch, online-cycle, replay workers
 ```
 
-## Two CLIs, two purposes
+Data flow:
 
-| Command | Owns a policy? | Updates params? | Purpose |
-|---|---|---|---|
-| `rollout` | no | no | Generate one trajectory for inspection |
-| `train` | no | **no** | Collect trajectories + rewards → JSONL (for downstream Atropos/verl/...) |
-| `train-rl` | **yes** | **yes** | Real RL training with GRPO (the MVP) |
-
-## GRPO briefing
-
-Given a prompt and `G` sampled rollouts with rewards `r_1..r_G`:
-
-```
-A_i = (r_i − mean(r)) / (std(r) + ε)                 # group-normalized advantage
-ratio_t = exp( logπ_new(a_t|s_t) − logπ_old(a_t|s_t) )
-loss_i = −min( ratio_t · A_i,  clip(ratio_t, 1±ε) · A_i )
-         + β · KL(π_new || π_ref)   (optional)
+```text
+Hermes rollout
+  -> session_sidecar
+  -> sessions.jsonl + replay.jsonl
+  -> session_train_worker
+  -> policy / RM checkpoint
+  -> session_eval_export
+  -> self_evolution_dataset
 ```
 
-No value head. Zero-variance groups produce no gradient (design-correct).
+## Verification
 
-## Running the old pipeline (0.1 back-compat)
+The repo treats linting, type checking, coverage, docs, and dependency audit as
+part of the deliverable:
 
 ```bash
-# fake runtime, same as before
-python -m hermes_agentic_rl.cli.main rollout \
-    --config configs/terminal_grpo.yaml --output outputs/trajectory.json
-python -m hermes_agentic_rl.cli.main train \
-    --config configs/terminal_grpo.yaml
+python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py
+python -m mypy --follow-imports=skip hermes_agentic_rl
+python -m pytest tests -q --cov=hermes_agentic_rl --cov-report=term-missing --cov-report=xml
+sphinx-build -W --keep-going -b html docs/sphinx docs/sphinx/_build/html
+uv pip compile --universal pyproject.toml --extra dev --extra docs --output-file requirements-lock.txt
+pip-audit -r requirements-lock.txt
 ```
 
-The default reward weights in `terminal_grpo.yaml` have been rebalanced to
-`verifier 0.8 / outcome 0.1 / toolcall 0.1` to avoid the "say 'done' to win"
-exploit that the old `0.7/0.3` setup allowed.
+GitHub Actions runs lint, coverage tests, docs build, and dependency audit on
+Python 3.11 and 3.12. Live training/eval validation snapshots are in
+[Experiment Notes](docs/experiments.md).
 
-## Tests
+## Docs
 
-```bash
-python -m pytest tests -q   # 82 passed
-```
-
-New in 0.2-dev:
-- `test_backends_tiny.py` — tokenizer round-trip, generate, differentiable score
-- `test_algos_grpo.py` — advantage normalization, clipped surrogate, GRPO one-step
-- `test_mvp_end_to_end.py` — params move, reward trends up, metadata flows through
-
-## Real Hermes runtime
-
-Same as before; see `docs/real-hermes-check.md`. A trainable backend for real
-Hermes interactions (bypassing `AIAgent.run_conversation` to expose logπ) is
-planned for 0.3.
-
-## Atropos / tinker-atropos integration (preflight)
-
-If you have local checkouts at repo root:
-
-```
-./atropos/
-./tinker-atropos/
-```
-
-You can run a zero-side-effect integration preflight:
-
-```bash
-python -m hermes_agentic_rl.cli.main atropos-preflight
-```
-
-This prints a JSON report of which directories and python deps are available.
-In particular, `tinker-atropos` training requires the `tinker` python package.
-
-## What's new in 0.3-dev (vs. 0.2)
-
-| Area | 0.2 | 0.3-dev |
-|---|---|---|
-| Algorithms | GRPO only | **PPO** (value-head + token-level GAE + clipped value loss) + GRPO |
-| GRPO variants | DeepSeek default | +`loss_agg`: `mean_token` / `sum_token` / **Dr.GRPO** |
-| Agent loop | single-turn only | +`MultiTurnAgentLoop` with `<tool_call>NAME(ARG)</tool_call>` protocol, per-turn records |
-| Envs | echo, terminal | +`SimToolEnv` (zero-dep `calc` tool) + `CurriculumEnv` (moving-avg promotion/demotion) |
-| Trainer | `GRPOTrainer` | `OnPolicyTrainer` base + `GRPOTrainer` / `PPOTrainer` thin subclasses |
-| Backend | TinyCausalLM (~26K params) | +optional **value head** (~30K params, still CPU-friendly) |
-| Monitoring | stdout only | +**pure-stdlib live dashboard** (`http.server` + Chart.js CDN), opt-in |
-| CLI | `train-rl --config echo_grpo_mvp.yaml` | `algo: grpo | ppo`, `agent_loop: policy | multi_turn`, `environment: echo | sim_tool | curriculum`, `dashboard: {enabled, port}` |
-| Tests | 82 | **94** (all green) |
-
-## Quick start — PPO
-
-```bash
-python -m hermes_agentic_rl.cli.main train-rl \
-    --config configs/echo_ppo_mvp.yaml \
-    --output outputs/ppo_mvp
-```
-
-## Quick start — multi-turn tool-use with GRPO
-
-```bash
-python -m hermes_agentic_rl.cli.main train-rl \
-    --config configs/sim_tool_grpo_multiturn.yaml
-```
-
-The tool protocol is string-based:
-
-```
-<tool_call>calc(3 + 4)</tool_call>
-                ↓
-<tool_result>7</tool_result>
-```
-
-`SimToolEnv` rewards three sub-skills with a dense decomposition
-(`0.4·used_tool + 0.3·tool_result_correct + 0.3·final_answer_correct`), so
-even a small policy gets a meaningful gradient signal.
-
-## Quick start — curriculum learning
-
-```bash
-python -m hermes_agentic_rl.cli.main train-rl \
-    --config configs/curriculum_grpo.yaml
-```
-
-Levels, window size, and promotion threshold are all YAML-configurable.
-`env.observe(reward)` is called by the trainer after every rollout, so no
-extra plumbing is needed.
-
-## Live dashboard (opt-in)
-
-Add to any config:
-
-```yaml
-dashboard:
-  enabled: true
-  host: 127.0.0.1
-  port: 8765
-```
-
-Then open `http://127.0.0.1:8765/`. Four live line charts update every second:
-mean_reward, loss, kl, value_loss. Zero Python dependencies — just
-`http.server` and a CDN `<script src>` tag.
-
-## Architecture (0.3)
-
-```
-hermes_agentic_rl/
-├── backends/            # LLMBackend: generate / score / score_with_value (PPO)
-├── mdp/                 # Observation, Action, PromptStateEncoder
-├── agent_loop/
-│   ├── policy_loop.py   # single-turn (v0.2)
-│   └── multi_turn_loop.py  # ⭐ tool-use with per-turn RL metadata
-├── algos/
-│   ├── grpo.py          # +loss_agg (Dr.GRPO)
-│   ├── ppo.py           # ⭐ GAE + clipped value loss
-│   └── common/
-│       ├── advantage.py # group_normalize_advantage
-│       ├── gae.py       # ⭐ compute_gae, terminal_token_rewards
-│       └── loss.py      # clipped_surrogate_loss, ⭐ clipped_value_loss
-├── trainers/
-│   ├── on_policy.py     # ⭐ shared rollout→loss→step skeleton
-│   ├── grpo_trainer.py  # thin subclass
-│   └── ppo_trainer.py   # ⭐ thin subclass, requires value-head backend
-├── envs/
-│   ├── echo_task_env.py
-│   ├── sim_tool_env.py  # ⭐ tool-use task with safe AST eval
-│   ├── curriculum.py    # ⭐ moving-avg level promotion
-│   └── terminal_task_env.py
-├── monitor/
-│   └── dashboard.py     # ⭐ pure-stdlib HTTP + Chart.js CDN
-└── cli/
-    ├── main.py
-    └── train_rl.py      # algo=grpo|ppo, env=echo|sim_tool|curriculum
-```
-
-## Roadmap
-
-- [x] **P0** — rename `AtroposGrpoTrainer` → `AtroposJsonlExporter`, rebalance default rewards
-- [x] **P1** — `backends/`, `mdp/`, `agent_loop/` — expose token-level signal
-- [x] **P2** — GRPO algorithm + trainer + CLI (MVP)
-- [x] **P3** — PPO (value head + GAE) + multi-turn tool-use + curriculum + live dashboard
-- [x] **P4** — HF backend (GPT-2 / SmolLM2 / Qwen) + LoRA + MPS training
-- [x] **P5** — Standalone `letter_counting` env + SFT warmup + GRPO on MPS
-- [ ] **P6** — distributed rollout (Ray actor pool) + multi-process rollout
-- [ ] **P7** — eval harness + A/B versioning + Lagrangian safety constraints
-- [ ] **P8** — offline algos (BC / AWR / DPO) + reward model trainer
-
-## 0.5 MPS Training Results
-
-Real GRPO training on Apple Silicon MPS (24GB):
-
-| Config | Value |
-|--------|-------|
-| Model | `openai-community/gpt2` (124M params) |
-| Device | MPS (Apple Silicon) |
-| Env | `letter_counting` (standalone, 10-tier adaptive difficulty) |
-| SFT | 200 samples × 3 epochs, loss 0.77→0.30 |
-| GRPO | 100 iters, group=4, prompts=4, lr=2e-5, temp=0.8 |
-| Speed | ~7.2s/iter on MPS |
-
-**Reward curve (GRPO after SFT):**
-```
-iter   0 | 0.1875 | #####
-iter   5 | 0.5625 | ################
-iter  10 | 0.2500 | #######
-iter  15 | 0.0000 | #   ← mode collapse (format drift)
-...
-iter  60 | 0.0625 | #   ← brief recovery
-```
-
-**Key findings:**
-- GRPO successfully increases reward from 0.19→0.56 in first 5 iters
-- GPT-2 (no instruct tuning) drifts away from `<answer>` format → reward collapse
-- SFT warmup is essential for sparse-reward tasks
-- MPS is 2-3× faster than CPU for this workload
-
-**Run it yourself:**
-```bash
-# Full pipeline: SFT warmup → GRPO on MPS
-python scripts/train_mps.py
-
-# GRPO only (from existing SFT checkpoint)
-python scripts/train_mps_grpo.py
-
-# Quick smoke test (tiny backend, no HF model)
-python scripts/smoke_letter_counting.py
-```
+- [Hermes-native training framework](docs/hermes-native-training-framework.md)
+- [Experiment notes](docs/experiments.md)
+- [Self-evolution export](docs/self-evolution-export.md)
+- [Real Hermes check](docs/real-hermes-check.md)
+- [Configuration reference](docs/configuration.md)
+- [ADRs](docs/adr/)
+- [Contributor guide](CONTRIBUTING.md)
+- [Sphinx docs](docs/sphinx/)

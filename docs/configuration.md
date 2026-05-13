@@ -21,13 +21,31 @@ backend:
   trust_remote_code: false
 
 environment:
-  type: echo | sim_tool | letter_counting | curriculum
+  type: echo | sim_tool | letter_counting | curriculum | hermes_reasoning_traces
   # echo / sim_tool / letter_counting
   dataset_path: path/to/tasks.jsonl   # optional
   dataset_size: 16                    # sim_tool only
   dataset_seed: 0
   max_level: 10                       # letter_counting only
   n_samples: 200                      # letter_counting only
+  # hermes_reasoning_traces (HF dataset)
+  dataset_name: lambda/hermes-agent-reasoning-traces
+  dataset_config: kimi
+  dataset_split: train
+  dataset_limit: 12
+  streaming: true
+  shuffle: true
+  seed: 0
+  revision: main
+  cache_dir: null
+  history_window_messages: 12
+  max_prompt_chars: 400             # useful for tiny/char-level backends
+  include_system_prompt: true
+  tool_call_format_hint: false
+  assistant_response_prefix: ""     # optional fixed prefix appended to prompts
+  assistant_response_suffix: ""     # optional fixed suffix restored for reward
+  assistant_response_adapter: ""    # terminal_command_tool_call for command-only actions
+  reward_weight: 1.0
   # curriculum
   levels:                             # list[dict] of sub-env specs
     - { type: echo }
@@ -69,6 +87,7 @@ train_rl:
 
   # --- GRPO-only ---
   entropy_coef: 0.0
+  advantage_eps: 1.0e-6
   advantage_norm: group | batch | whiten
   per_token_advantage: false
 
@@ -85,6 +104,12 @@ train_rl:
   interleave_sft_every: 0
   interleave_sft_samples: 32
   interleave_sft_lr: 1.0e-4
+  interleave_sft_epochs: 1
+  interleave_sft_batch_size: 8
+  bootstrap_sft_rounds: 0
+  bootstrap_sft_samples: 32
+  bootstrap_sft_lr: 1.0e-4
+  bootstrap_sft_epochs: 1
 
   # --- batch generate ---
   batch_generate: false
@@ -100,7 +125,18 @@ metrics:
   jsonl: true                         # → <output_dir>/metrics.jsonl
   stdout: false
   tensorboard: true | "<path>"        # → <output_dir>/tb/
-  wandb: true | { prefix: train }     # requires external wandb.init()
+  wandb: true |                       # auto-calls wandb.init() if installed
+    enabled: true
+    prefix: train                     # metric namespace, e.g. train/loss
+    project: hermes-agentic-rl
+    name: echo-grpo-run
+    group: ablation-a
+    mode: online | offline | disabled
+    tags: [grpo, echo]
+    notes: short description
+    finish_on_close: true             # default true
+    config:                           # merged into wandb.init(config=...)
+      sweep_id: debug-01
 
 # v0.3: live dashboard (stdlib HTTP + Chart.js CDN)
 dashboard:
@@ -139,3 +175,78 @@ See `configs/echo_grpo_v06.yaml` for a config that exercises:
 - K3 KL estimator
 - Checkpoint + auto-resume
 - Pluggable metrics writers
+
+## W&B Notes
+
+- Recommended install: `pip install -e '.[rl,data,metrics]'`
+- Online sync uses the standard `WANDB_API_KEY` environment variable.
+- The trainer automatically pushes all scalar iteration metrics to W&B,
+  including nested numeric fields such as lagrangian or multi-turn credit
+  summaries when present.
+- Final run summary metrics such as `last_mean_reward`, `best_mean_reward`,
+  and `reward_delta` are written into the W&B run summary at the end.
+
+## `eval-rl` Held-Out Evaluation
+
+`eval-rl` reuses the same `backend`, `environment`, `agent_loop`, and
+`metrics` blocks, then adds an `eval_rl` block:
+
+```yaml
+eval_rl:
+  output_dir: outputs/hermes_eval
+  split: val                         # train | val | test | all
+  split_by: source_trace_id          # keeps trace turns together
+  val_ratio: 0.2
+  test_ratio: 0.1
+  seed: 0
+  n_rollouts: 32
+  temperature: 0.0                   # greedy by default for reproducibility
+  max_new_tokens: 128
+  success_metric: reward             # reward | metadata/<key> | component/<name>
+  success_threshold: 0.25
+  rank_metric: mean_reward           # or success_rate / any numeric metric
+  policies:
+    - name: baseline
+    - name: rl_checkpoint
+      checkpoint_path: outputs/run/checkpoints/iter_00023/model.pt
+    - name: sweep_run
+      checkpoint_dir: outputs/run/checkpoints
+      max_checkpoints: 3
+```
+
+Outputs are `eval_summary.json`, `eval_rollouts.jsonl`, `leaderboard.md`, and
+`ranking.md`. The summary also includes `best_policy`, `ranking`,
+`success_metric`, and `success_threshold` so you can pick the strongest
+checkpoint directly and understand what "success" means. W&B/TensorBoard/JSONL
+logging is controlled by the same `metrics:` block used for training.
+
+## Hermes Reasoning Traces
+
+- `environment.type: hermes_reasoning_traces` loads
+  `lambda/hermes-agent-reasoning-traces` from Hugging Face.
+- Each assistant turn in a trace becomes one training item with a full
+  conversation prefix as the prompt and the real assistant reply as the target.
+- For small experiments, set `streaming: true` + `dataset_limit` so the loader
+  can use Hugging Face's rows API fallback without pulling the whole dataset.
+- For terminal-command stages, set
+  `assistant_response_adapter: terminal_command_tool_call`. The loader trains on
+  only the extracted `arguments.command` string, while reward/eval wraps model
+  output back into a Hermes `<tool_call>` block before scoring parse validity,
+  tool-name match, argument-key overlap, and command similarity.
+- For command-action eval, prefer
+  `success_metric: metadata/argument_value_similarity` with an explicit
+  threshold. This keeps command-content success separate from the fixed wrapper
+  structure that the adapter already guarantees.
+- This works best with `bootstrap_sft_rounds` or `interleave_sft_every` to warm
+  start on the real traces before continuing RL updates.
+- See `configs/hermes_reasoning_traces_grpo_smoke.yaml` for a conservative
+  real-dataset smoke setup with W&B enabled.
+
+## Interleaved / Bootstrap SFT Notes
+
+- `interleave_sft_*` and `bootstrap_sft_*` are available on on-policy runs
+  (`grpo` and `ppo`).
+- They require the active environment to implement `build_supervised_samples(item)`.
+- In-tree environments with teacher samples today: `echo`, `sim_tool`, `letter_counting`, and `curriculum` (delegates to the active sub-env).
+- For tool-call tasks, ensure `agent_loop.max_new_tokens_per_turn` is long enough to emit the full tool syntax; `configs/sim_tool_grpo_multiturn.yaml` uses `48` on purpose.
+- `multi_turn_credit` also supports `judge_weight` and `teacher_weight`. When teacher samples are available, the trainer can derive turn-local similarity shaping from the expected assistant response, which is especially useful for early tool-call and answer-format learning.

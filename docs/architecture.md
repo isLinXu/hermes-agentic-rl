@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ CLI (cli/)                                                  │
-│   main.py      rollout / train / train-rl / offline         │
+│   main.py      rollout / train / train-rl / eval-rl / offline│
 │   train_rl.py  YAML → trainer factory                       │
 └─────────────┬───────────────────────────────────────────────┘
               ↓
@@ -89,7 +89,7 @@ MetricsWriter(record) [jsonl / tb / wandb / dashboard]
 | Offline | `offline/` | `BCTrainer`, `DPOTrainer`, `ReplayBuffer` |
 | PEFT | `peft/` | `LoRALinear`, `inject_lora` |
 | Env | `envs/` | `EchoTaskEnv`, `SimToolEnv`, `LetterCountingEnv`, `CurriculumEnv` |
-| Eval | `eval/` | `EvalHarness`, `VersionManager`, `run_ab`, `paired_welch_t` |
+| Eval | `eval/` | `EvalHarness`, `run_eval_rl`, `VersionManager`, `run_ab`, `paired_welch_t` |
 | Monitor | `monitor/` | `LiveDashboard`, `JsonlMetricsWriter`, `TensorBoardMetricsWriter`, `WandbMetricsWriter`, `MultiMetricsWriter` |
 | Distributed | `distributed/` | `MPRolloutPool` (stdlib multiprocessing) |
 | Integration | `integrations/` | `AtroposEnvAdapter`, `HermesAPIServer`, `AtroposRewardComponent` |

@@ -1,7 +1,7 @@
 # hermes-agentic-rl 设计文档
 
 ## 概述
-`hermes-agentic-rl` 的目标是参考 `OpenClaw-RL` 对 `OpenClaw` 的强化学习思路，为 `hermes-agent` 提供一套原生、可扩展、可训练的 agentic RL 框架。
+`hermes-agentic-rl` 的目标是为 `hermes-agent` 提供一套原生、可扩展、可训练的 agentic RL 框架。
 
 第一阶段不重做一套完整的异步在线训练基础设施，而是优先复用 `hermes-agent` 已有的 `environments/`、`HermesAgentLoop`、`ToolContext`、trajectory 与 Atropos 对接能力，构建一个最小可运行、边界清晰、后续可演化为异步侧车架构的训练框架。
 
@@ -11,7 +11,7 @@
 - 支持基于真实 sandbox 状态的 reward 计算，而不只依赖最终文本
 - 支持将轨迹与 reward 转换为 Atropos/GRPO 可消费的训练样本
 - 通过配置与注册表实现 `env`、`reward`、`judge`、`trainer` 的可插拔
-- 为未来扩展到 `OpenClaw-RL` 风格的异步采集、异步判分、异步训练预留接口
+- 为未来扩展到 Hermes-native 的异步采集、异步判分、异步训练预留接口
 
 ## 非目标
 以下能力明确不属于第一阶段交付范围：
@@ -24,9 +24,9 @@
 - UI、dashboard、可视化控制台
 - 覆盖所有 terminal backend 的大规模兼容矩阵
 
-## 外部参考与设计依据
-### OpenClaw-RL 的关键启发
-参考 `OpenClaw-RL` 的思路，核心启发有三点：
+## 设计依据
+### Hermes-native 的关键设计原则
+核心设计原则有三点：
 
 1. 将 `agent serving`、`rollout collection`、`judging`、`policy training` 解耦
 2. 将多轮会话组织为可训练的 session-aware trajectory
@@ -40,7 +40,7 @@
 - `ToolContext`，可在同一 sandbox 内做 reward 复验
 - trajectory 与 benchmark / data generation 通路
 
-因此，第一阶段最合理的路径不是复制 `OpenClaw-RL` 的完整异步训练系统，而是建立一个面向 `hermes-agent` 的框架层，使 Hermes 现有环境能力可以被统一组织成可训练流水线。
+因此，第一阶段最合理的路径是建立一个面向 `hermes-agent` 的框架层，使 Hermes 现有环境能力可以被统一组织成可训练流水线。
 
 ## 总体方案
 ### 方案选择
@@ -626,7 +626,7 @@ class BaseTrainer:
 - 将 judge 从 reward 内部依赖升级为可异步执行的组件
 
 ### 第三阶段
-- 引入 `OpenClaw-RL` 风格的异步四段式架构
+- 引入 Hermes-native 的异步四段式架构
 - 支持异步 rollout、异步 judging、异步训练提交
 - 支持 OPD / hindsight / richer process reward
 
@@ -661,6 +661,6 @@ class BaseTrainer:
 7. `unit + integration + smoke tests`
 
 ## 结论
-`hermes-agentic-rl` 第一阶段应被定义为一个建立在 `hermes-agent` 原生环境体系之上的 agentic RL 框架层，而不是 `OpenClaw-RL` 异步训练系统的直接复制品。
+`hermes-agentic-rl` 第一阶段应被定义为一个建立在 `hermes-agent` 原生环境体系之上的 agentic RL 框架层，而不是通用异步训练系统的直接复制品。
 
 该方案既能快速获得最小可运行闭环，也能在接口层面为未来演进到异步在线训练架构预留足够空间。
