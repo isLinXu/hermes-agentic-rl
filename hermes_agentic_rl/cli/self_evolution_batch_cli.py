@@ -225,7 +225,7 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             exit_code = exit_code or code
             export_summary = _json_load(dataset_dir / "manifest.json")
 
-        direction_summary = {
+        direction_summary: dict[str, Any] = {
             "name": name,
             "slug": slug,
             "description": direction_cfg.get("description", ""),
@@ -270,15 +270,21 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             f"holdout={samples.get('holdout', 0)}"
         )
 
-    batch_summary = {
+    replay_samples_total = sum(
+        int(item["replay"]["samples_written"]) for item in direction_summaries
+    )
+    worker_updates_total = sum(
+        int(item["worker"]["updates"]) for item in direction_summaries
+    )
+    batch_summary: dict[str, Any] = {
         "command": "self-evolution-batch",
         "input_path": str(input_path),
         "output_dir": str(output_dir),
         "directions": direction_summaries,
         "totals": {
             "directions": len(direction_summaries),
-            "replay_samples": sum(item["replay"]["samples_written"] for item in direction_summaries),
-            "worker_updates": sum(item["worker"]["updates"] for item in direction_summaries),
+            "replay_samples": replay_samples_total,
+            "worker_updates": worker_updates_total,
         },
     }
     _json_dump(output_dir / "batch_summary.json", batch_summary)
@@ -286,7 +292,7 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
         "[self-evolution-batch] "
         f"summary={output_dir / 'batch_summary.json'} "
         f"directions={len(direction_summaries)} "
-        f"updates={batch_summary['totals']['worker_updates']}"
+        f"updates={worker_updates_total}"
     )
     return int(exit_code)
 
