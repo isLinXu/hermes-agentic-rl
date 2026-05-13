@@ -3,7 +3,10 @@
 ## How do I know RL improved the model?
 
 Use `eval-rl` on a held-out grouped split, then compare baseline and checkpoint
-metrics on the same trace groups. Training reward alone is not enough.
+metrics on the same trace groups. Training reward alone is not enough. The
+generated `eval_summary.json` also includes a `promotion_readout` block that
+summarizes the strongest candidate against the baseline in one place, and
+`promotion.md` gives you the same decision in a quick human-readable form.
 
 ## Why is the Apple MPS path still mentioned?
 

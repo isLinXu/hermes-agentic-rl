@@ -32,6 +32,7 @@ benchmarks.
 - [Where We Improve Next](#where-we-improve-next)
 - [Capabilities](#capabilities)
 - [Quick Start](#quick-start)
+- [External Project Paths](#external-project-paths)
 - [Secrets and Environment](#secrets-and-environment)
 - [Training Modes](#training-modes)
 - [Key Configurations](#key-configurations)
@@ -143,9 +144,11 @@ stable entry points.
 | Area | Entry point | Status |
 |---|---|---|
 | Real Hermes runtime | `runtime.integration: hermes` | Loads from `runtime.repo_path`, `HERMES_AGENT_REPO`, or `subprojects/hermes-agent`. |
+| Atropos/Tinker bridge | `atropos-preflight` | Loads from `ATROPOS_REPO`, `TINKER_ATROPOS_REPO`, `subprojects/`, or local fallback paths. |
 | Local RL validation run | `train-rl` | CPU-friendly Tiny backend with GRPO/PPO and W&B/TensorBoard metrics. |
 | Real dataset RL | `configs/hermes_reasoning_traces_grpo_smoke.yaml` | Uses `lambda/hermes-agent-reasoning-traces`. |
 | Held-out RL benchmark | `eval-rl` | Baseline vs checkpoint on grouped held-out traces with structured metrics. |
+| Promotion gate | `eval-gate` | Runs held-out eval and fails with exit code `3` when a checkpoint should not be promoted. |
 | Online Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export. |
 | Directional self-evolution | `self-evolution-batch` | Batch replay, worker training, validation splits, and per-direction summaries. |
 | Self-evolution export | `session-eval-export` | Writes `task_input` / `expected_behavior` JSONL splits. |
@@ -155,8 +158,9 @@ stable entry points.
 
 ```bash
 python -m pip install -e '.[rl,data,metrics]'
-git submodule update --init --recursive
+git submodule update --init
 python -m hermes_agentic_rl.cli.main hermes-preflight
+python -m hermes_agentic_rl.cli.main atropos-preflight
 ```
 
 Expected preflight shape:
@@ -174,6 +178,22 @@ that path when needed:
 ```bash
 export HERMES_AGENT_REPO=/path/to/hermes-agent
 ```
+
+## External Project Paths
+
+External repos are resolved explicitly before falling back to local defaults.
+This keeps local development, CI, and cloned subprojects from depending on the
+current shell directory.
+
+| Project | Environment override | Default lookup order |
+|---|---|---|
+| `hermes-agent` | `HERMES_AGENT_REPO` | `subprojects/hermes-agent`, `hermes-agent`, `vendor/hermes-agent` |
+| Atropos | `ATROPOS_REPO` | `subprojects/atropos`, `subprojects/hermes-agent/atropos`, `atropos`, `vendor/atropos` |
+| Tinker-Atropos | `TINKER_ATROPOS_REPO` | `subprojects/tinker-atropos`, `subprojects/hermes-agent/tinker-atropos`, `tinker-atropos`, `vendor/tinker-atropos` |
+
+Use the preflight commands when changing these paths. Their JSON output includes
+the selected source plus every checked path, which makes missing submodules or
+misconfigured environment variables much easier to diagnose.
 
 ## Secrets and Environment
 
@@ -275,6 +295,13 @@ python -m hermes_agentic_rl.cli.main eval-rl \
 The recommended gate before promoting a checkpoint is to compare held-out
 reward deltas, paired A/B results, `tool_call_parse_ok`, `tool_name_match`, and
 argument-overlap metrics.
+`eval_summary.json` now also includes a `promotion_readout` block that picks the
+best non-baseline candidate, summarizes reward/success-rate deltas, and emits a
+simple `promote` or `hold` recommendation for fast checkpoint triage. If you
+want this to be stricter, set `eval_rl.promotion_gate` thresholds in the eval
+config and review the generated `promotion.md`. For automation, set
+`eval_rl.promotion_gate.fail_on_hold: true` so `eval-rl` returns exit code `3`
+when the gate does not approve promotion.
 
 For the command-action stage:
 
@@ -282,6 +309,26 @@ For the command-action stage:
 python -m hermes_agentic_rl.cli.main eval-rl \
   --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
 ```
+
+For a machine-enforced promotion decision:
+
+```bash
+python -m hermes_agentic_rl.cli.main eval-gate \
+  --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
+```
+
+This command forces `promotion_gate.fail_on_hold: true` and returns exit code
+`3` when the best candidate should not be promoted.
+
+For a repository-local CLI/CI smoke check of the hold path:
+
+```bash
+python scripts/ci_eval_gate_smoke.py
+```
+
+This helper generates a tiny trace file, a Tiny-backend checkpoint, runs
+`eval-gate`, expects exit code `3`, and verifies that `eval_summary.json` and
+`promotion.md` are emitted correctly.
 
 ### Online Hermes Cycle
 
@@ -379,6 +426,7 @@ python -m hermes_agentic_rl.cli.main rollout --config <config> --output outputs/
 python -m hermes_agentic_rl.cli.main train --config <config>
 python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
+python -m hermes_agentic_rl.cli.main eval-gate --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
@@ -399,7 +447,7 @@ hermes_agentic_rl/
   offline/       BC, DPO, reward-model training
   rewards/       Outcome, tool-call, filesystem, feedback, RM components
   monitor/       JSONL, TensorBoard, W&B, dashboard writers
-  cli/           Rollout, train, train-rl, eval-rl, self-evolution-batch, online-cycle, replay workers
+  cli/           Rollout, train, train-rl, eval-rl, eval-gate, self-evolution-batch, online-cycle, replay workers
 ```
 
 Data flow:
@@ -420,16 +468,17 @@ The repo treats linting, type checking, coverage, docs, and dependency audit as
 part of the deliverable:
 
 ```bash
-python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py
+python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py scripts/ci_eval_gate_smoke.py
 python -m mypy --follow-imports=skip hermes_agentic_rl
 python -m pytest tests -q --cov=hermes_agentic_rl --cov-report=term-missing --cov-report=xml
+python scripts/ci_eval_gate_smoke.py
 sphinx-build -W --keep-going -b html docs/sphinx docs/sphinx/_build/html
 uv pip compile --universal pyproject.toml --extra dev --extra docs --output-file requirements-lock.txt
 pip-audit -r requirements-lock.txt
 ```
 
-GitHub Actions runs lint, coverage tests, docs build, and dependency audit on
-Python 3.11 and 3.12. Live training/eval validation snapshots are in
+GitHub Actions runs lint, coverage tests, an `eval-gate` smoke path, docs
+build, and dependency audit. Live training/eval validation snapshots are in
 [Experiment Notes](docs/experiments.md).
 
 ## Docs

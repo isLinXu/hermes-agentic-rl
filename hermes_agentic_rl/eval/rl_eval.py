@@ -339,6 +339,232 @@ def _rank_policy_reports(
     )
 
 
+def _normalize_promotion_gate(
+    eval_cfg: dict[str, Any],
+    *,
+    rank_metric: str,
+) -> dict[str, Any]:
+    raw = eval_cfg.get("promotion_gate")
+    if raw is False:
+        return {"enabled": False, "rank_metric": rank_metric}
+    raw_dict = dict(raw) if isinstance(raw, dict) else {}
+    max_p_value_raw = raw_dict.get("max_p_value")
+    max_p_value = None
+    if max_p_value_raw is not None and max_p_value_raw != "":
+        max_p_value = float(max_p_value_raw)
+    return {
+        "enabled": bool(raw_dict.get("enabled", True)),
+        "candidate": str(raw_dict.get("candidate", "best_non_baseline")),
+        "rank_metric": rank_metric,
+        "fail_on_hold": bool(raw_dict.get("fail_on_hold", False)),
+        "min_reward_delta": float(raw_dict.get("min_reward_delta", 0.0)),
+        "min_success_rate_delta": float(raw_dict.get("min_success_rate_delta", 0.0)),
+        "min_rank_metric_delta": float(raw_dict.get("min_rank_metric_delta", 0.0)),
+        "require_any_improvement": bool(raw_dict.get("require_any_improvement", True)),
+        "require_paired_winner": bool(raw_dict.get("require_paired_winner", False)),
+        "max_p_value": max_p_value,
+    }
+
+
+def _promotion_readout(
+    *,
+    policy_reports: list[dict[str, Any]],
+    comparisons: list[dict[str, Any]],
+    rank_metric: str,
+    eval_cfg: dict[str, Any],
+) -> dict[str, Any] | None:
+    gate = _normalize_promotion_gate(eval_cfg, rank_metric=rank_metric)
+    if not gate["enabled"]:
+        return {
+            "enabled": False,
+            "rank_metric": rank_metric,
+            "recommendation": "disabled",
+            "passed": False,
+        }
+
+    if not policy_reports:
+        return None
+
+    baseline = policy_reports[0]
+    best_non_baseline = None
+    candidate_mode = str(gate.get("candidate", "best_non_baseline"))
+    if candidate_mode != "best_non_baseline":
+        raise RuntimeError(
+            "eval_rl.promotion_gate.candidate currently supports only "
+            "`best_non_baseline`"
+        )
+
+    for report in _rank_policy_reports(policy_reports[1:], metric=rank_metric):
+        if best_non_baseline is None:
+            best_non_baseline = report
+            break
+
+    if best_non_baseline is None:
+        return {
+            "enabled": True,
+            "gate": gate,
+            "baseline": baseline["name"],
+            "candidate": baseline["name"],
+            "rank_metric": rank_metric,
+            "recommendation": "baseline_only",
+            "reason": "no candidate checkpoint was evaluated",
+            "passed": False,
+        }
+
+    comparison = next(
+        (item for item in comparisons if item["candidate"] == best_non_baseline["name"]),
+        None,
+    )
+    metric_delta = dict(comparison["metric_delta"]) if comparison else {}
+    reward_ab = dict(comparison["reward_ab"]) if comparison else {}
+    reward_delta = float(metric_delta.get("mean_reward", 0.0))
+    success_rate_delta = float(metric_delta.get("success_rate", 0.0))
+    best_score = float(best_non_baseline["metrics"].get(rank_metric, 0.0))
+    baseline_score = float(baseline["metrics"].get(rank_metric, 0.0))
+    rank_metric_delta = best_score - baseline_score
+    any_improvement = (
+        reward_delta > 0.0
+        or success_rate_delta > 0.0
+        or rank_metric_delta > 0.0
+        or reward_ab.get("winner") == "candidate"
+    )
+    checks: dict[str, dict[str, Any]] = {
+        "min_reward_delta": {
+            "required": float(gate["min_reward_delta"]),
+            "actual": reward_delta,
+            "passed": reward_delta >= float(gate["min_reward_delta"]),
+        },
+        "min_success_rate_delta": {
+            "required": float(gate["min_success_rate_delta"]),
+            "actual": success_rate_delta,
+            "passed": success_rate_delta >= float(gate["min_success_rate_delta"]),
+        },
+        "min_rank_metric_delta": {
+            "required": float(gate["min_rank_metric_delta"]),
+            "actual": rank_metric_delta,
+            "passed": rank_metric_delta >= float(gate["min_rank_metric_delta"]),
+        },
+    }
+    if bool(gate.get("require_any_improvement", True)):
+        checks["require_any_improvement"] = {
+            "required": True,
+            "actual": any_improvement,
+            "passed": any_improvement,
+        }
+    if bool(gate.get("require_paired_winner", False)):
+        checks["require_paired_winner"] = {
+            "required": "candidate",
+            "actual": reward_ab.get("winner"),
+            "passed": reward_ab.get("winner") == "candidate",
+        }
+    max_p_value = gate.get("max_p_value")
+    if max_p_value is not None:
+        approx_p = _as_float(reward_ab.get("approx_p"))
+        checks["max_p_value"] = {
+            "required": float(max_p_value),
+            "actual": approx_p,
+            "passed": approx_p is not None and approx_p <= float(max_p_value),
+        }
+
+    failed_checks = [name for name, payload in checks.items() if not payload["passed"]]
+    passed = best_non_baseline["name"] != baseline["name"] and not failed_checks
+
+    return {
+        "enabled": True,
+        "gate": gate,
+        "baseline": baseline["name"],
+        "candidate": best_non_baseline["name"],
+        "rank_metric": rank_metric,
+        "baseline_score": baseline_score,
+        "candidate_score": best_score,
+        "rank_metric_delta": rank_metric_delta,
+        "reward_delta": reward_delta,
+        "success_rate_delta": success_rate_delta,
+        "reward_ab": reward_ab,
+        "metric_delta": metric_delta,
+        "checks": checks,
+        "failed_checks": failed_checks,
+        "passed": passed,
+        "recommendation": "promote" if passed else "hold",
+        "reasons": failed_checks,
+    }
+
+
+def _promotion_markdown(promotion_readout: dict[str, Any] | None) -> str:
+    if not promotion_readout:
+        return "# Promotion Readout\n\nNo promotion data available.\n"
+
+    lines = ["# Promotion Readout", ""]
+    recommendation = str(promotion_readout.get("recommendation", "unknown"))
+    lines.append(f"- Recommendation: `{recommendation}`")
+    lines.append(f"- Passed: `{promotion_readout.get('passed', False)}`")
+
+    if not promotion_readout.get("enabled", True):
+        lines.append("- Gate: disabled")
+        return "\n".join(lines) + "\n"
+
+    baseline = promotion_readout.get("baseline")
+    candidate = promotion_readout.get("candidate")
+    if baseline is not None:
+        lines.append(f"- Baseline: `{baseline}`")
+    if candidate is not None:
+        lines.append(f"- Candidate: `{candidate}`")
+    lines.append(f"- Rank metric: `{promotion_readout.get('rank_metric', 'mean_reward')}`")
+
+    numeric_keys = (
+        "baseline_score",
+        "candidate_score",
+        "rank_metric_delta",
+        "reward_delta",
+        "success_rate_delta",
+    )
+    for key in numeric_keys:
+        value = _as_float(promotion_readout.get(key))
+        if value is not None:
+            lines.append(f"- {key}: `{value:+.4f}`")
+
+    reward_ab = promotion_readout.get("reward_ab")
+    if isinstance(reward_ab, dict) and reward_ab:
+        winner = reward_ab.get("winner", "unknown")
+        mean_diff = _as_float(reward_ab.get("mean_diff"))
+        approx_p = _as_float(reward_ab.get("approx_p"))
+        payload = f"- Paired A/B winner: `{winner}`"
+        if mean_diff is not None:
+            payload += f", mean_diff=`{mean_diff:+.4f}`"
+        if approx_p is not None:
+            payload += f", approx_p=`{approx_p:.4f}`"
+        lines.append(payload)
+
+    checks = promotion_readout.get("checks")
+    if isinstance(checks, dict) and checks:
+        lines.append("")
+        lines.append("## Checks")
+        lines.append("")
+        lines.append("| name | required | actual | passed |")
+        lines.append("|---|---|---|---|")
+        for name, payload in checks.items():
+            if not isinstance(payload, dict):
+                continue
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        str(name),
+                        str(payload.get("required")),
+                        str(payload.get("actual")),
+                        str(payload.get("passed")),
+                    ]
+                )
+                + " |"
+            )
+    failed_checks = promotion_readout.get("failed_checks")
+    if isinstance(failed_checks, list) and failed_checks:
+        lines.append("")
+        lines.append(f"- Failed checks: `{', '.join(str(item) for item in failed_checks)}`")
+
+    return "\n".join(lines) + "\n"
+
+
 def _resolve_path(path: str | Path, *, base_dir: Path) -> Path:
     resolved = Path(path)
     if not resolved.is_absolute():
@@ -603,10 +829,20 @@ def _prepare_eval_items(
     return selected, split_info
 
 
-def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
+def run_eval_rl(
+    config_path: str,
+    output_dir: str | None = None,
+    *,
+    force_fail_on_hold: bool = False,
+    command_name: str = "eval-rl",
+) -> int:
     base_dir = Path.cwd()
     cfg = _load_yaml(config_path)
     eval_cfg = dict(cfg.get("eval_rl") or {})
+    if force_fail_on_hold:
+        promotion_gate = dict(eval_cfg.get("promotion_gate") or {})
+        promotion_gate["fail_on_hold"] = True
+        eval_cfg["promotion_gate"] = promotion_gate
     out_dir = _resolve_path(
         output_dir or eval_cfg.get("output_dir") or "outputs/eval_rl",
         base_dir=base_dir,
@@ -637,9 +873,9 @@ def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
         output_dir=out_dir,
         wandb_context={
             "name": str(eval_cfg.get("name") or out_dir.name),
-            "job_type": "eval-rl",
-            "tags": ["eval-rl", backend_name, env_type],
-            "command": "eval-rl",
+            "job_type": command_name,
+            "tags": [command_name, backend_name, env_type],
+            "command": command_name,
             "config_path": str(config_path),
             "output_dir": str(out_dir),
             "config": cfg,
@@ -668,7 +904,7 @@ def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
                     )
                 )
             print(
-                f"[eval-rl] policy={name} backend={backend_name} "
+                f"[{command_name}] policy={name} backend={backend_name} "
                 f"device={backend.device} checkpoint={loaded_checkpoint or '<fresh baseline>'}"
             )
             report = asyncio.run(
@@ -716,6 +952,12 @@ def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
         rank_metric = str(eval_cfg.get("rank_metric", "mean_reward"))
         ranking = _rank_policy_reports(policy_reports, metric=rank_metric)
         best_policy = ranking[0] if ranking else None
+        promotion_readout = _promotion_readout(
+            policy_reports=policy_reports,
+            comparisons=comparisons,
+            rank_metric=rank_metric,
+            eval_cfg=eval_cfg,
+        )
         ranking_summary = [
             {
                 "rank": index + 1,
@@ -728,7 +970,7 @@ def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
             for index, report in enumerate(ranking)
         ]
         summary = {
-            "command": "eval-rl",
+            "command": command_name,
             "config_path": str(config_path),
             "output_dir": str(out_dir),
             "split": split_info,
@@ -746,6 +988,7 @@ def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
             ),
             "ranking": ranking_summary,
             "success_threshold": float(eval_cfg.get("success_threshold", 0.5)),
+            "promotion_readout": promotion_readout,
             "policies": policy_reports,
             "comparisons": comparisons,
             "artifacts": {
@@ -753,6 +996,7 @@ def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
                 "rollouts": str(rollouts_path),
                 "leaderboard": str(out_dir / "leaderboard.md"),
                 "ranking": str(out_dir / "ranking.md"),
+                "promotion": str(out_dir / "promotion.md"),
             },
         }
         _json_dump(out_dir / "eval_summary.json", summary)
@@ -764,13 +1008,18 @@ def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
             _ranking_markdown(ranking_summary, metric=rank_metric),
             encoding="utf-8",
         )
+        (out_dir / "promotion.md").write_text(
+            _promotion_markdown(promotion_readout),
+            encoding="utf-8",
+        )
         if isinstance(metrics_writer, MultiMetricsWriter):
             metrics_writer.update_summary(
                 {
-                    "command": "eval-rl",
+                    "command": command_name,
                     "split": split_info,
                     "success_metric": str(eval_cfg.get("success_metric", "reward")),
                     "success_threshold": float(eval_cfg.get("success_threshold", 0.5)),
+                    "promotion_readout": promotion_readout,
                     "policy_metrics": {
                         report["name"]: report["metrics"] for report in policy_reports
                     },
@@ -783,10 +1032,30 @@ def run_eval_rl(config_path: str, output_dir: str | None = None) -> int:
                 }
             )
 
-        print(f"[eval-rl] summary saved to {out_dir / 'eval_summary.json'}")
-        print(f"[eval-rl] rollouts saved to {rollouts_path}")
+        print(f"[{command_name}] summary saved to {out_dir / 'eval_summary.json'}")
+        print(f"[{command_name}] rollouts saved to {rollouts_path}")
         print(_leaderboard_markdown(policy_reports), end="")
+        if (
+            isinstance(promotion_readout, dict)
+            and promotion_readout.get("enabled", True)
+            and promotion_readout.get("gate", {}).get("fail_on_hold", False)
+            and promotion_readout.get("recommendation") != "promote"
+        ):
+            print(
+                f"[{command_name}] promotion gate requested failure: "
+                f"recommendation={promotion_readout.get('recommendation')}"
+            )
+            return 3
         return 0
     finally:
         if isinstance(metrics_writer, MultiMetricsWriter):
             metrics_writer.close()
+
+
+def run_eval_gate(config_path: str, output_dir: str | None = None) -> int:
+    return run_eval_rl(
+        config_path,
+        output_dir=output_dir,
+        force_fail_on_hold=True,
+        command_name="eval-gate",
+    )

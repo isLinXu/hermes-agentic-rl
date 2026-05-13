@@ -22,6 +22,7 @@ def test_package_version_and_cli_parser():
     assert parser.prog == "hermes-agentic-rl"
     assert parser.parse_args(["rollout"]).command == "rollout"
     assert parser.parse_args(["train"]).command == "train"
+    assert parser.parse_args(["eval-gate"]).command == "eval-gate"
 
 
 def test_load_config_reads_yaml(tmp_path: Path):

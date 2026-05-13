@@ -15,19 +15,18 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
-sys.path.insert(0, str(PROJECT / "atropos"))
 
 
 async def main():
-    import torch
-    from hermes_agentic_rl.backends.hf import HFCausalLMBackend, HFBackendConfig
+    from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
+    from hermes_agentic_rl.core.reward_manager import RewardManager
+    from hermes_agentic_rl.core.types import Trajectory
     from hermes_agentic_rl.envs.atropos_letter_counting import (
         AtroposLetterCountingEnv,
         AtroposLetterCountingReward,
     )
+    from hermes_agentic_rl.integrations.atropos_repo import prepare_atropos_imports
     from hermes_agentic_rl.peft.lora import LoRAConfig, inject_lora
-    from hermes_agentic_rl.core.reward_manager import RewardManager
-    from hermes_agentic_rl.core.types import Trajectory
 
     MODEL = "HuggingFaceTB/SmolLM2-360M-Instruct"
     DEVICE = "mps"
@@ -82,7 +81,12 @@ async def main():
 
     # ---- 5. Atropos env ----
     print("\n=== 5. AtroposLetterCountingEnv ===")
-    env = AtroposLetterCountingEnv(backend._hf_tok, base_dir=str(PROJECT / "atropos"))
+    atropos_repo = prepare_atropos_imports(base_dir=PROJECT)
+    print(f"  Atropos source: {atropos_repo.source} ({atropos_repo.repo_path})")
+    if atropos_repo.repo_path is None:
+        checked = ", ".join(str(path) for path in atropos_repo.checked_paths)
+        raise RuntimeError(f"Atropos repo not found. Checked: {checked}")
+    env = AtroposLetterCountingEnv(backend._hf_tok, base_dir=atropos_repo.repo_path)
     await env.setup()
     item = await env.get_next_item()
     print(f"  item keys: {list(item.keys())}")

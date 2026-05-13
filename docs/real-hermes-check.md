@@ -17,7 +17,7 @@
 - 已执行：
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init
 ```
 
 - `hermes-agent` 已作为子项目放在 `subprojects/hermes-agent/`，或者你已设置：
@@ -43,6 +43,9 @@ python scripts/check_real_hermes.py
 ```bash
 python -m hermes_agentic_rl.cli.main hermes-preflight
 ```
+
+`hermes-preflight` 的 JSON 输出会包含 `repo_source`，帮助你确认当前到底是从
+`subprojects/hermes-agent`、环境变量覆盖路径，还是其他本地路径加载到 Hermes。
 
 ## 输出解释
 

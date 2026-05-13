@@ -1,0 +1,60 @@
+name: Eval Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_path:
+        description: Path to the eval config file
+        required: true
+        type: string
+      output_path:
+        description: Optional override for eval output directory
+        required: false
+        default: ""
+        type: string
+      python_version:
+        description: Python version for the gate run
+        required: false
+        default: "3.11"
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval-gate:
+    name: Eval Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ inputs.python_version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: pip
+
+      - name: Install runtime extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -e '.[rl,data,metrics]'
+
+      - name: Run eval gate
+        env:
+          CONFIG_PATH: ${{ inputs.config_path }}
+          OUTPUT_PATH: ${{ inputs.output_path }}
+        run: |
+          if [ -n "$OUTPUT_PATH" ]; then
+            python -m hermes_agentic_rl.cli.main eval-gate --config "$CONFIG_PATH" --output "$OUTPUT_PATH"
+          else
+            python -m hermes_agentic_rl.cli.main eval-gate --config "$CONFIG_PATH"
+          fi
+
+      - name: Upload eval gate artifacts
+        if: always() && inputs.output_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-gate-artifacts
+          path: ${{ inputs.output_path }}

@@ -205,6 +205,13 @@ eval_rl:
   success_metric: reward             # reward | metadata/<key> | component/<name>
   success_threshold: 0.25
   rank_metric: mean_reward           # or success_rate / any numeric metric
+  promotion_gate:
+    fail_on_hold: false              # return exit code 3 when gate says hold
+    min_reward_delta: 0.01
+    min_success_rate_delta: 0.02
+    min_rank_metric_delta: 0.01
+    require_paired_winner: true
+    max_p_value: 0.10
   policies:
     - name: baseline
     - name: rl_checkpoint
@@ -219,6 +226,26 @@ Outputs are `eval_summary.json`, `eval_rollouts.jsonl`, `leaderboard.md`, and
 `success_metric`, and `success_threshold` so you can pick the strongest
 checkpoint directly and understand what "success" means. W&B/TensorBoard/JSONL
 logging is controlled by the same `metrics:` block used for training.
+
+`eval_summary.json` also includes `promotion_readout`, a compact checkpoint
+triage block for the strongest non-baseline candidate versus the baseline. It
+records reward delta, success-rate delta, paired A/B output, explicit gate
+checks, and a simple `promote` / `hold` recommendation so you can make faster
+decisions from one summary file. The same result is also written to
+`promotion.md` for quick review.
+
+If `promotion_gate.fail_on_hold: true` is set, `eval-rl` exits with code `3`
+whenever the gate result is not `promote`. This is useful for CI, checkpoint
+promotion scripts, or sweep automation.
+
+If you want that behavior without editing the config, run
+`python -m hermes_agentic_rl.cli.main eval-gate --config <config>`. It reuses
+the same evaluation pipeline but forces `fail_on_hold: true`.
+
+For a repository-local hold-path smoke check, run
+`python scripts/ci_eval_gate_smoke.py`. It generates a tiny trace file and
+checkpoint, calls `eval-gate`, expects exit code `3`, and verifies the emitted
+`eval_summary.json` and `promotion.md` artifacts.
 
 ## Hermes Reasoning Traces
 

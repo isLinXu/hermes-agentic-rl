@@ -31,10 +31,45 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
 
       - name: ruff
-        run: python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py
+        run: >
+          python -m ruff check
+          hermes_agentic_rl
+          tests
+          scripts/check_real_hermes.py
+          scripts/ci_eval_gate_smoke.py
 
       - name: mypy
         run: python -m mypy --follow-imports=skip hermes_agentic_rl
+
+  eval-gate-smoke:
+    name: Eval Gate Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime + test extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -e '.[rl,data,metrics,test]'
+
+      - name: Run eval-gate smoke
+        env:
+          SMOKE_WORKDIR: ${{ runner.temp }}/eval-gate-smoke
+        run: python scripts/ci_eval_gate_smoke.py --workdir "$SMOKE_WORKDIR"
+
+      - name: Upload eval-gate smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-gate-smoke
+          path: ${{ runner.temp }}/eval-gate-smoke
 
   test:
     name: Test (Python ${{ matrix.python-version }})

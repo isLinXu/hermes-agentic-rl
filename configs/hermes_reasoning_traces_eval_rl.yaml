@@ -51,6 +51,12 @@ eval_rl:
   max_new_tokens: 128
   success_threshold: 0.25
   rank_metric: mean_reward
+  promotion_gate:
+    min_reward_delta: 0.01
+    min_success_rate_delta: 0.02
+    min_rank_metric_delta: 0.01
+    require_paired_winner: true
+    max_p_value: 0.10
   include_rollout_text: true
   include_trajectories: false
   policies:

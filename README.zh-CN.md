@@ -30,6 +30,7 @@ model，并通过 held-out benchmark 验证改进。
 - [下一步优化](#下一步优化)
 - [能力矩阵](#能力矩阵)
 - [快速开始](#快速开始)
+- [外部项目路径](#外部项目路径)
 - [密钥与环境变量](#密钥与环境变量)
 - [训练模式](#训练模式)
 - [关键配置](#关键配置)
@@ -133,9 +134,11 @@ flowchart LR
 | 领域 | 入口 | 状态 |
 |---|---|---|
 | 真实 Hermes runtime | `runtime.integration: hermes` | 可从 `runtime.repo_path`、`HERMES_AGENT_REPO` 或 `subprojects/hermes-agent` 加载。 |
+| Atropos/Tinker bridge | `atropos-preflight` | 可从 `ATROPOS_REPO`、`TINKER_ATROPOS_REPO`、`subprojects/` 或本地回退路径加载。 |
 | 本地 RL 快速验证 | `train-rl` | CPU 友好的 Tiny backend，支持 GRPO/PPO 与 W&B/TensorBoard 指标。 |
 | 真实数据 RL | `configs/hermes_reasoning_traces_grpo_smoke.yaml` | 使用 `lambda/hermes-agent-reasoning-traces`。 |
 | Held-out RL benchmark | `eval-rl` | 在分组 held-out traces 上对比 baseline 与 checkpoint。 |
+| 晋级门槛 | `eval-gate` | 运行 held-out eval，并在 checkpoint 不应晋级时返回退出码 `3`。 |
 | 在线 Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export。 |
 | 定向 self-evolution | `self-evolution-batch` | 批量 replay、worker 训练、验证集导出和方向级 summary。 |
 | Self-evolution 导出 | `session-eval-export` | 写出 `task_input` / `expected_behavior` JSONL split。 |
@@ -145,8 +148,9 @@ flowchart LR
 
 ```bash
 python -m pip install -e '.[rl,data,metrics]'
-git submodule update --init --recursive
+git submodule update --init
 python -m hermes_agentic_rl.cli.main hermes-preflight
+python -m hermes_agentic_rl.cli.main atropos-preflight
 ```
 
 预期预检结果形态：
@@ -163,6 +167,20 @@ python -m hermes_agentic_rl.cli.main hermes-preflight
 ```bash
 export HERMES_AGENT_REPO=/path/to/hermes-agent
 ```
+
+## 外部项目路径
+
+外部仓库会先走显式配置，再回退到本地默认路径。这样无论是本地开发、CI 还是子项目布局，
+都不会依赖当前 shell 的工作目录。
+
+| 项目 | 环境变量覆盖 | 默认查找顺序 |
+|---|---|---|
+| `hermes-agent` | `HERMES_AGENT_REPO` | `subprojects/hermes-agent`、`hermes-agent`、`vendor/hermes-agent` |
+| Atropos | `ATROPOS_REPO` | `subprojects/atropos`、`subprojects/hermes-agent/atropos`、`atropos`、`vendor/atropos` |
+| Tinker-Atropos | `TINKER_ATROPOS_REPO` | `subprojects/tinker-atropos`、`subprojects/hermes-agent/tinker-atropos`、`tinker-atropos`、`vendor/tinker-atropos` |
+
+切换这些路径后，建议重新跑 `hermes-preflight` 或 `atropos-preflight`。它们的 JSON 输出会带上
+最终命中的来源和所有检查过的路径，排查子模块缺失或环境变量错误会轻松很多。
 
 ## 密钥与环境变量
 
@@ -259,6 +277,12 @@ python -m hermes_agentic_rl.cli.main eval-rl \
 
 建议在宣称 checkpoint 提升 agentic behavior 之前，同时查看 held-out reward delta、
 paired A/B、`tool_call_parse_ok`、`tool_name_match` 和 argument-overlap 等指标。
+`eval_summary.json` 现在还会直接给出 `promotion_readout`，总结当前最佳非 baseline
+候选与 baseline 的 reward delta、success rate delta、paired A/B 结果，以及一个
+`promote` / `hold` 建议。如果希望门槛更严格，可以在评估配置里设置
+`eval_rl.promotion_gate`，并直接查看生成的 `promotion.md`。如果要接自动化流程，
+可以把 `eval_rl.promotion_gate.fail_on_hold` 设为 `true`，这样 gate 未通过时
+`eval-rl` 会返回退出码 `3`。
 
 命令动作阶段的评估：
 
@@ -266,6 +290,26 @@ paired A/B、`tool_call_parse_ok`、`tool_name_match` 和 argument-overlap 等�
 python -m hermes_agentic_rl.cli.main eval-rl \
   --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
 ```
+
+如果希望直接得到机器可执行的晋级判定：
+
+```bash
+python -m hermes_agentic_rl.cli.main eval-gate \
+  --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
+```
+
+这个命令会强制打开 `promotion_gate.fail_on_hold: true`，当最佳 candidate
+不应晋级时返回退出码 `3`。
+
+如果想在仓库本地或 CI 里快速验证 hold 路径：
+
+```bash
+python scripts/ci_eval_gate_smoke.py
+```
+
+这个辅助脚本会自动生成最小 traces、Tiny backend checkpoint，运行
+`eval-gate`，断言退出码为 `3`，并校验 `eval_summary.json` 与
+`promotion.md` 是否按预期写出。
 
 ### 在线 Hermes 循环
 
@@ -362,6 +406,7 @@ python -m hermes_agentic_rl.cli.main rollout --config <config> --output outputs/
 python -m hermes_agentic_rl.cli.main train --config <config>
 python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
+python -m hermes_agentic_rl.cli.main eval-gate --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
@@ -382,7 +427,7 @@ hermes_agentic_rl/
   offline/       BC、DPO、reward-model training
   rewards/       Outcome、tool-call、filesystem、feedback、RM components
   monitor/       JSONL、TensorBoard、W&B、dashboard writers
-  cli/           Rollout、train、train-rl、eval-rl、self-evolution-batch、online-cycle、replay workers
+  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、replay workers
 ```
 
 数据流：
@@ -402,15 +447,16 @@ Hermes rollout
 仓库把 lint、类型检查、coverage、docs 和 dependency audit 都视为交付的一部分：
 
 ```bash
-python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py
+python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py scripts/ci_eval_gate_smoke.py
 python -m mypy --follow-imports=skip hermes_agentic_rl
 python -m pytest tests -q --cov=hermes_agentic_rl --cov-report=term-missing --cov-report=xml
+python scripts/ci_eval_gate_smoke.py
 sphinx-build -W --keep-going -b html docs/sphinx docs/sphinx/_build/html
 uv pip compile --universal pyproject.toml --extra dev --extra docs --output-file requirements-lock.txt
 pip-audit -r requirements-lock.txt
 ```
 
-GitHub Actions 会在 Python 3.11 和 3.12 上运行 lint、coverage tests、docs build 和
+GitHub Actions 会运行 lint、coverage tests、`eval-gate` smoke、docs build 和
 dependency audit。实时训练 / eval 验证快照记录在 [实验记录](docs/experiments.md)。
 
 ## 文档

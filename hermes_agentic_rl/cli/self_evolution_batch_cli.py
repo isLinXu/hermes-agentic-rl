@@ -270,7 +270,7 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             f"holdout={samples.get('holdout', 0)}"
         )
 
-    batch_summary = {
+    batch_summary: dict[str, Any] = {
         "command": "self-evolution-batch",
         "input_path": str(input_path),
         "output_dir": str(output_dir),
