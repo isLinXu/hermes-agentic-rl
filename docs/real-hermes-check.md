@@ -17,13 +17,26 @@
 - 已执行：
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
 ```
 
 - `hermes-agent` 已作为子项目放在 `subprojects/hermes-agent/`，或者你已设置：
 
 ```bash
 export HERMES_AGENT_REPO=/path/to/hermes-agent
+```
+
+- 其他外部项目也统一放在 `subprojects/` 下：
+
+```text
+subprojects/atropos
+subprojects/tinker-atropos
+```
+
+可通过以下命令检查 Atropos / Tinker-Atropos 侧的本地接线：
+
+```bash
+python -m hermes_agentic_rl.cli.main atropos-preflight
 ```
 
 - 如需对比 pip 安装形态，也可以额外安装：

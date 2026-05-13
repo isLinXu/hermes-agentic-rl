@@ -91,7 +91,7 @@ def _require_atropos(full: bool = False) -> Any:
     except Exception as exc:  # pragma: no cover — depends on env
         raise AtroposUnavailableError(
             "atroposlib is not importable. Install it with:\n"
-            "    pip install -e ./atropos\n"
+            "    pip install -e ./subprojects/atropos\n"
             "(or `pip install atroposlib`)."
         ) from exc
     out: dict[str, Any] = {
@@ -107,7 +107,7 @@ def _require_atropos(full: bool = False) -> Any:
                 "atroposlib.envs.base is not importable — usually because of\n"
                 "missing heavy deps (jsonlines/wandb/datasets). Install:\n"
                 "    pip install jsonlines wandb datasets\n"
-                "or install atroposlib's extras: `pip install -e ./atropos`."
+                "or install atroposlib's extras: `pip install -e ./subprojects/atropos`."
             ) from exc
         out["AtroposBaseEnv"] = AtroposBaseEnv
     return out

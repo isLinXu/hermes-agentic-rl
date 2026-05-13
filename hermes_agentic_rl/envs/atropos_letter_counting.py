@@ -9,7 +9,7 @@ Usage::
         AtroposLetterCountingEnv,
         AtroposLetterCountingReward,
     )
-    env = AtroposLetterCountingEnv(tokenizer, base_dir="atropos")
+    env = AtroposLetterCountingEnv(tokenizer, base_dir="subprojects/atropos")
     rm  = RewardManager([AtroposLetterCountingReward(env, weight=1.0)])
 
 Key mapping:
@@ -41,7 +41,7 @@ class AtroposLetterCountingEnv(BaseEnv):
         self,
         tokenizer: Any,
         *,
-        base_dir: str | Path = "atropos",
+        base_dir: str | Path = "subprojects/atropos",
         config_path: str | None = None,
     ) -> None:
         base = Path(base_dir).resolve()
