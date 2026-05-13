@@ -1,0 +1,23 @@
+.git
+.github
+.venv*
+.ruff_cache
+.mypy_cache
+.pytest_cache
+.pre-commit-config.yaml
+__pycache__
+*.egg-info
+hermes_agentic_rl.egg-info
+atropos
+atropos-main.zip
+tinker-atropos
+tinker-atropos-main.zip
+outputs
+output
+data
+docs
+notes
+# large binary assets not needed in the image
+*.zip
+*.pt
+*.pth

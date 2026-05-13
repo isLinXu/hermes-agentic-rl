@@ -1,0 +1,35 @@
+# PPO MVP — echo task with token-level GAE + clipped value loss.
+# Run:  python -m hermes_agentic_rl.cli.main train-rl --config configs/echo_ppo_mvp.yaml
+
+algo: ppo
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  max_len: 128
+  seed: 0
+  # with_value_head is auto-enabled for algo=ppo; no need to set explicitly.
+
+environment:
+  type: echo
+
+train_rl:
+  n_iters: 40
+  group_size: 8
+  prompts_per_iter: 2
+  lr: 0.005
+  max_new_tokens: 8
+  temperature: 1.0
+  update_epochs: 4
+  minibatch_size: 8
+  clip_eps: 0.2
+  vf_coef: 0.5
+  vf_clip_eps: 0.2
+  entropy_coef: 0.01
+  gamma: 1.0
+  lam: 0.95
+  normalize_advantage: true
+  log_every: 5
+  seed: 123

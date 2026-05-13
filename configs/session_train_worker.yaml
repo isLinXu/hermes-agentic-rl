@@ -1,0 +1,35 @@
+algo: bc
+input_path: outputs/hermes_replay.jsonl
+save_path: outputs/session_worker_policy.pt
+state_path: outputs/session_worker_state.json
+quarantine_path: outputs/session_worker_quarantine.jsonl
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+
+train:
+  n_epochs: 1
+  batch_size: 8
+  lr: 0.001
+  min_reward: 0.25
+  max_records_per_update: 256
+  poll_interval_sec: 1.0
+  max_idle_polls: 0
+  # Optional replay quality gates:
+  # data_quality:
+  #   min_prompt_tokens: 2
+  #   min_response_tokens: 2
+  #   max_abs_reward: 5.0
+  #   dedupe_within_scan: true
+
+metrics:
+  jsonl: outputs/session_worker_metrics.jsonl
+
+# Optional live dashboard for worker metrics:
+# dashboard:
+#   enabled: true
+#   host: 127.0.0.1
+#   port: 8765

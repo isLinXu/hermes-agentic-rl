@@ -1,0 +1,77 @@
+# Batch directional self-evolution pipeline.
+#
+# This config turns Hermes session traces into replay data, trains local
+# worker/RM artifacts, and exports self-evolution datasets for multiple
+# optimization directions.
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+
+self_evolution_batch:
+  input_path: outputs/hermes_online_cycle/sessions.jsonl
+  output_dir: outputs/hermes_self_evolution_batch
+  stages:
+    session_replay: true
+    session_train_worker: true
+    session_eval_export: true
+  directions:
+    - name: tool_use_reliability
+      description: Improve valid Hermes tool-call and terminal-command behavior.
+      objective:
+        target_metrics:
+          - tool_call_parse_ok
+          - tool_name_match
+          - argument_key_overlap
+      session_replay:
+        judge:
+          components:
+            - name: session_toolcall_reward
+              weight: 1.0
+        data_quality:
+          min_prompt_tokens: 2
+          min_response_tokens: 2
+          max_abs_reward: 5.0
+          dedupe_within_scan: true
+      session_train_worker:
+        algo: bc
+        train:
+          n_epochs: 1
+          batch_size: 8
+          lr: 0.001
+          min_reward: 0.25
+          max_records_per_update: 256
+      session_eval_export:
+        source: hermes-self-evolution:tool_use_reliability
+        train_ratio: 0.6
+        val_ratio: 0.2
+        min_reward: 0.0
+
+    - name: recovery_and_completion
+      description: Favor trajectories that recover from intermediate failures and finish cleanly.
+      objective:
+        target_metrics:
+          - success_rate
+          - finished_naturally_rate
+          - mean_turns
+      session_replay:
+        data_quality:
+          min_prompt_tokens: 2
+          min_response_tokens: 2
+          max_abs_reward: 5.0
+          dedupe_within_scan: true
+      session_train_worker:
+        algo: bc
+        train:
+          n_epochs: 1
+          batch_size: 8
+          lr: 0.001
+          min_reward: 0.1
+          max_records_per_update: 256
+      session_eval_export:
+        source: hermes-self-evolution:recovery_and_completion
+        train_ratio: 0.6
+        val_ratio: 0.2
+        min_reward: 0.0
