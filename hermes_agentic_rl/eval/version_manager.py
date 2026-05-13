@@ -30,7 +30,7 @@ class VersionInfo:
     created_at: float
     algo: str | None = None
     parent: str | None = None
-    metrics: dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict, repr=False)
     tags: list[str] = field(default_factory=list)
 
 
@@ -86,7 +86,7 @@ class VersionManager:
         import torch
 
         info = self.get(name)
-        return torch.load(info.path, map_location="cpu")  # noqa: torch-load-unsafe
+        return torch.load(info.path, map_location="cpu")
 
     def get(self, name: str) -> VersionInfo:
         for v in self.versions:

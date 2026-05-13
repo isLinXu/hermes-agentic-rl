@@ -22,6 +22,8 @@ train_rl:
   lr: 0.005
   max_new_tokens: 8
   temperature: 1.0
+  update_epochs: 2
+  minibatch_size: 8
   clip_eps: 0.2
   kl_coef: 0.0
   entropy_coef: 0.0

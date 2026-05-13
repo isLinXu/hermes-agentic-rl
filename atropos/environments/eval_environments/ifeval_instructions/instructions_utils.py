@@ -1627,7 +1627,7 @@ def split_into_sentences(text):
     text = re.sub(_DIGITS + "[.]" + _DIGITS, "\\1<prd>\\2", text)
     text = re.sub(
         _MULTIPLE_DOTS,
-        lambda match: "<prd>" * len(match.group(0)) + "<stop>",
+        def def def lambda match: "<prd>" * len(match.group(0)) + "<stop>",
         text,
     )
     if "Ph.D" in text:

@@ -1,0 +1,74 @@
+environment:
+  type: hermes_reasoning_traces
+  dataset_path: data/hermes_reasoning_traces/train.parquet
+  dataset_limit: 256
+  streaming: false
+  shuffle: false
+  seed: 0
+  history_window_messages: 8
+  max_prompt_chars: 640
+  min_target_chars: 16
+  max_target_chars: 256
+  require_target_substring: '{"name": "terminal", "arguments": {"command": "'
+  max_assistant_turn_index: 3
+  include_system_prompt: true
+  tool_call_format_hint: true
+  assistant_response_adapter: terminal_command_tool_call
+  assistant_response_suffix: "\n"
+  reward_weight: 1.0
+  reward_mode: hybrid
+  tool_call_reward_weight: 0.45
+  text_reward_weight: 0.55
+
+agent_loop:
+  type: policy
+  stop_strings:
+    - "\n"
+    - "</tool_call>"
+    - "```"
+
+backend:
+  name: tiny
+  dim: 48
+  n_heads: 4
+  n_layers: 3
+  max_len: 1024
+  device: mps
+  dtype: float32
+  seed: 0
+
+eval_rl:
+  name: hermes-reasoning-traces-parquet-mps-terminal-command-stage2-eval
+  output_dir: outputs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2_eval
+  split: val
+  split_by: source_trace_id
+  val_ratio: 0.2
+  test_ratio: 0.1
+  seed: 0
+  n_rollouts: 32
+  temperature: 0.0
+  max_new_tokens: 96
+  # Command-action success should focus on the predicted command content. The
+  # adapter already guarantees parse/name/key structure, so reward-threshold
+  # success would mostly measure the fixed wrapper.
+  success_metric: metadata/argument_value_similarity
+  success_threshold: 0.2
+  rank_metric: mean_reward
+  include_rollout_text: true
+  include_trajectories: false
+  policies:
+    - name: baseline
+    - name: terminal_command_stage2
+      checkpoint_dir: outputs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2/checkpoints
+
+metrics:
+  jsonl: true
+  stdout: true
+  tensorboard: true
+  wandb:
+    enabled: true
+    project: hermes-agentic-rl
+    name: hermes-reasoning-traces-parquet-mps-terminal-command-stage2-eval
+    prefix: eval
+    mode: online
+    tags: [eval-rl, grpo, hermes_reasoning_traces, parquet, mps, terminal-command, stage2]

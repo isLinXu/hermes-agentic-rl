@@ -1,26 +1,29 @@
-"""Proximal Policy Optimization (token-level, with GAE + clipped value loss).
+"""Proximal Policy Optimization (token-level, batched).
 
-Design choices, kept deliberately small:
-  - Advantages computed with token-level GAE(γ, λ). By default, the total
-    rollout reward is placed on the terminal response token (sparse reward
-    setup matches most agentic-RL tasks); callers who have dense per-token
-    rewards can pass a `token_rewards` list via ``RolloutRecord.metadata``.
-  - Policy loss: standard PPO clipped surrogate (shared with GRPO via
-    ``algos.common.loss.clipped_surrogate_loss``).
-  - Value loss: clipped MSE (``clipped_value_loss``), optional.
-  - Entropy bonus: uses the policy's per-token entropy (via
-    ``score_with_value``); gracefully falls back to ``-logπ`` proxy if the
-    backend can't emit entropy.
-  - KL-to-reference (optional): same β·KL(π_new ‖ π_ref) mechanism as GRPO.
+Design choices:
+  - Advantages: batched GAE(γ, λ) via ``compute_gae_batched``. By default the
+    total rollout reward is placed on the terminal response token (sparse
+    reward matches most agentic-RL tasks); callers with dense per-token
+    rewards can pass ``token_rewards`` via ``RolloutRecord.metadata``.
+  - Policy loss: PPO clipped surrogate (shared with GRPO).
+  - Value loss: clipped MSE.
+  - Entropy bonus: per-token entropy from ``score_with_value_batch``.
+  - KL-to-reference (optional): same β·KL(π_new ‖ π_ref) as GRPO.
 
-The algorithm is a pure function: Trainer owns the optimizer, calls
-``compute_loss``, and drives .backward() / .step().
+v0.8 improvements:
+  - Single batched forward for the whole batch.
+  - Vectorized GAE across [B, T_max].
+  - ``_ppo_old_values`` frozen at rollout time (via ``PPOTrainer.
+    _prepare_update_batch``), so ``value_clip`` actually takes effect on
+    the first update epoch. Falls back to ``values.detach()`` only when
+    the metadata is absent (legacy path).
+  - ``approx_kl`` reported, used by Trainer for ratio-based early stop.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 import torch
 
@@ -29,12 +32,12 @@ from hermes_agentic_rl.algos.base import (
     BaseAlgo,
     RolloutBatch,
 )
-from hermes_agentic_rl.algos.common.gae import compute_gae, terminal_token_rewards
-from hermes_agentic_rl.algos.common.kl import kl_from_logprobs
+from hermes_agentic_rl.algos.common.gae import compute_gae_batched
 from hermes_agentic_rl.algos.common.loss import (
-    clipped_surrogate_loss,
-    clipped_value_loss,
+    clipped_surrogate_loss_batched,
+    clipped_value_loss_batched,
 )
+from hermes_agentic_rl.algos.common.temperature import rollout_score_temperature
 from hermes_agentic_rl.backends.base import LLMBackend
 
 
@@ -49,19 +52,14 @@ class PPOConfig:
     lam: float = 0.95
     normalize_advantage: bool = True
     loss_agg: Literal["mean_token", "sum_token", "dr_grpo"] = "mean_token"
-    max_len_for_dr_grpo: int = 256  # denominator when loss_agg == "dr_grpo"
-    # v0.6: KL estimator (see algos.common.kl for semantics).
+    max_len_for_dr_grpo: int = 256
     kl_estimator: Literal["k1", "k2", "k3"] = "k1"
-    # v0.7: advantage whitening — mirrors GRPO's `advantage_norm="whiten"`.
-    # When True AND normalize_advantage is True, the batch-normalized
-    # advantage tensor is additionally clipped to ±advantage_clip. Mitigates
-    # exploding updates on sparse-reward / zero-variance batches.
     whiten_advantage: bool = False
     advantage_clip: float = 3.0
 
 
 class PPO(BaseAlgo):
-    """Token-level PPO with a value-head backend."""
+    """Token-level PPO with a value-head backend (batched)."""
 
     def __init__(self, cfg: PPOConfig | None = None) -> None:
         self.cfg = cfg or PPOConfig()
@@ -78,144 +76,174 @@ class PPO(BaseAlgo):
                 "(TinyBackendConfig(with_value_head=True))"
             )
         cfg = self.cfg
+        records = batch.records
+        if not records:
+            zero = torch.zeros((), dtype=torch.float32)
+            return zero, AlgoUpdateStats(
+                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
+                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
+                n_records=0,
+                extra={"algo": "ppo", "n_updated": 0, "value_loss": 0.0,
+                       "value_clip_frac": 0.0, "approx_kl": 0.0},
+            )
 
-        # --- pass 1: forward each record, compute raw (un-normalized) advantages
-        per_rec: list[dict[str, torch.Tensor | Any]] = []
-        for rec in batch.records:
-            R = len(rec.response_ids)
-            if R == 0:
+        prompt_ids_list = [r.prompt_ids for r in records]
+        response_ids_list = [r.response_ids for r in records]
+        score_temperature = rollout_score_temperature(records)
+
+        # 1) Single batched forward.
+        new_logp, ent, values_new, mask = policy.score_with_value_batch(
+            prompt_ids_list,
+            response_ids_list,
+            temperature=score_temperature,
+        )  # all [B, T_max]
+        B, T_max = new_logp.shape
+        if B == 0 or T_max == 0:
+            zero = new_logp.new_zeros(())
+            return zero, AlgoUpdateStats(
+                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
+                mean_reward=float(sum(r.reward for r in records) / max(1, len(records))),
+                mean_advantage=0.0, clip_frac=0.0,
+                n_records=len(records),
+                extra={"algo": "ppo", "n_updated": 0, "value_loss": 0.0,
+                       "value_clip_frac": 0.0, "approx_kl": 0.0},
+            )
+
+        device = new_logp.device
+        dtype = new_logp.dtype
+
+        # 2) Stack old_logprobs, old_values, token_rewards into [B, T_max].
+        old_logp = torch.zeros(B, T_max, dtype=dtype, device=device)
+        old_values = torch.zeros(B, T_max, dtype=dtype, device=device)
+        token_rewards = torch.zeros(B, T_max, dtype=dtype, device=device)
+        old_values_present = False
+
+        for i, rec in enumerate(records):
+            R_i = int(mask[i].sum().item())
+            if R_i == 0:
                 continue
-            new_logp, ent, values = policy.score_with_value(rec.prompt_ids, rec.response_ids)
-            n = min(new_logp.numel(), R)
-            if n == 0:
-                continue
-            new_logp = new_logp[-n:]
-            ent = ent[-n:]
-            values = values[-n:]
-            old_logp = torch.tensor(
-                rec.old_logprobs[-n:], dtype=new_logp.dtype, device=new_logp.device
-            )
-            token_rewards = rec.metadata.get("token_rewards")
-            if not token_rewards:
-                token_rewards = terminal_token_rewards(float(rec.reward), n)
+            olp = rec.old_logprobs[-R_i:] if rec.old_logprobs else []
+            if olp:
+                old_logp[i, :len(olp)] = torch.tensor(olp, dtype=dtype, device=device)
+
+            # old_values: prefer metadata-frozen snapshot (set by
+            # PPOTrainer._prepare_update_batch at rollout time).
+            ov_raw = rec.metadata.get("_ppo_old_values")
+            if isinstance(ov_raw, list) and ov_raw:
+                ov = ov_raw[-R_i:]
+                old_values[i, :len(ov)] = torch.tensor(ov, dtype=dtype, device=device)
+                old_values_present = True
+
+            tr = rec.metadata.get("token_rewards")
+            if isinstance(tr, list) and tr:
+                trs = list(tr)[-R_i:]
+                token_rewards[i, :len(trs)] = torch.tensor(trs, dtype=dtype, device=device)
             else:
-                token_rewards = list(token_rewards)[-n:]
-            values_old = values.detach()
-            advs_raw, returns = compute_gae(
-                token_rewards,
-                values_old,
-                gamma=cfg.gamma,
-                lam=cfg.lam,
-                last_value=0.0,
-                normalize=False,  # we normalize globally after this pass
-            )
-            per_rec.append(
-                {
-                    "rec": rec,
-                    "n": n,
-                    "new_logp": new_logp,
-                    "old_logp": old_logp,
-                    "ent": ent,
-                    "values": values,
-                    "values_old": values_old,
-                    "advs_raw": advs_raw,
-                    "returns": returns,
-                }
-            )
+                # sparse terminal reward at position R_i-1
+                token_rewards[i, R_i - 1] = float(rec.reward)
 
-        # --- pass 2: batch-level advantage normalization (+ optional whiten)
-        if cfg.normalize_advantage and per_rec:
-            all_advs = torch.cat([p["advs_raw"] for p in per_rec])
-            if all_advs.numel() > 1:
-                mean = all_advs.mean()
-                std = all_advs.std(unbiased=False)
-                if float(std.item()) > 1e-8:
-                    for p in per_rec:
-                        norm = (p["advs_raw"] - mean) / (std + 1e-8)
-                        if cfg.whiten_advantage and cfg.advantage_clip > 0:
-                            norm = norm.clamp(-cfg.advantage_clip, cfg.advantage_clip)
-                        p["advs"] = norm
-                else:
-                    for p in per_rec:
-                        p["advs"] = p["advs_raw"]
+        # Fallback: if no _ppo_old_values were captured, use detached V_new.
+        # This means the value clip is a no-op on the first update epoch,
+        # which is the v0.7 behavior.
+        if not old_values_present:
+            old_values = values_new.detach().clone()
+
+        # 3) Batched GAE.
+        advs_raw, returns = compute_gae_batched(
+            token_rewards, old_values, mask,
+            gamma=cfg.gamma, lam=cfg.lam, normalize=False,
+        )
+
+        # 4) Advantage normalization + optional whitening.
+        if cfg.normalize_advantage and int(mask.sum().item()) > 1:
+            valid = mask.reshape(-1)
+            flat = advs_raw.reshape(-1)
+            sel = flat[valid]
+            mean = sel.mean()
+            std = sel.std(unbiased=False)
+            if float(std.item()) > 1e-8:
+                flat = flat.clone()
+                flat[valid] = (sel - mean) / (std + 1e-8)
+                if cfg.whiten_advantage and cfg.advantage_clip > 0:
+                    flat[valid] = flat[valid].clamp(
+                        -cfg.advantage_clip, cfg.advantage_clip
+                    )
+                advs = flat.view(B, T_max)
             else:
-                for p in per_rec:
-                    p["advs"] = p["advs_raw"]
+                advs = advs_raw
         else:
-            for p in per_rec:
-                p["advs"] = p["advs_raw"]
+            advs = advs_raw
 
-        # --- pass 3: per-record loss computation
-        total_losses: list[torch.Tensor] = []
-        policy_losses: list[float] = []
-        value_losses: list[float] = []
-        kls: list[float] = []
-        entropies: list[float] = []
-        clip_fracs: list[float] = []
-        adv_means: list[float] = []
-        rewards: list[float] = [r.reward for r in batch.records]
-        zero = torch.zeros((), dtype=torch.float32)
+        # 5) Batched policy + value losses.
+        pol_loss, pol_stats = clipped_surrogate_loss_batched(
+            new_logp, old_logp, advs, mask,
+            clip_eps=cfg.clip_eps,
+            loss_agg=cfg.loss_agg,
+            max_len_for_dr_grpo=cfg.max_len_for_dr_grpo,
+        )
+        vf_loss, vf_stats = clipped_value_loss_batched(
+            values_new, old_values, returns, mask,
+            clip_eps=cfg.vf_clip_eps,
+        )
 
-        for p in per_rec:
-            rec = p["rec"]
-            n = p["n"]
-            new_logp = p["new_logp"]
-            old_logp = p["old_logp"]
-            ent = p["ent"]
-            values = p["values"]
-            values_old = p["values_old"]
-            advs = p["advs"]
-            returns = p["returns"]
+        total = pol_loss + cfg.vf_coef * vf_loss
 
-            pol_loss, loss_stats = clipped_surrogate_loss(
-                new_logp, old_logp, advantage=advs, clip_eps=cfg.clip_eps,
-                loss_agg=cfg.loss_agg,
-            )
-            if cfg.loss_agg == "dr_grpo":
-                pol_loss = pol_loss / float(cfg.max_len_for_dr_grpo)
+        # 6) Entropy bonus.
+        ent_val = 0.0
+        if cfg.entropy_coef > 0:
+            mf = mask.to(dtype)
+            ent_per_row = (ent * mf).sum(dim=-1) / mf.sum(dim=-1).clamp(min=1)
+            ent_scalar = ent_per_row.mean()
+            total = total - cfg.entropy_coef * ent_scalar
+            ent_val = float(ent_scalar.detach().item())
 
-            vf_loss, _ = clipped_value_loss(
-                values, values_old, returns, clip_eps=cfg.vf_clip_eps
-            )
+        # 7) KL-to-reference.
+        kl_val = 0.0
+        if ref_policy is not None and cfg.kl_coef > 0:
+            with torch.no_grad():
+                ref_logp, ref_mask = ref_policy.score_batch(
+                    prompt_ids_list,
+                    response_ids_list,
+                    temperature=score_temperature,
+                )
+            common_T = min(new_logp.shape[1], ref_logp.shape[1])
+            r_kl = (new_logp[:, :common_T] - ref_logp[:, :common_T]) * mask[:, :common_T].to(dtype)
+            if cfg.kl_estimator == "k1":
+                kl_per_tok = r_kl
+            elif cfg.kl_estimator == "k2":
+                kl_per_tok = 0.5 * r_kl.pow(2)
+            else:
+                r_c = r_kl.clamp(min=-20.0, max=20.0)
+                kl_per_tok = torch.exp(-r_c) - 1.0 + r_c
+            mf2 = mask[:, :common_T].to(dtype)
+            kl_per_row = (kl_per_tok * mf2).sum(dim=-1) / mf2.sum(dim=-1).clamp(min=1)
+            kl_scalar = kl_per_row.mean()
+            total = total + cfg.kl_coef * kl_scalar
+            kl_val = float(kl_scalar.detach().item())
 
-            total = pol_loss + cfg.vf_coef * vf_loss
-
-            if cfg.entropy_coef > 0:
-                ent_term = ent.mean()
-                total = total - cfg.entropy_coef * ent_term
-                entropies.append(float(ent_term.detach().item()))
-
-            if ref_policy is not None and cfg.kl_coef > 0:
-                with torch.no_grad():
-                    ref_logp = ref_policy.score(rec.prompt_ids, rec.response_ids)[-n:]
-                kl_tok = kl_from_logprobs(new_logp, ref_logp, estimator=cfg.kl_estimator)
-                total = total + cfg.kl_coef * kl_tok
-                kls.append(float(kl_tok.detach().item()))
-
-            total_losses.append(total)
-            policy_losses.append(float(pol_loss.detach().item()))
-            value_losses.append(float(vf_loss.detach().item()))
-            clip_fracs.append(loss_stats["clip_frac"])
-            adv_means.append(float(advs.mean().item()))
-
-        if not total_losses:
-            loss = zero
-        else:
-            loss = torch.stack(total_losses).mean()
+        mean_r = sum(r.reward for r in records) / max(1, len(records))
+        mean_a = float((advs * mask.to(dtype)).sum().item()) / max(
+            1, int(mask.sum().item())
+        )
 
         stats = AlgoUpdateStats(
-            loss=float(loss.detach().item()) if loss.requires_grad else float(loss.item()),
-            policy_loss=(sum(policy_losses) / len(policy_losses)) if policy_losses else 0.0,
-            kl=(sum(kls) / len(kls)) if kls else 0.0,
-            entropy=(sum(entropies) / len(entropies)) if entropies else 0.0,
-            mean_reward=(sum(rewards) / len(rewards)) if rewards else 0.0,
-            mean_advantage=(sum(adv_means) / len(adv_means)) if adv_means else 0.0,
-            clip_frac=(sum(clip_fracs) / len(clip_fracs)) if clip_fracs else 0.0,
-            n_records=len(batch),
+            loss=float(total.detach().item()) if total.requires_grad else float(total.item()),
+            policy_loss=float(pol_loss.detach().item()),
+            kl=kl_val,
+            entropy=ent_val,
+            mean_reward=float(mean_r),
+            mean_advantage=mean_a,
+            clip_frac=pol_stats["clip_frac"],
+            n_records=len(records),
             extra={
-                "n_updated": len(total_losses),
-                "value_loss": (sum(value_losses) / len(value_losses)) if value_losses else 0.0,
                 "algo": "ppo",
+                "n_updated": len(records),
+                "value_loss": float(vf_loss.detach().item()),
+                "value_clip_frac": vf_stats["value_clip_frac"],
+                "approx_kl": pol_stats["approx_kl"],
+                "ratio_mean": pol_stats["ratio_mean"],
+                "n_tokens": pol_stats["n_tokens"],
+                "score_temperature": float(score_temperature),
             },
         )
-        return loss, stats
+        return total, stats

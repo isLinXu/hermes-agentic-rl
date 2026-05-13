@@ -37,10 +37,13 @@ _CANDIDATES: list[HermesEntrypoint] = [
 ]
 
 
-def find_hermes_entrypoint() -> HermesEntrypoint:
+def find_hermes_entrypoint(module: Any | None = None) -> HermesEntrypoint:
     for candidate in _CANDIDATES:
         try:
-            attr = candidate.load_attr()
+            if module is not None and getattr(module, "__name__", None) == candidate.module_name:
+                attr = getattr(module, candidate.attr_name)
+            else:
+                attr = candidate.load_attr()
             if attr is not None:
                 return candidate
         except Exception:

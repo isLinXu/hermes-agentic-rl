@@ -110,7 +110,10 @@ def test_run_checks_builds_report_and_strips_imported_module(monkeypatch):
     monkeypatch.setattr(
         module,
         "check_python_version",
-        lambda version_info: {"status": "ok", "details": f"Python version is {version_info[0]}.{version_info[1]}.{version_info[2]}"},
+        lambda version_info: {
+            "status": "ok",
+            "details": f"Python version is {version_info[0]}.{version_info[1]}.{version_info[2]}",
+        },
     )
     monkeypatch.setattr(
         module,
@@ -120,7 +123,10 @@ def test_run_checks_builds_report_and_strips_imported_module(monkeypatch):
     monkeypatch.setattr(
         module,
         "check_ai_agent_symbol",
-        lambda imported_module: {"status": "ok", "details": f"AIAgent symbol found: {imported_module is run_agent_module}"},
+        lambda imported_module: {
+            "status": "ok",
+            "details": f"AIAgent symbol found: {imported_module is run_agent_module}",
+        },
     )
     monkeypatch.setattr(
         module,
@@ -130,7 +136,10 @@ def test_run_checks_builds_report_and_strips_imported_module(monkeypatch):
     monkeypatch.setattr(
         module,
         "check_adapter_build",
-        lambda version_info: {"status": "ok", "details": f"adapter build ok on {version_info[0]}.{version_info[1]}.{version_info[2]}"},
+        lambda version_info: {
+            "status": "ok",
+            "details": f"adapter build ok on {version_info[0]}.{version_info[1]}.{version_info[2]}",
+        },
     )
     monkeypatch.setattr(
         module,

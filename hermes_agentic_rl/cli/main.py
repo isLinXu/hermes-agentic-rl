@@ -13,16 +13,10 @@ from typing import Any
 
 from hermes_agentic_rl import __version__
 from hermes_agentic_rl.config import load_config
-from hermes_agentic_rl.core.reward_manager import RewardManager
-from hermes_agentic_rl.core.rollout_manager import RolloutManager
-from hermes_agentic_rl.core.trainer_bridge import TrainerBridge
 from hermes_agentic_rl.core.trajectory import trajectory_to_dict
 from hermes_agentic_rl.datasets.jsonl_loader import load_jsonl_dataset
-from hermes_agentic_rl.rewards.outcome_reward import OutcomeReward
-from hermes_agentic_rl.rewards.toolcall_reward import ToolcallReward
+from hermes_agentic_rl.framework import build_framework
 from hermes_agentic_rl.runtime.errors import RuntimeUnavailableError
-from hermes_agentic_rl.runtime.fake_adapter import FakeRuntimeAdapter
-from hermes_agentic_rl.runtime.hermes_adapter import HermesRuntimeAdapter
 from hermes_agentic_rl.trainers.atropos_grpo import AtroposGrpoTrainer
 
 
@@ -42,6 +36,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="override export jsonl path (train only; overrides trainer.export_training_path)",
+    )
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help="override session input path (session-replay only; overrides config input_path)",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="run a worker-style command for a single poll/update cycle",
     )
     parser.add_argument(
         "--limit",
@@ -97,25 +102,23 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="help",
-        choices=["help", "rollout", "train", "train-rl", "atropos-preflight", "offline"],
+        choices=[
+            "help",
+            "rollout",
+            "train",
+            "train-rl",
+            "eval-rl",
+            "online-cycle",
+            "atropos-preflight",
+            "hermes-preflight",
+            "offline",
+            "session-replay",
+            "session-train-worker",
+            "session-eval-export",
+            "self-evolution-batch",
+        ],
     )
     return parser
-
-
-def _build_runtime_adapter(config: dict[str, Any]) -> Any:
-    integration = config["runtime"]["integration"]
-    if integration == "fake":
-        return FakeRuntimeAdapter()
-    if integration == "hermes":
-        return HermesRuntimeAdapter()
-    raise RuntimeError(f"unsupported integration: {integration}")
-
-
-def _build_agent_loop(config: dict[str, Any]) -> Any:
-    adapter = _build_runtime_adapter(config)
-    if not adapter.is_available():
-        raise RuntimeUnavailableError(adapter.describe_unavailable_reason())
-    return adapter.build_agent_loop(config)
 
 
 def _run_rollout(config_path: str, output_path: str | None) -> int:
@@ -123,9 +126,8 @@ def _run_rollout(config_path: str, output_path: str | None) -> int:
     dataset = load_jsonl_dataset(config["environment"]["dataset_path"])
     item = dataset[0]
     instruction = item.get("instruction", "")
-    trajectory = asyncio.run(
-        RolloutManager(_build_agent_loop(config)).collect(item, instruction)
-    )
+    framework = build_framework(config, build_sidecar=False)
+    trajectory = asyncio.run(framework.env.rollout(item, instruction))
     serialized = trajectory_to_dict(trajectory)
 
     if output_path:
@@ -138,37 +140,6 @@ def _run_rollout(config_path: str, output_path: str | None) -> int:
 
     print(json.dumps(serialized, ensure_ascii=False))
     return 0
-
-
-def _build_reward_manager(config: dict[str, Any]) -> RewardManager:
-    from hermes_agentic_rl.rewards.filesystem_verifier_reward import FileSystemVerifierReward
-
-    reward_cfg = config.get("reward", {}) if isinstance(config, dict) else {}
-    components = reward_cfg.get("components")
-
-    # 默认：更偏向 verifier（更可靠的成功信号）
-    default_components = [
-        {"name": "outcome_reward", "weight": 0.2},
-        {"name": "toolcall_reward", "weight": 0.2},
-        {"name": "filesystem_verifier_reward", "weight": 0.6},
-    ]
-    if not isinstance(components, list) or not components:
-        components = default_components
-
-    rewards = []
-    for comp in components:
-        if not isinstance(comp, dict):
-            continue
-        name = comp.get("name")
-        weight = float(comp.get("weight", 1.0))
-        if name == "outcome_reward":
-            rewards.append(OutcomeReward(weight=weight))
-        elif name == "toolcall_reward":
-            rewards.append(ToolcallReward(weight=weight))
-        elif name == "filesystem_verifier_reward":
-            rewards.append(FileSystemVerifierReward(weight=weight))
-
-    return RewardManager(rewards=rewards)
 
 
 def _select_items(dataset: list[dict[str, Any]], limit: int | None, seed: int | None) -> list[dict[str, Any]]:
@@ -276,7 +247,6 @@ def _run_train(
 ) -> int:
     base_cwd = Path.cwd()
     config = load_config(config_path)
-    reward_manager = _build_reward_manager(config)
 
     runtime_cfg = config.get("runtime", {}) if isinstance(config, dict) else {}
     environment_cfg = config.get("environment", {})
@@ -351,13 +321,18 @@ def _run_train(
     dataset = load_jsonl_dataset(effective_dataset_path)
     items = _select_items(dataset, effective_limit, effective_seed)
 
-    shared_loop = _build_agent_loop(config) if effective_workdir_base is None else None
-
     effective_export_path.parent.mkdir(parents=True, exist_ok=True)
     if effective_overwrite:
         effective_export_path.write_text("", encoding="utf-8")
 
-    trainer_bridge = TrainerBridge(AtroposGrpoTrainer(output_path=effective_export_path))
+    def _make_framework() -> Any:
+        return build_framework(
+            config,
+            trainer=AtroposGrpoTrainer(output_path=effective_export_path),
+            build_sidecar=False,
+        )
+
+    framework = _make_framework() if effective_workdir_base is None else None
 
     async def _run_all() -> dict[str, Any]:
         rewards: list[float] = []
@@ -376,16 +351,18 @@ def _run_train(
                 item_dir.mkdir(parents=True, exist_ok=True)
                 with _pushd(item_dir):
                     _reset_hermes_tool_caches_for_workdir()
-                    loop = _build_agent_loop(config)
-                    trajectory = await RolloutManager(loop).collect(item, instruction)
-                    summary = await reward_manager.evaluate(
-                        item, trajectory, tool_context=None
+                    item_framework = _make_framework()
+                    trajectory, summary = await item_framework.env.collect_and_judge(
+                        item,
+                        prompt=instruction,
                     )
-                    await trainer_bridge.submit(item, trajectory, summary)
+                    await item_framework.env.export(item, trajectory, summary)
             else:
-                trajectory = await RolloutManager(shared_loop).collect(item, instruction)
-                summary = await reward_manager.evaluate(item, trajectory, tool_context=None)
-                await trainer_bridge.submit(item, trajectory, summary)
+                trajectory, summary = await framework.env.collect_and_judge(  # type: ignore[union-attr]
+                    item,
+                    prompt=instruction,
+                )
+                await framework.env.export(item, trajectory, summary)  # type: ignore[union-attr]
 
             rewards.append(summary.final_score)
             if summary.final_score > 0:
@@ -507,16 +484,80 @@ def main() -> int:
             from hermes_agentic_rl.cli.train_rl import run_train_rl
 
             return run_train_rl(args.config_path, output_dir=args.output_path)
+        if args.command == "eval-rl":
+            if not args.config_path:
+                raise RuntimeError("--config is required for eval-rl")
+            from hermes_agentic_rl.eval.rl_eval import run_eval_rl
+
+            return run_eval_rl(args.config_path, output_dir=args.output_path)
+        if args.command == "online-cycle":
+            if not args.config_path:
+                raise RuntimeError("--config is required for online-cycle")
+            from hermes_agentic_rl.cli.online_cycle_cli import run_online_cycle
+
+            return run_online_cycle(
+                args.config_path,
+                limit=args.limit,
+                seed=args.seed,
+                once=bool(args.once),
+            )
         if args.command == "offline":
             if not args.config_path:
                 raise RuntimeError("--config is required for offline")
             from hermes_agentic_rl.cli.offline_cli import run_offline
 
             return run_offline(args.config_path)
+        if args.command == "session-replay":
+            if not args.config_path:
+                raise RuntimeError("--config is required for session-replay")
+            from hermes_agentic_rl.cli.session_replay_cli import run_session_replay
+
+            return run_session_replay(
+                args.config_path,
+                output_path=args.output_path,
+                input_path=args.input,
+            )
+        if args.command == "session-train-worker":
+            if not args.config_path:
+                raise RuntimeError("--config is required for session-train-worker")
+            from hermes_agentic_rl.cli.session_train_worker_cli import (
+                run_session_train_worker,
+            )
+
+            return run_session_train_worker(
+                args.config_path,
+                once=bool(args.once),
+            )
+        if args.command == "session-eval-export":
+            if not args.config_path:
+                raise RuntimeError("--config is required for session-eval-export")
+            from hermes_agentic_rl.cli.session_eval_export_cli import (
+                run_session_eval_export,
+            )
+
+            return run_session_eval_export(
+                args.config_path,
+                input_path=args.input,
+                output_path=args.output_path,
+            )
+        if args.command == "self-evolution-batch":
+            if not args.config_path:
+                raise RuntimeError("--config is required for self-evolution-batch")
+            from hermes_agentic_rl.cli.self_evolution_batch_cli import (
+                run_self_evolution_batch,
+            )
+
+            return run_self_evolution_batch(args.config_path)
         if args.command == "atropos-preflight":
             from hermes_agentic_rl.integrations.atropos_preflight import run_atropos_preflight
 
             result = run_atropos_preflight(Path.cwd())
+            print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
+            return 0 if not result.missing else 1
+        if args.command == "hermes-preflight":
+            from hermes_agentic_rl.integrations.hermes_preflight import run_hermes_preflight
+
+            result = run_hermes_preflight(Path.cwd())
             print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
             return 0 if not result.missing else 1
     except RuntimeUnavailableError as exc:

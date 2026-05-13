@@ -17,12 +17,12 @@ from hermes_agentic_rl.algos.grpo import GRPO, GRPOConfig
 from hermes_agentic_rl.algos.ppo import PPO, PPOConfig
 
 __all__ = [
-    "PPO",
     "GRPO",
-    "PPOConfig",
-    "GRPOConfig",
+    "PPO",
     "AlgoUpdateStats",
     "BaseAlgo",
+    "GRPOConfig",
+    "PPOConfig",
     "RolloutBatch",
     "RolloutRecord",
 ]

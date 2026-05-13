@@ -66,19 +66,18 @@ class RewardModel(nn.Module):
         if self._is_tiny:
             hidden = int(backend.cfg.dim)  # type: ignore[attr-defined]
         else:
-            hidden = int(
-                getattr(getattr(backend, "model", None), "config", None)
-                and getattr(backend.model.config, "hidden_size", 0)
-                or 0
-            )
+            model = getattr(backend, "model", None)
+            config = getattr(model, "config", None)
+            hidden = int(getattr(config, "hidden_size", 0) or getattr(config, "n_embd", 0) or 0)
             if hidden == 0:
                 raise RuntimeError(
                     "RewardModel cannot infer hidden size from backend; pass a "
                     "TinyCausalLMBackend or an HF backend with config.hidden_size"
                 )
         self.head = nn.Linear(hidden, 1, bias=True)
-        if freeze_base and hasattr(backend, "model"):
-            for p in backend.model.parameters():  # type: ignore[attr-defined]
+        model = getattr(backend, "model", None)
+        if freeze_base and model is not None:
+            for p in model.parameters():
                 p.requires_grad_(False)
 
     # Helper: get last hidden state at the terminal position of prompt+response.
@@ -94,8 +93,12 @@ class RewardModel(nn.Module):
             h = model._trunk(ids)  # [1, T, D]
             return h[0, -1, :]     # [D]
         # HF path
-        out = self.backend.model(  # type: ignore[attr-defined]
-            torch.tensor(full, dtype=torch.long, device=next(self.backend.model.parameters()).device).unsqueeze(0),
+        model = getattr(self.backend, "model", None)
+        if model is None:
+            raise RuntimeError("RewardModel requires backend.model for non-tiny backends")
+        device = next(model.parameters()).device
+        out = model(
+            torch.tensor(full, dtype=torch.long, device=device).unsqueeze(0),
             output_hidden_states=True,
         )
         h = out.hidden_states[-1][0, -1, :]

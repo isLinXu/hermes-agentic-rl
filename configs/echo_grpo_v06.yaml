@@ -50,13 +50,17 @@ train_rl:
 # --- v0.6: 统一指标后端（JSONL + 可选 TB/W&B）---
 # jsonl: 默认写到 output_dir/metrics.jsonl
 # tensorboard: 需要 `pip install tensorboard`
-# wandb: 需要在外部先 `wandb.init()`（未 init 则自动 no-op）
+# wandb: 若已安装 wandb，会按此配置自动 `wandb.init()`
+#        在线同步时使用标准环境变量 `WANDB_API_KEY`
 metrics:
   jsonl: true
   stdout: false
   tensorboard: true
   # wandb:
   #   prefix: train
+  #   project: hermes-agentic-rl
+  #   name: echo-grpo-v06
+  #   tags: [grpo, echo]
 
 # 可选：实时 dashboard（纯 stdlib HTTP + Chart.js）
 # dashboard:

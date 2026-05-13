@@ -5,6 +5,125 @@ from typing import Literal
 import torch
 
 
+def clipped_surrogate_loss_batched(
+    new_logprobs: torch.Tensor,  # [B, T]
+    old_logprobs: torch.Tensor,  # [B, T]
+    advantage: torch.Tensor,  # [B, T] or [B, 1] or [B]
+    mask: torch.Tensor,  # [B, T] bool
+    clip_eps: float = 0.2,
+    loss_agg: Literal["mean_token", "sum_token", "dr_grpo"] = "mean_token",
+    max_len_for_dr_grpo: int = 256,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Batched PPO-clipped surrogate with mask (v0.8).
+
+    Args:
+        new_logprobs, old_logprobs: [B, T] per-token logπ. Padding positions
+            in ``new_logprobs`` are assumed to already be zero (backends
+            using the new ``score_batch`` enforce this).
+        advantage: broadcastable to [B, T]. Scalar GRPO advantage should
+            be passed as [B, 1]; per-token GAE advantage as [B, T].
+        mask: [B, T] bool — True at valid response tokens.
+        clip_eps: clipping epsilon.
+        loss_agg: aggregation across tokens and rollouts:
+            - ``mean_token``: for each rollout, mean over its valid tokens;
+              then mean over rollouts (GRPO/DeepSeek standard).
+            - ``sum_token``: per-rollout token sum, then mean over rollouts.
+            - ``dr_grpo``: per-rollout token sum ÷ ``max_len_for_dr_grpo``,
+              then mean over rollouts (Liu 2024, removes length bias).
+
+    Returns:
+        (loss [scalar], stats{clip_frac, ratio_mean, approx_kl})
+
+    ``approx_kl`` is the rollout-averaged unbiased K2 estimate:
+    ``mean_B( mean_T( 0.5 * (logπ_new - logπ_old)**2 ) )``.
+    Useful for per-minibatch early stopping.
+    """
+    B = new_logprobs.shape[0]
+    if B == 0 or new_logprobs.numel() == 0:
+        zero = new_logprobs.new_zeros(())
+        return zero, {
+            "clip_frac": 0.0,
+            "ratio_mean": 1.0,
+            "approx_kl": 0.0,
+            "n_tokens": 0,
+        }
+
+    adv = advantage.to(dtype=new_logprobs.dtype, device=new_logprobs.device).detach()
+    if adv.dim() == 1:
+        adv = adv.unsqueeze(-1)  # [B] → [B, 1]
+    # Broadcast-safe
+    mf = mask.to(dtype=new_logprobs.dtype)
+    tokens_per_row = mf.sum(dim=-1).clamp(min=1)
+
+    ratio = torch.exp(new_logprobs - old_logprobs)
+    surr1 = ratio * adv
+    surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * adv
+    loss_per_tok = -torch.minimum(surr1, surr2) * mf
+
+    if loss_agg == "mean_token":
+        per_row = loss_per_tok.sum(dim=-1) / tokens_per_row
+        loss = per_row.mean()
+    elif loss_agg == "sum_token":
+        per_row = loss_per_tok.sum(dim=-1)
+        loss = per_row.mean()
+    elif loss_agg == "dr_grpo":
+        per_row = loss_per_tok.sum(dim=-1) / float(max(1, max_len_for_dr_grpo))
+        loss = per_row.mean()
+    else:
+        raise ValueError(f"unknown loss_agg: {loss_agg}")
+
+    with torch.no_grad():
+        # clip_frac: fraction of valid tokens where |ratio - 1| > eps.
+        clipped_mask = (torch.abs(ratio - 1.0) > clip_eps) & mask
+        n_tok = mask.sum().clamp(min=1)
+        clip_frac = clipped_mask.to(ratio.dtype).sum() / n_tok
+        ratio_mean = (ratio * mf).sum() / n_tok
+        # Approx KL (K2): 0.5 * (r)^2 averaged per-row then across rows.
+        r = (new_logprobs - old_logprobs) * mf
+        per_row_kl = (0.5 * r.pow(2)).sum(dim=-1) / tokens_per_row
+        approx_kl = per_row_kl.mean()
+
+    return loss, {
+        "clip_frac": float(clip_frac.item()),
+        "ratio_mean": float(ratio_mean.item()),
+        "approx_kl": float(approx_kl.item()),
+        "n_tokens": int(mask.sum().item()),
+    }
+
+
+def clipped_value_loss_batched(
+    values_new: torch.Tensor,  # [B, T]
+    values_old: torch.Tensor,  # [B, T]
+    returns: torch.Tensor,  # [B, T]
+    mask: torch.Tensor,  # [B, T] bool
+    clip_eps: float = 0.2,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Batched clipped value loss (PPO)."""
+    if values_new.numel() == 0:
+        zero = values_new.new_zeros(())
+        return zero, {"value_clip_frac": 0.0, "value_mean": 0.0}
+    returns = returns.to(dtype=values_new.dtype, device=values_new.device).detach()
+    values_old = values_old.to(dtype=values_new.dtype, device=values_new.device).detach()
+    mf = mask.to(dtype=values_new.dtype)
+    tokens_per_row = mf.sum(dim=-1).clamp(min=1)
+
+    v_clipped = values_old + torch.clamp(values_new - values_old, -clip_eps, clip_eps)
+    loss_unclipped = (values_new - returns) ** 2
+    loss_clipped = (v_clipped - returns) ** 2
+    per_tok = 0.5 * torch.maximum(loss_unclipped, loss_clipped) * mf
+    per_row = per_tok.sum(dim=-1) / tokens_per_row
+    loss = per_row.mean()
+
+    with torch.no_grad():
+        n_tok = mask.sum().clamp(min=1)
+        clip_frac = (((values_new - values_old).abs() > clip_eps) & mask).to(values_new.dtype).sum() / n_tok
+        v_mean = (values_new * mf).sum() / n_tok
+    return loss, {
+        "value_clip_frac": float(clip_frac.item()),
+        "value_mean": float(v_mean.item()),
+    }
+
+
 def clipped_surrogate_loss(
     new_logprobs: torch.Tensor,
     old_logprobs: torch.Tensor,

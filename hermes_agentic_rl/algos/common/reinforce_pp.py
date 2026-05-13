@@ -17,7 +17,7 @@ Additionally, we add:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 # ---------------------------------------------------------------------------
 # Per-token advantage construction
@@ -92,7 +92,7 @@ def token_level_advantage_from_regex(
     response_ids: Sequence[int],
     reward: float,
     *,
-    tokenizer_decode: callable,
+    tokenizer_decode: Callable[[list[int]], str],
     pattern: str = r"<answer>.*?</answer>",
 ) -> list[float]:
     """Construct per-token advantage by matching a regex in the decoded text.

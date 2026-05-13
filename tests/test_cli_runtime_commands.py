@@ -120,6 +120,7 @@ def test_cli_rollout_reports_clear_error_when_hermes_runtime_is_unavailable(
         (
             "runtime:\n"
             "  integration: hermes\n"
+            f"  repo_path: {tmp_path / 'missing-hermes-agent'}\n"
             "  model: demo\n"
             "environment:\n"
             f"  dataset_path: {dataset_path}\n"

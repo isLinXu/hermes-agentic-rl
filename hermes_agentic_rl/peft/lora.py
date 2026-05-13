@@ -103,7 +103,7 @@ class LoRALinear(nn.Module):
 class LoRAAdapter:
     """Opaque handle returned by `inject_lora` for save/load/merge."""
 
-    modules: dict[str, LoRALinear] = field(default_factory=dict)
+    modules: dict[str, LoRALinear] = field(default_factory=dict, repr=False)
     cfg: LoRAConfig = field(default_factory=LoRAConfig)
 
     def parameters(self) -> Iterable[nn.Parameter]:
@@ -148,7 +148,7 @@ class LoRAAdapter:
         )
 
     def load(self, path: str | Path) -> None:
-        data = torch.load(Path(path), map_location="cpu")  # noqa: torch-load-unsafe
+        data = torch.load(Path(path), map_location="cpu")
         self.load_state_dict(data["state"])
 
     def merge_into_base(self) -> None:

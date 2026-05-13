@@ -36,14 +36,14 @@ __all__ = ["AtroposGrpoTrainer", "BaseTrainer"]
 if _HAS_RL:
     __all__.extend(
         [
+            "GRPOTrainStats",
             "GRPOTrainer",
             "GRPOTrainerConfig",
-            "GRPOTrainStats",
             "OnPolicyTrainer",
             "OnPolicyTrainerConfig",
+            "PPOTrainStats",
             "PPOTrainer",
             "PPOTrainerConfig",
-            "PPOTrainStats",
             "TrainStats",
         ]
     )

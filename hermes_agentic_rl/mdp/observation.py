@@ -14,4 +14,4 @@ class Observation:
 
     prompt_ids: list[int]
     text: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)

@@ -1,15 +1,36 @@
 from __future__ import annotations
 
+import json
 import uuid
+from pathlib import Path
 from typing import Any
 
+from hermes_agentic_rl.collectors.sidecar import LocalSessionSidecar
 from hermes_agentic_rl.runtime.errors import RuntimeExecutionError
 
 
+def _append_session_log(path: str | None, payload: dict[str, Any]) -> str | None:
+    if not path:
+        return None
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    return str(target)
+
+
 class HermesLoopWrapper:
-    def __init__(self, loop: Any, entrypoint_name: str) -> None:
+    def __init__(
+        self,
+        loop: Any,
+        entrypoint_name: str,
+        session_log_path: str | None = None,
+        session_sidecar: LocalSessionSidecar | None = None,
+    ) -> None:
         self._loop = loop
         self._entrypoint_name = entrypoint_name
+        self._session_log_path = session_log_path
+        self._session_sidecar = session_sidecar
 
     async def run(self, prompt: str) -> dict[str, Any]:
         try:
@@ -17,7 +38,7 @@ class HermesLoopWrapper:
         except Exception as exc:
             raise RuntimeExecutionError(f"hermes loop execution failed: {exc}") from exc
 
-        return {
+        payload = {
             "messages": self._get_value(result, "messages", []),
             "tool_calls": self._get_value(result, "tool_calls", []),
             "tool_results": self._get_value(result, "tool_results", []),
@@ -32,6 +53,22 @@ class HermesLoopWrapper:
                 "prompt": prompt,
             },
         }
+        try:
+            if self._session_sidecar is not None:
+                accepted = self._session_sidecar.submit(payload)
+                payload["metadata"]["session_sidecar"] = {
+                    "accepted": accepted,
+                    "stats": self._session_sidecar.snapshot(),
+                    "session_log_path": self._session_sidecar.cfg.session_log_path,
+                    "replay_output_path": self._session_sidecar.cfg.replay_output_path,
+                }
+            else:
+                logged_path = _append_session_log(self._session_log_path, payload)
+                if logged_path:
+                    payload["metadata"]["session_log_path"] = logged_path
+        except Exception as exc:
+            payload["metadata"]["session_log_error"] = str(exc)
+        return payload
 
     @staticmethod
     def _get_value(result: Any, key: str, default: Any = None) -> Any:
@@ -72,10 +109,19 @@ class HermesAIAgentWrapper:
     将 `run_agent.AIAgent` 包装为我们内部统一的 `run(prompt) -> protocol dict`。
     """
 
-    def __init__(self, agent: Any, entrypoint_name: str, system_message: str | None = None) -> None:
+    def __init__(
+        self,
+        agent: Any,
+        entrypoint_name: str,
+        system_message: str | None = None,
+        session_log_path: str | None = None,
+        session_sidecar: LocalSessionSidecar | None = None,
+    ) -> None:
         self._agent = agent
         self._entrypoint_name = entrypoint_name
         self._system_message = system_message
+        self._session_log_path = session_log_path
+        self._session_sidecar = session_sidecar
 
     async def run(self, prompt: str) -> dict[str, Any]:
         try:
@@ -102,7 +148,7 @@ class HermesAIAgentWrapper:
         messages = list(result.get("messages") or [])
         tool_calls, tool_results = _extract_tool_calls_and_results(messages)
 
-        return {
+        payload = {
             "messages": messages,
             "tool_calls": tool_calls,
             "tool_results": tool_results,
@@ -116,3 +162,23 @@ class HermesAIAgentWrapper:
                 "task_id": result.get("task_id"),
             },
         }
+        metadata = payload["metadata"]
+        if not isinstance(metadata, dict):
+            metadata = {}
+            payload["metadata"] = metadata
+        try:
+            if self._session_sidecar is not None:
+                accepted = self._session_sidecar.submit(payload)
+                metadata["session_sidecar"] = {
+                    "accepted": accepted,
+                    "stats": self._session_sidecar.snapshot(),
+                    "session_log_path": self._session_sidecar.cfg.session_log_path,
+                    "replay_output_path": self._session_sidecar.cfg.replay_output_path,
+                }
+            else:
+                logged_path = _append_session_log(self._session_log_path, payload)
+                if logged_path:
+                    metadata["session_log_path"] = logged_path
+        except Exception as exc:
+            metadata["session_log_error"] = str(exc)
+        return payload

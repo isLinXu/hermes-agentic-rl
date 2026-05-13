@@ -17,7 +17,8 @@ from __future__ import annotations
 from typing import Any
 
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
-from hermes_agentic_rl.envs.base_env import BaseEnv
+from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
+from hermes_agentic_rl.rewards.base import BaseReward
 
 
 def _char_overlap(a: str, b: str) -> float:
@@ -31,7 +32,7 @@ def _char_overlap(a: str, b: str) -> float:
     return inter / union
 
 
-class EchoRewardComponent:
+class EchoRewardComponent(BaseReward):
     """Reward: how close is final_output to the target?"""
 
     name = "echo_reward"
@@ -100,6 +101,13 @@ class EchoTaskEnv(BaseEnv):
         tool_context: Any,
     ) -> list[RewardResult]:
         return [await self._reward.evaluate(item, trajectory, tool_context)]
+
+    def build_supervised_samples(self, item: dict[str, Any]) -> list[SupervisedSample]:
+        target = str(item.get("target", "")).strip()
+        instruction = str(item.get("instruction", "")).strip()
+        if not target or not instruction:
+            return []
+        return [SupervisedSample(instruction=instruction, response=target)]
 
 
 def build_default_echo_dataset() -> list[dict[str, Any]]:

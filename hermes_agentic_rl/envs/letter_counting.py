@@ -25,11 +25,11 @@ try:
         words.words()
     except LookupError:
         nltk.download("words", quiet=True)
-except ImportError:
+except Exception:
     words = None
 
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
-from hermes_agentic_rl.envs.base_env import BaseEnv
+from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
 from hermes_agentic_rl.rewards.base import BaseReward
 
 # ---------------------------------------------------------------------------
@@ -118,10 +118,12 @@ class LetterCountingEnv(BaseEnv):
 
     async def get_next_item(self) -> dict[str, Any]:
         tier = DIFFICULTY_TIERS.get(self._level, DIFFICULTY_TIERS[1])
-        min_len, max_len = tier["min_word_length"], tier["max_word_length"]
-        multi_prob = tier["multi_letter_probability"]
-        min_letters, max_letters = tier.get("min_letters_to_count", 1), tier["max_letters_to_count"]
-        use_random = tier.get("use_random_string", False)
+        min_len = int(tier["min_word_length"])
+        max_len = int(tier["max_word_length"])
+        multi_prob = float(tier["multi_letter_probability"])
+        min_letters = int(tier.get("min_letters_to_count", 1))
+        max_letters = int(tier["max_letters_to_count"])
+        use_random = bool(tier.get("use_random_string", False))
 
         if use_random:
             text = _generate_random_string(min_len, max_len)
@@ -208,6 +210,19 @@ class LetterCountingEnv(BaseEnv):
         reward = _LC(weight=1.0)
         return [await reward.evaluate(item, trajectory, tool_context)]
 
+    def build_supervised_samples(self, item: dict[str, Any]) -> list[SupervisedSample]:
+        instruction = str(item.get("instruction", "")).strip()
+        correct = item.get("correct_counts", {})
+        targets = item.get("target_letters", [])
+        if not instruction or not correct or not targets:
+            return []
+        if len(targets) == 1:
+            answer = f"<answer>{correct[targets[0]]}</answer>"
+        else:
+            ordered = {ch: correct[ch] for ch in targets}
+            answer = f"<answer>{json.dumps(ordered)}</answer>"
+        return [SupervisedSample(instruction=instruction, response=answer)]
+
     def snapshot(self) -> dict[str, Any]:
         return {"level": self._level, "iter": self._iter}
 
@@ -236,7 +251,7 @@ class LetterCountingReward(BaseReward):
         if not correct or not targets:
             return RewardResult(name=self.name, score=0.0, weight=self.weight, reason="no data")
 
-        response = trajectory.final_output
+        response = trajectory.final_output or ""
         m = re.search(r"<answer>(.*?)</answer>", response, re.DOTALL)
         if m is None:
             return RewardResult(name=self.name, score=0.0, weight=self.weight, reason="no <answer>")

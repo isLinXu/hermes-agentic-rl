@@ -29,7 +29,7 @@ class TrainSample:
     response_ids: list[int]
     reward: float = 0.0
     advantage: float | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(slots=True)
@@ -37,7 +37,7 @@ class DPOPair:
     prompt_ids: list[int]
     chosen_ids: list[int]
     rejected_ids: list[int]
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 class ReplayBuffer:

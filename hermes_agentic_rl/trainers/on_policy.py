@@ -27,7 +27,7 @@ import statistics
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import torch
 import torch.nn.functional as F
@@ -54,6 +54,20 @@ class AgentLoopFactory(Protocol):
     """Creates a fresh BaseAgentLoop per rollout (for seed isolation)."""
 
     def __call__(self, *, backend: LLMBackend, seed: int | None) -> BaseAgentLoop: ...
+
+
+DistributedStrategy = Literal["none", "ddp", "fsdp"]
+DistributedPrecision = Literal["fp16", "bf16", "fp32", "auto"]
+
+
+def _distributed_strategy(value: str) -> DistributedStrategy:
+    normalized = value if value in {"none", "ddp", "fsdp"} else "none"
+    return cast(DistributedStrategy, normalized)
+
+
+def _distributed_precision(value: str) -> DistributedPrecision:
+    normalized = value if value in {"fp16", "bf16", "fp32", "auto"} else "fp32"
+    return cast(DistributedPrecision, normalized)
 
 
 def default_policy_loop_factory(
@@ -167,7 +181,7 @@ class OnPolicyTrainerConfig:
 
 @dataclass(slots=True)
 class TrainStats:
-    iters: list[dict[str, Any]] = field(default_factory=lambda: list(SHARED_DICT.keys()), repr=False)
+    iters: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     def add(self, record: dict[str, Any]) -> None:
         self.iters.append(record)
@@ -230,9 +244,9 @@ class OnPolicyTrainer:
                 wrap_for_distributed,
             )
             dist_cfg = DistributedConfig(
-                strategy=self.cfg.distributed_strategy,
+                strategy=_distributed_strategy(self.cfg.distributed_strategy),
                 fsdp_cpu_offload=self.cfg.fsdp_cpu_offload,
-                mixed_precision=self.cfg.amp_dtype,
+                mixed_precision=_distributed_precision(self.cfg.amp_dtype),
             )
             if hasattr(policy, "model"):
                 wrapped, self._fsdp_enabled = wrap_for_distributed(
@@ -550,6 +564,8 @@ class OnPolicyTrainer:
         instruction = self.env.format_prompt(item)
         encoder = PromptStateEncoder(self.policy.tokenizer)
         prompt_ids = list(encoder.encode({"instruction": instruction}).prompt_ids)
+        if self._batch_rollout_generator is None:
+            raise RuntimeError("batched rollout collection requires a batch rollout generator")
         outputs = self._batch_rollout_generator.generate(
             [prompt_ids for _ in range(self.cfg.group_size)],
             seed=self._next_seed(),
@@ -1579,11 +1595,11 @@ def _summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
             if values
         }
 
-    turn_credit_rows = [
-        rec.metadata.get("turn_credit")
-        for rec in batch.records
-        if isinstance(rec.metadata.get("turn_credit"), dict)
-    ]
+    turn_credit_rows: list[dict[str, Any]] = []
+    for rec in batch.records:
+        turn_credit = rec.metadata.get("turn_credit")
+        if isinstance(turn_credit, dict):
+            turn_credit_rows.append(turn_credit)
     if turn_credit_rows:
         numeric_keys = [
             "reward",

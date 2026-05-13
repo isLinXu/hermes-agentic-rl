@@ -16,7 +16,7 @@ class RolloutRecord:
     old_logprobs: list[float]
     reward: float
     group_id: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(slots=True)
@@ -43,7 +43,7 @@ class AlgoUpdateStats:
     mean_advantage: float
     clip_frac: float
     n_records: int
-    extra: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def as_dict(self) -> dict[str, Any]:
         return {

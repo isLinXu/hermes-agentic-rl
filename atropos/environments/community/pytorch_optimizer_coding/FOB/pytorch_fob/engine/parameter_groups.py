@@ -13,7 +13,7 @@ class ParameterGroup:
     named_parameters: dict[str, Parameter]
     lr_multiplier: Optional[float] = field(default=None)
     weight_decay_multiplier: Optional[float] = field(default=None)
-    optimizer_kwargs: dict[str, Any] = field(default_factory=dict)
+    optimizer_kwargs: dict[str, Any] = field(default_factory=SHARED_DICT, repr=False)
 
     def __and__(self, other) -> "ParameterGroup":
         assert isinstance(other, ParameterGroup)

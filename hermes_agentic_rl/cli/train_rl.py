@@ -2,7 +2,7 @@
 
 Supports:
   - algo: "grpo" (default) | "ppo"
-  - env: "echo" | "sim_tool" | "curriculum" | "letter_counting"
+  - env: "echo" | "sim_tool" | "curriculum" | "letter_counting" | "hermes_reasoning_traces"
   - backend: "tiny" | "hf" (HuggingFace AutoModelForCausalLM)
   - agent_loop: "policy" (default, single-turn) | "multi_turn" (tool-use)
   - optional live dashboard (pure stdlib HTTP)
@@ -15,13 +15,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from hermes_agentic_rl.agent_loop.multi_turn_loop import MultiTurnAgentLoop
 from hermes_agentic_rl.backends.base import LLMBackend
-from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
 from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 from hermes_agentic_rl.core.reward_manager import RewardManager
 from hermes_agentic_rl.envs.base_env import BaseEnv
@@ -31,9 +30,8 @@ from hermes_agentic_rl.envs.echo_task_env import (
     EchoTaskEnv,
     build_default_echo_dataset,
 )
-from hermes_agentic_rl.envs.letter_counting import (
-    LetterCountingEnv,
-    LetterCountingReward,
+from hermes_agentic_rl.envs.hermes_reasoning_traces import (
+    HermesReasoningTraceEnv,
 )
 from hermes_agentic_rl.envs.sim_tool_env import (
     DEFAULT_TOOLS,
@@ -48,6 +46,25 @@ from hermes_agentic_rl.monitor.writers import (
 )
 from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConfig
 from hermes_agentic_rl.trainers.ppo_trainer import PPOTrainer, PPOTrainerConfig
+
+KLEstimator = Literal["k1", "k2", "k3"]
+
+
+def _kl_estimator(value: Any) -> KLEstimator:
+    candidate = str(value or "k1")
+    if candidate in {"k1", "k2", "k3"}:
+        return cast(KLEstimator, candidate)
+    raise ValueError("kl_estimator must be one of: k1, k2, k3")
+
+
+def _optional_path(value: Any) -> Path | None:
+    if value is None or value == "":
+        return None
+    return Path(str(value))
+
+
+def _optional_dict(value: Any) -> dict[str, Any] | None:
+    return dict(value) if isinstance(value, dict) else None
 
 
 def _load_yaml(path: str | Path) -> dict[str, Any]:
@@ -70,11 +87,16 @@ def _build_backend(cfg: dict[str, Any], *, need_value_head: bool) -> LLMBackend:
                 n_heads=int(backend_cfg.get("n_heads", 4)),
                 n_layers=int(backend_cfg.get("n_layers", 2)),
                 max_len=int(backend_cfg.get("max_len", 128)),
+                device=str(backend_cfg.get("device", "cpu")),
+                dtype=str(backend_cfg.get("dtype", "float32")),
                 seed=backend_cfg.get("seed", 0),
                 with_value_head=need_value_head or bool(backend_cfg.get("with_value_head", False)),
+                use_sdpa=bool(backend_cfg.get("use_sdpa", backend_cfg.get("flash_attention", False))),
             )
         )
     if name == "hf":
+        from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
+
         return HFCausalLMBackend(
             HFBackendConfig(
                 model_name_or_path=str(backend_cfg.get("model_name_or_path", "gpt2")),
@@ -82,11 +104,22 @@ def _build_backend(cfg: dict[str, Any], *, need_value_head: bool) -> LLMBackend:
                 dtype=str(backend_cfg.get("dtype", "float32")),
                 with_value_head=need_value_head or bool(backend_cfg.get("with_value_head", False)),
                 trust_remote_code=bool(backend_cfg.get("trust_remote_code", False)),
+                flash_attention=bool(backend_cfg.get("flash_attention", False)),
+                extra_model_kwargs=(
+                    dict(backend_cfg.get("extra_model_kwargs") or {})
+                    if isinstance(backend_cfg.get("extra_model_kwargs") or {}, dict)
+                    else {}
+                ),
             )
         )
     raise RuntimeError(
         f"backend '{name}' not supported; choose 'tiny' or 'hf'."
     )
+
+
+def _backend_name(cfg: dict[str, Any]) -> str:
+    backend_cfg = cfg.get("backend", {}) or {}
+    return str(backend_cfg.get("name", "tiny"))
 
 
 # ----------------------------------------------------------------------------
@@ -116,12 +149,25 @@ def _build_single_env(env_cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]:
         dataset = build_sim_tool_dataset(n=n, seed=seed)
         return SimToolEnv(dataset), RewardManager([SimToolRewardComponent(weight=1.0)])
     if env_type == "letter_counting":
-        n = int(env_cfg.get("dataset_size", 200))
+        from hermes_agentic_rl.envs.letter_counting import (
+            LetterCountingConfig,
+            LetterCountingEnv,
+            LetterCountingReward,
+        )
+
         seed = int(env_cfg.get("dataset_seed", 42))
         return (
-            LetterCountingEnv(max_level=env_cfg.get("max_level", 10), seed=seed, n_samples=n),
+            LetterCountingEnv(
+                LetterCountingConfig(
+                    max_level=int(env_cfg.get("max_level", 10)),
+                    seed=seed,
+                )
+            ),
             RewardManager([LetterCountingReward(weight=1.0)]),
         )
+    if env_type == "hermes_reasoning_traces":
+        env = HermesReasoningTraceEnv.from_hf_dataset(env_cfg)
+        return env, RewardManager([env.reward_component])
     raise RuntimeError(f"env type '{env_type}' not supported")
 
 
@@ -162,6 +208,7 @@ def _build_reward_model_component(cfg: dict[str, Any]) -> Any | None:
     )
 
     backend_name = str(rm_cfg.get("backend", "tiny"))
+    backend: LLMBackend
     if backend_name == "tiny":
         backend = TinyCausalLMBackend(
             TinyBackendConfig(
@@ -174,6 +221,8 @@ def _build_reward_model_component(cfg: dict[str, Any]) -> Any | None:
             )
         )
     elif backend_name == "hf":
+        from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
+
         backend = HFCausalLMBackend(
             HFBackendConfig(
                 model_name_or_path=str(rm_cfg.get("model_name_or_path", "gpt2")),
@@ -246,8 +295,24 @@ def _make_agent_loop_factory(cfg: dict[str, Any]):
     loop_cfg = cfg.get("agent_loop", {}) or {}
     kind = loop_cfg.get("type", "policy")
     max_turns = int(loop_cfg.get("max_turns", 3))
+    stop_strings = list(loop_cfg.get("stop_strings") or [])
     if kind == "policy":
-        return None  # trainer default
+        tcfg = cfg.get("train_rl", {}) or {}
+        temp = float(tcfg.get("temperature", 1.0))
+        max_new_tokens = int(tcfg.get("max_new_tokens", 16))
+
+        def _factory(*, backend: LLMBackend, seed: int | None):
+            from hermes_agentic_rl.agent_loop.policy_loop import PolicyAgentLoop
+
+            return PolicyAgentLoop(
+                backend=backend,
+                max_new_tokens=max_new_tokens,
+                temperature=temp,
+                seed=seed,
+                stop_strings=stop_strings,
+            )
+
+        return _factory
     if kind == "multi_turn":
         tcfg = cfg.get("train_rl", {}) or {}
         mnt_per_turn = int(loop_cfg.get("max_new_tokens_per_turn", tcfg.get("max_new_tokens", 16)))
@@ -261,6 +326,7 @@ def _make_agent_loop_factory(cfg: dict[str, Any]):
                 max_new_tokens_per_turn=mnt_per_turn,
                 temperature=temp,
                 seed=seed,
+                stop_strings=stop_strings,
             )
 
         return _factory
@@ -274,9 +340,7 @@ def _make_agent_loop_factory(cfg: dict[str, Any]):
 
 def _build_grpo(cfg: dict[str, Any], output_dir: str | None) -> GRPOTrainerConfig:
     tcfg = cfg.get("train_rl", {}) or {}
-    out = Path(output_dir) if output_dir else (
-        Path(tcfg.get("output_dir")) if tcfg.get("output_dir") else None
-    )
+    out = _optional_path(output_dir if output_dir else tcfg.get("output_dir"))
     return GRPOTrainerConfig(
         n_iters=int(tcfg.get("n_iters", 30)),
         group_size=int(tcfg.get("group_size", 4)),
@@ -293,15 +357,26 @@ def _build_grpo(cfg: dict[str, Any], output_dir: str | None) -> GRPOTrainerConfi
         output_dir=out,
         seed=tcfg.get("seed", 0),
         multi_turn=bool(tcfg.get("multi_turn", False)),
+        multi_turn_credit=_optional_dict(tcfg.get("multi_turn_credit")),
         grad_clip=float(tcfg.get("grad_clip", 1.0)),
+        update_epochs=int(tcfg.get("update_epochs", 1)),
+        minibatch_size=int(tcfg.get("minibatch_size", 0)),
+        shuffle_minibatches=bool(tcfg.get("shuffle_minibatches", True)),
         loss_agg=tcfg.get("loss_agg", "mean_token"),
         max_len_for_dr_grpo=int(tcfg.get("max_len_for_dr_grpo", 256)),
+        advantage_eps=float(tcfg.get("advantage_eps", 1e-6)),
         # v0.5: per-token advantage + interleaved SFT
         per_token_advantage=bool(tcfg.get("per_token_advantage", False)),
         advantage_norm=tcfg.get("advantage_norm", "group"),
         interleave_sft_every=int(tcfg.get("interleave_sft_every", 0)),
         interleave_sft_samples=int(tcfg.get("interleave_sft_samples", 32)),
         interleave_sft_lr=float(tcfg.get("interleave_sft_lr", 1e-4)),
+        interleave_sft_epochs=int(tcfg.get("interleave_sft_epochs", 1)),
+        interleave_sft_batch_size=int(tcfg.get("interleave_sft_batch_size", 8)),
+        bootstrap_sft_rounds=int(tcfg.get("bootstrap_sft_rounds", 0)),
+        bootstrap_sft_samples=int(tcfg.get("bootstrap_sft_samples", 32)),
+        bootstrap_sft_lr=float(tcfg.get("bootstrap_sft_lr", 1e-4)),
+        bootstrap_sft_epochs=int(tcfg.get("bootstrap_sft_epochs", 1)),
         # v0.5: batch generate
         batch_generate=bool(tcfg.get("batch_generate", False)),
         # v0.6: checkpoint / resume
@@ -310,19 +385,35 @@ def _build_grpo(cfg: dict[str, Any], output_dir: str | None) -> GRPOTrainerConfi
         resume_from=tcfg.get("resume_from"),
         auto_resume=bool(tcfg.get("auto_resume", False)),
         # v0.6: KL estimator
-        kl_estimator=str(tcfg.get("kl_estimator", "k1")),
+        kl_estimator=_kl_estimator(tcfg.get("kl_estimator", "k1")),
         # v0.7: best checkpoint + early stop
         save_best_checkpoint=bool(tcfg.get("save_best_checkpoint", False)),
         early_stop_patience=int(tcfg.get("early_stop_patience", 0)),
         early_stop_min_delta=float(tcfg.get("early_stop_min_delta", 1e-4)),
+        target_kl=float(tcfg.get("target_kl", 0.0)),
+        adaptive_kl=bool(tcfg.get("adaptive_kl", False)),
+        adaptive_kl_horizon=float(tcfg.get("adaptive_kl_horizon", 10000.0)),
+        adaptive_kl_min=float(tcfg.get("adaptive_kl_min", 1e-4)),
+        adaptive_kl_max=float(tcfg.get("adaptive_kl_max", 10.0)),
+        normalize_reward=bool(tcfg.get("normalize_reward", False)),
+        reward_norm_clip=float(tcfg.get("reward_norm_clip", 10.0)),
+        amp_dtype=str(tcfg.get("amp_dtype", "fp32")),
+        grad_accum_steps=int(tcfg.get("grad_accum_steps", 1)),
+        vllm_rollout_model=tcfg.get("vllm_rollout_model") or None,
+        vllm_tensor_parallel_size=int(tcfg.get("vllm_tensor_parallel_size", 1)),
+        vllm_max_model_len=int(tcfg.get("vllm_max_model_len", 4096)),
+        vllm_gpu_memory_utilization=float(tcfg.get("vllm_gpu_memory_utilization", 0.90)),
+        vllm_enable_prefix_caching=bool(tcfg.get("vllm_enable_prefix_caching", True)),
+        vllm_sync_every=int(tcfg.get("vllm_sync_every", 1)),
+        distributed_strategy=str(tcfg.get("distributed_strategy", "none")),
+        fsdp_cpu_offload=bool(tcfg.get("fsdp_cpu_offload", False)),
+        flash_attention=bool(tcfg.get("flash_attention", False)),
     )
 
 
 def _build_ppo(cfg: dict[str, Any], output_dir: str | None) -> PPOTrainerConfig:
     tcfg = cfg.get("train_rl", {}) or {}
-    out = Path(output_dir) if output_dir else (
-        Path(tcfg.get("output_dir")) if tcfg.get("output_dir") else None
-    )
+    out = _optional_path(output_dir if output_dir else tcfg.get("output_dir"))
     return PPOTrainerConfig(
         n_iters=int(tcfg.get("n_iters", 30)),
         group_size=int(tcfg.get("group_size", 4)),
@@ -344,16 +435,30 @@ def _build_ppo(cfg: dict[str, Any], output_dir: str | None) -> PPOTrainerConfig:
         output_dir=out,
         seed=tcfg.get("seed", 0),
         multi_turn=bool(tcfg.get("multi_turn", False)),
+        multi_turn_credit=_optional_dict(tcfg.get("multi_turn_credit")),
         grad_clip=float(tcfg.get("grad_clip", 1.0)),
+        update_epochs=int(tcfg.get("update_epochs", 1)),
+        minibatch_size=int(tcfg.get("minibatch_size", 0)),
+        shuffle_minibatches=bool(tcfg.get("shuffle_minibatches", True)),
         loss_agg=tcfg.get("loss_agg", "mean_token"),
         max_len_for_dr_grpo=int(tcfg.get("max_len_for_dr_grpo", 256)),
+        batch_generate=bool(tcfg.get("batch_generate", False)),
+        interleave_sft_every=int(tcfg.get("interleave_sft_every", 0)),
+        interleave_sft_samples=int(tcfg.get("interleave_sft_samples", 32)),
+        interleave_sft_lr=float(tcfg.get("interleave_sft_lr", 1e-4)),
+        interleave_sft_epochs=int(tcfg.get("interleave_sft_epochs", 1)),
+        interleave_sft_batch_size=int(tcfg.get("interleave_sft_batch_size", 8)),
+        bootstrap_sft_rounds=int(tcfg.get("bootstrap_sft_rounds", 0)),
+        bootstrap_sft_samples=int(tcfg.get("bootstrap_sft_samples", 32)),
+        bootstrap_sft_lr=float(tcfg.get("bootstrap_sft_lr", 1e-4)),
+        bootstrap_sft_epochs=int(tcfg.get("bootstrap_sft_epochs", 1)),
         # v0.6: checkpoint / resume
         checkpoint_every=int(tcfg.get("checkpoint_every", 0)),
         keep_last_checkpoints=int(tcfg.get("keep_last_checkpoints", 3)),
         resume_from=tcfg.get("resume_from"),
         auto_resume=bool(tcfg.get("auto_resume", False)),
         # v0.6: KL estimator
-        kl_estimator=str(tcfg.get("kl_estimator", "k1")),
+        kl_estimator=_kl_estimator(tcfg.get("kl_estimator", "k1")),
         # v0.7: advantage whitening (PPO)
         whiten_advantage=bool(tcfg.get("whiten_advantage", False)),
         advantage_clip=float(tcfg.get("advantage_clip", 3.0)),
@@ -361,6 +466,24 @@ def _build_ppo(cfg: dict[str, Any], output_dir: str | None) -> PPOTrainerConfig:
         save_best_checkpoint=bool(tcfg.get("save_best_checkpoint", False)),
         early_stop_patience=int(tcfg.get("early_stop_patience", 0)),
         early_stop_min_delta=float(tcfg.get("early_stop_min_delta", 1e-4)),
+        target_kl=float(tcfg.get("target_kl", 0.0)),
+        adaptive_kl=bool(tcfg.get("adaptive_kl", False)),
+        adaptive_kl_horizon=float(tcfg.get("adaptive_kl_horizon", 10000.0)),
+        adaptive_kl_min=float(tcfg.get("adaptive_kl_min", 1e-4)),
+        adaptive_kl_max=float(tcfg.get("adaptive_kl_max", 10.0)),
+        normalize_reward=bool(tcfg.get("normalize_reward", False)),
+        reward_norm_clip=float(tcfg.get("reward_norm_clip", 10.0)),
+        amp_dtype=str(tcfg.get("amp_dtype", "fp32")),
+        grad_accum_steps=int(tcfg.get("grad_accum_steps", 1)),
+        vllm_rollout_model=tcfg.get("vllm_rollout_model") or None,
+        vllm_tensor_parallel_size=int(tcfg.get("vllm_tensor_parallel_size", 1)),
+        vllm_max_model_len=int(tcfg.get("vllm_max_model_len", 4096)),
+        vllm_gpu_memory_utilization=float(tcfg.get("vllm_gpu_memory_utilization", 0.90)),
+        vllm_enable_prefix_caching=bool(tcfg.get("vllm_enable_prefix_caching", True)),
+        vllm_sync_every=int(tcfg.get("vllm_sync_every", 1)),
+        distributed_strategy=str(tcfg.get("distributed_strategy", "none")),
+        fsdp_cpu_offload=bool(tcfg.get("fsdp_cpu_offload", False)),
+        flash_attention=bool(tcfg.get("flash_attention", False)),
     )
 
 
@@ -372,6 +495,9 @@ def _build_ppo(cfg: dict[str, Any], output_dir: str | None) -> PPOTrainerConfig:
 def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
     cfg = _load_yaml(config_path)
     algo = str(cfg.get("algo") or "grpo").lower()
+    backend_name = _backend_name(cfg)
+    env_cfg = cfg.get("environment", {}) or {}
+    env_type = str(env_cfg.get("type", "echo"))
     env, reward_manager = _build_env_and_rewards(cfg)
     agent_loop_factory = _make_agent_loop_factory(cfg)
 
@@ -390,10 +516,22 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
     # Resolve metrics output dir (for jsonl/tb defaults): CLI arg > tcfg > None.
     _tcfg_block = cfg.get("train_rl", {}) or {}
     _metrics_base = output_dir or _tcfg_block.get("output_dir")
+    default_run_name = (
+        Path(str(_metrics_base)).name if _metrics_base else Path(config_path).stem
+    )
     metrics_writer = build_writer_from_config(
         cfg.get("metrics"),
         output_dir=_metrics_base,
         extra=extra_sinks or None,
+        wandb_context={
+            "name": default_run_name,
+            "job_type": "train-rl",
+            "tags": [algo, backend_name, env_type],
+            "command": "train-rl",
+            "config_path": str(config_path),
+            "output_dir": str(_metrics_base) if _metrics_base else None,
+            "config": cfg,
+        },
     )
     metrics_sink = metrics_writer  # may be None if no dashboard + no metrics cfg
     if metrics_sink is None and extra_sinks:
@@ -401,29 +539,36 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
         # plain callable sink for backward compat.
         metrics_sink = extra_sinks[0]
 
+    backend: LLMBackend
+    trainer: GRPOTrainer | PPOTrainer
+    trainer_cfg: GRPOTrainerConfig | PPOTrainerConfig
     if algo == "grpo":
         backend = _build_backend(cfg, need_value_head=False)
-        tcfg = _build_grpo(cfg, output_dir)
-        tcfg.metrics_sink = metrics_sink
+        grpo_cfg = _build_grpo(cfg, output_dir)
+        grpo_cfg.metrics_sink = metrics_sink
+        trainer_cfg = grpo_cfg
         print(
-            f"[train-rl] algo=grpo backend=tiny params={backend.num_parameters()} "
-            f"iters={tcfg.n_iters} group={tcfg.group_size} lr={tcfg.lr}"
+            f"[train-rl] algo=grpo backend={backend_name} device={backend.device} "
+            f"params={backend.num_parameters()} "
+            f"iters={grpo_cfg.n_iters} group={grpo_cfg.group_size} lr={grpo_cfg.lr}"
         )
         trainer = GRPOTrainer(
-            policy=backend, env=env, reward_manager=reward_manager, cfg=tcfg,
+            policy=backend, env=env, reward_manager=reward_manager, cfg=grpo_cfg,
             agent_loop_factory=agent_loop_factory,
         )
     elif algo == "ppo":
         backend = _build_backend(cfg, need_value_head=True)
-        tcfg = _build_ppo(cfg, output_dir)
-        tcfg.metrics_sink = metrics_sink
+        ppo_cfg = _build_ppo(cfg, output_dir)
+        ppo_cfg.metrics_sink = metrics_sink
+        trainer_cfg = ppo_cfg
         print(
-            f"[train-rl] algo=ppo backend=tiny params={backend.num_parameters()} "
-            f"iters={tcfg.n_iters} group={tcfg.group_size} lr={tcfg.lr} "
-            f"vf_coef={tcfg.vf_coef} lam={tcfg.lam}"
+            f"[train-rl] algo=ppo backend={backend_name} device={backend.device} "
+            f"params={backend.num_parameters()} "
+            f"iters={ppo_cfg.n_iters} group={ppo_cfg.group_size} lr={ppo_cfg.lr} "
+            f"vf_coef={ppo_cfg.vf_coef} lam={ppo_cfg.lam}"
         )
         trainer = PPOTrainer(
-            policy=backend, env=env, reward_manager=reward_manager, cfg=tcfg,
+            policy=backend, env=env, reward_manager=reward_manager, cfg=ppo_cfg,
             agent_loop_factory=agent_loop_factory,
         )
     else:
@@ -436,33 +581,35 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
             # keep dashboard alive briefly so user can inspect; comment out
             # next line to keep serving forever.
             dashboard.stop()
+    try:
+        if trainer_cfg.output_dir is not None:
+            trainer_cfg.output_dir.mkdir(parents=True, exist_ok=True)
+            summary_path = trainer_cfg.output_dir / "train_rl_summary.json"
+            summary_payload = {
+                "algo": algo,
+                "backend": backend_name,
+                "device": str(backend.device),
+                "iters": stats.iters,
+                "last_mean_reward": stats.last_reward(),
+                "best_mean_reward": stats.best_reward(),
+                "reward_delta": stats.mean_reward_delta(),
+                "curriculum_snapshot": (
+                    env.snapshot() if hasattr(env, "snapshot") else None
+                ),
+            }
+            summary_path.write_text(
+                json.dumps(summary_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            if isinstance(metrics_writer, MultiMetricsWriter):
+                metrics_writer.update_summary(summary_payload)
+            print(f"[train-rl] summary saved to {summary_path}")
+
+        print(
+            f"[train-rl] DONE algo={algo} last_mean_reward={stats.last_reward():.4f} "
+            f"best={stats.best_reward():.4f} delta={stats.mean_reward_delta():+.4f}"
+        )
+        return 0
+    finally:
         if isinstance(metrics_writer, MultiMetricsWriter):
             metrics_writer.close()
-
-    if tcfg.output_dir is not None:
-        tcfg.output_dir.mkdir(parents=True, exist_ok=True)
-        summary_path = tcfg.output_dir / "train_rl_summary.json"
-        summary_path.write_text(
-            json.dumps(
-                {
-                    "algo": algo,
-                    "iters": stats.iters,
-                    "last_mean_reward": stats.last_reward(),
-                    "best_mean_reward": stats.best_reward(),
-                    "reward_delta": stats.mean_reward_delta(),
-                    "curriculum_snapshot": (
-                        env.snapshot() if hasattr(env, "snapshot") else None
-                    ),
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        print(f"[train-rl] summary saved to {summary_path}")
-
-    print(
-        f"[train-rl] DONE algo={algo} last_mean_reward={stats.last_reward():.4f} "
-        f"best={stats.best_reward():.4f} delta={stats.mean_reward_delta():+.4f}"
-    )
-    return 0

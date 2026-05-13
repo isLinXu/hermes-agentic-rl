@@ -26,7 +26,7 @@ loop terminates with that turn's output as the final answer.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from hermes_agentic_rl.agent_loop.base import BaseAgentLoop
@@ -35,6 +35,8 @@ from hermes_agentic_rl.mdp.state_encoder import PromptStateEncoder
 
 ToolFn = Callable[[str, str], str]
 """Signature: fn(tool_name, tool_arg) -> tool_result_text."""
+
+DEFAULT_TOOL_RESULT_TEMPLATE = "\n<tool_result>{result}</tool_result>\n"
 
 TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*([^)]*?)\s*\)\s*</tool_call>"
@@ -47,14 +49,15 @@ class MultiTurnAgentLoop(BaseAgentLoop):
     def __init__(
         self,
         backend: LLMBackend,
-        tools: dict[str, ToolFn],
+        tools: Mapping[str, ToolFn],
         *,
         encoder: PromptStateEncoder | None = None,
         max_turns: int = 3,
         max_new_tokens_per_turn: int = 16,
         temperature: float = 1.0,
         seed: int | None = None,
-        tool_result_template: str = "\n<tool_result>{result}</tool_result>\n",
+        stop_strings: list[str] | None = None,
+        tool_result_template: str = DEFAULT_TOOL_RESULT_TEMPLATE,
     ) -> None:
         self.backend = backend
         self.tools = tools
@@ -63,6 +66,7 @@ class MultiTurnAgentLoop(BaseAgentLoop):
         self.max_new_tokens_per_turn = max_new_tokens_per_turn
         self.temperature = temperature
         self.seed = seed
+        self.stop_strings = list(stop_strings or [])
         self.tool_result_template = tool_result_template
 
     async def run(self, prompt: str) -> dict[str, Any]:
@@ -86,11 +90,16 @@ class MultiTurnAgentLoop(BaseAgentLoop):
                 max_new_tokens=self.max_new_tokens_per_turn,
                 temperature=self.temperature,
                 seed=(self.seed + turn * 7919) if self.seed is not None else None,
+                stop_strings=self.stop_strings,
             )
             assistant_ids = list(gen.response_ids)
             assistant_text = self.backend.tokenizer.decode(assistant_ids)
             working_ids.extend(assistant_ids)
-            messages.append({"role": "assistant", "content": assistant_text})
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": assistant_text,
+            }
+            messages.append(assistant_message)
 
             turns.append(
                 {
@@ -111,6 +120,7 @@ class MultiTurnAgentLoop(BaseAgentLoop):
 
             tool_name, tool_arg = m.group(1), m.group(2).strip()
             tool_fn = self.tools.get(tool_name)
+            assistant_message["tool_calls"] = [{"name": tool_name, "arg": tool_arg}]
             try:
                 tool_result_text = (
                     tool_fn(tool_name, tool_arg)

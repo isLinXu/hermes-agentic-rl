@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 
 def _load_config(path: str | Path) -> dict[str, Any]:
@@ -50,6 +50,7 @@ def run_offline(config_path: str | Path) -> int:
     algo_cfg = cfg.get("algo_config", {})
     save_path = cfg.get("save_path")
 
+    trainer: Any
     if algo == "bc":
         trainer = BCTrainer(backend, buf, cfg=BCConfig(**algo_cfg))
         trainer.train()

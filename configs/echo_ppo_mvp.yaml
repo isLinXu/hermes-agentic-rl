@@ -22,6 +22,8 @@ train_rl:
   lr: 0.005
   max_new_tokens: 8
   temperature: 1.0
+  update_epochs: 4
+  minibatch_size: 8
   clip_eps: 0.2
   vf_coef: 0.5
   vf_clip_eps: 0.2

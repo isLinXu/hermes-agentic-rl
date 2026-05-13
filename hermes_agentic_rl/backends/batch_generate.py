@@ -19,6 +19,7 @@ we fall back to batched forward without cache (still faster than sequential).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import torch
@@ -51,6 +52,30 @@ def _pad_and_mask(
         padded[i, :n] = torch.tensor(p, dtype=torch.long, device=device)
         mask[i, :n] = 1
     return padded, mask
+
+
+def _model_forward(
+    model: Any,
+    *,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    use_cache: bool,
+    past_key_values: Any,
+) -> Any:
+    kwargs: dict[str, Any] = {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+    }
+    if use_cache:
+        kwargs["use_cache"] = True
+    if past_key_values is not None:
+        kwargs["past_key_values"] = past_key_values
+
+    try:
+        return model(**kwargs)
+    except TypeError:
+        logits = model(input_ids)
+        return SimpleNamespace(logits=logits, past_key_values=None)
 
 
 @torch.no_grad()
@@ -94,7 +119,8 @@ def batch_generate(
 
     # KV-cache
     past_key_values = None
-    use_cache = cfg.use_kv_cache and hasattr(model.config, "use_cache")
+    model_config = getattr(model, "config", None)
+    use_cache = cfg.use_kv_cache and model_config is not None and hasattr(model_config, "use_cache")
 
     for _step in range(cfg.max_new_tokens):
         if all(finished):
@@ -102,16 +128,19 @@ def batch_generate(
 
         if use_cache and past_key_values is not None:
             # Only feed the last token
-            out = model(
+            out = _model_forward(
+                model,
                 input_ids=input_ids[:, -1:],
                 attention_mask=attention_mask,
                 past_key_values=past_key_values,
                 use_cache=True,
             )
         else:
-            out = model(
+            out = _model_forward(
+                model,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
+                past_key_values=None,
                 use_cache=use_cache,
             )
 
@@ -122,14 +151,16 @@ def batch_generate(
         # Sample next tokens
         if cfg.temperature <= 0:
             next_ids = logits.argmax(dim=-1)  # [B]
+            policy_logits = logits
         else:
             logits_scaled = logits / max(cfg.temperature, 1e-6)
             if cfg.top_p < 1.0:
                 logits_scaled = _top_p_filter(logits_scaled, cfg.top_p)
             probs = torch.softmax(logits_scaled, dim=-1)
             next_ids = torch.multinomial(probs, 1).squeeze(-1)  # [B]
+            policy_logits = logits_scaled
 
-        logp_all = torch.log_softmax(logits, dim=-1)
+        logp_all = torch.log_softmax(policy_logits, dim=-1)
 
         for i in range(B):
             if finished[i]:

@@ -257,7 +257,7 @@ class Run:
         if model_checkpoint is None:
             available_checkpoints = self.get_available_checkpoints()
             model_checkpoint = findfirst(
-                lambda x: x.stem.startswith("best"), available_checkpoints
+                def def def lambda x: x.stem.startswith("best"), available_checkpoints
             )
         return model_checkpoint
 
@@ -300,7 +300,7 @@ class Run:
                     )
                 else:
                     resume_path = findfirst(
-                        lambda x: x.stem == "last", available_checkpoints
+                        def def def lambda x: x.stem == "last", available_checkpoints
                     )
             self._config[self.engine_key]["resume"] = resume_path
             self._generate_configs()

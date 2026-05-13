@@ -1,32 +1,19 @@
-"""Pluggable metrics writers for OnPolicyTrainer.
+"""Pluggable metrics writers for on-policy and offline trainers.
 
-A writer receives a flat dict of metrics per iteration (via
-``metrics_sink``) and fans them out to one or more backends. This module
-provides four concrete implementations, each with graceful-degradation:
+A writer receives a metrics record and fans it out to one or more
+destinations. This module provides four concrete implementations, each with
+graceful degradation:
 
-- ``JsonlMetricsWriter``: zero-dep, appends one JSON line per iter.
-- ``StdoutMetricsWriter``: prints to stdout (same format as trainer's
-  default logger). Useful for running a headless sink alongside the
-  dashboard.
+- ``JsonlMetricsWriter``: zero-dep, appends one JSON line per call.
+- ``StdoutMetricsWriter``: prints the usual training summary line.
 - ``TensorBoardMetricsWriter``: uses ``torch.utils.tensorboard.SummaryWriter``.
-  Silently becomes a no-op if TB isn't importable.
-- ``WandbMetricsWriter``: uses ``wandb.log`` if wandb is installed and
-  ``wandb.init`` has been called; no-op otherwise.
+  Silently becomes a no-op if tensorboard is unavailable.
+- ``WandbMetricsWriter``: auto-initializes a W&B run when configured, logs all
+  scalar metrics (including nested numeric sub-fields), and becomes a no-op if
+  wandb is unavailable or init fails.
 
-``MultiMetricsWriter`` composes N writers with fail-safe dispatch —
-one writer crashing doesn't break the trainer.
-
-Usage::
-
-    writer = MultiMetricsWriter([
-        JsonlMetricsWriter(output_dir / "metrics.jsonl"),
-        StdoutMetricsWriter(),
-        TensorBoardMetricsWriter(output_dir / "tb"),
-    ])
-    trainer_cfg.metrics_sink = writer
-
-All writers are callable (``writer(record)``) to match the
-``Callable[[dict[str, Any]], None]`` contract on ``OnPolicyTrainerConfig``.
+``MultiMetricsWriter`` composes N writers with fail-safe dispatch, so one
+metrics backend crashing never breaks training.
 """
 
 from __future__ import annotations
@@ -47,49 +34,50 @@ class JsonlMetricsWriter:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Touch the file so an empty run produces a visible artifact.
         if not self.path.exists():
             self.path.touch()
 
     def __call__(self, record: dict[str, Any]) -> None:
         try:
             serializable = _to_json_safe(record)
-            with self.path.open("a", encoding="utf-8") as h:
-                h.write(json.dumps(serializable, ensure_ascii=False) + "\n")
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(serializable, ensure_ascii=False) + "\n")
         except Exception:
-            # never fail training because of metric IO
             pass
 
-    def close(self) -> None:  # symmetry with TB/W&B writers
+    def close(self) -> None:
         pass
 
 
 class StdoutMetricsWriter:
-    """Format-and-print a record. Mirrors trainer default logger."""
+    """Format-and-print a record. Mirrors the trainer default logger."""
 
     _KEYS = (
-        "iter", "algo", "mean_reward", "loss", "policy_loss",
-        "value_loss", "mean_advantage", "kl", "clip_frac", "n_updated",
+        "iter",
+        "algo",
+        "mean_reward",
+        "loss",
+        "policy_loss",
+        "value_loss",
+        "mean_advantage",
+        "kl",
+        "clip_frac",
+        "n_updated",
     )
 
     def __call__(self, record: dict[str, Any]) -> None:
         parts: list[str] = []
-        for k in self._KEYS:
-            v = record.get(k)
-            if isinstance(v, float):
-                parts.append(f"{k}={v:.4f}")
-            elif v is not None:
-                parts.append(f"{k}={v}")
+        for key in self._KEYS:
+            value = record.get(key)
+            if isinstance(value, float):
+                parts.append(f"{key}={value:.4f}")
+            elif value is not None:
+                parts.append(f"{key}={value}")
         print("[metrics] " + " ".join(parts))
 
 
 class TensorBoardMetricsWriter:
-    """Use ``torch.utils.tensorboard.SummaryWriter`` if available.
-
-    Gracefully becomes a no-op if tensorboard isn't installed. The iter
-    step is taken from ``record['iter']`` if present, else a monotonic
-    internal counter.
-    """
+    """Use ``torch.utils.tensorboard.SummaryWriter`` if available."""
 
     def __init__(self, log_dir: str | Path) -> None:
         self._step = 0
@@ -100,7 +88,7 @@ class TensorBoardMetricsWriter:
             Path(log_dir).mkdir(parents=True, exist_ok=True)
             self._sw = SummaryWriter(log_dir=str(log_dir))
         except Exception:
-            self._sw = None  # disable silently
+            self._sw = None
 
     def __call__(self, record: dict[str, Any]) -> None:
         if self._sw is None:
@@ -108,65 +96,98 @@ class TensorBoardMetricsWriter:
         step = int(record.get("iter", self._step))
         self._step = step + 1
         try:
-            for k, v in record.items():
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    self._sw.add_scalar(f"train/{k}", float(v), step)
+            for key, value in record.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    self._sw.add_scalar(f"train/{key}", float(value), step)
         except Exception:
             pass
 
     def close(self) -> None:
-        if self._sw is not None:
-            try:
-                self._sw.close()
-            except Exception:
-                pass
+        if self._sw is None:
+            return
+        try:
+            self._sw.close()
+        except Exception:
+            pass
 
 
 class WandbMetricsWriter:
-    """Forward each record to ``wandb.log`` if wandb is active.
+    """Forward each record to W&B, auto-initializing when configured."""
 
-    Assumes the caller has already called ``wandb.init()`` (we do NOT init
-    here — that's a user-facing decision). If wandb is missing or no run
-    is active, this is a no-op.
-    """
-
-    def __init__(self, *, prefix: str = "train") -> None:
+    def __init__(
+        self,
+        *,
+        prefix: str = "train",
+        init_kwargs: dict[str, Any] | None = None,
+        finish_on_close: bool = True,
+    ) -> None:
         self._prefix = prefix.rstrip("/")
+        self._finish_on_close = finish_on_close
         self._wandb: Any = None
+        self._run: Any = None
+        self._owns_run = False
         try:
             import wandb  # type: ignore
 
-            # only enable if a run is already active
-            if getattr(wandb, "run", None) is not None:
-                self._wandb = wandb
+            self._wandb = wandb
+            run = getattr(wandb, "run", None)
+            if run is None and init_kwargs is not None:
+                self._run = wandb.init(**init_kwargs)
+                self._owns_run = self._run is not None
+            else:
+                self._run = run
+            if self._run is not None:
+                try:
+                    wandb.define_metric(f"{self._prefix}/iter")
+                    wandb.define_metric(
+                        f"{self._prefix}/*",
+                        step_metric=f"{self._prefix}/iter",
+                    )
+                except Exception:
+                    pass
         except Exception:
             self._wandb = None
+            self._run = None
 
     def __call__(self, record: dict[str, Any]) -> None:
-        if self._wandb is None:
+        if self._wandb is None or self._run is None:
             return
         try:
-            step = int(record.get("iter", 0))
-            payload = {
-                f"{self._prefix}/{k}": v
-                for k, v in record.items()
-                if isinstance(v, (int, float)) and not isinstance(v, bool)
-            }
-            self._wandb.log(payload, step=step)
+            step_value = record.get("iter", 0)
+            if isinstance(step_value, bool) or step_value is None:
+                step_value = 0
+            step = int(step_value)
+            wandb_step = max(0, step)
+            payload = _flatten_numeric_fields(record, prefix=self._prefix)
+            if f"{self._prefix}/iter" not in payload:
+                payload[f"{self._prefix}/iter"] = step
+            self._wandb.log(payload, step=wandb_step)
+        except Exception:
+            pass
+
+    def update_summary(self, summary: dict[str, Any]) -> None:
+        if self._run is None:
+            return
+        try:
+            flat = _flatten_numeric_fields(summary)
+            for key, value in flat.items():
+                self._run.summary[key] = value
         except Exception:
             pass
 
     def close(self) -> None:
-        pass
+        if self._wandb is None or self._run is None:
+            return
+        if not self._finish_on_close or not self._owns_run:
+            return
+        try:
+            self._wandb.finish()
+        except Exception:
+            pass
 
 
 class MultiMetricsWriter:
-    """Dispatch each record to N writers, isolating failures.
-
-    Also forwards a pre-existing ``Callable`` (e.g. the live dashboard's
-    ``record`` method), so users can chain the new writers alongside
-    legacy sinks.
-    """
+    """Dispatch each record to N writers, isolating failures."""
 
     def __init__(
         self,
@@ -178,35 +199,104 @@ class MultiMetricsWriter:
         self._writers.append(writer)
 
     def __call__(self, record: dict[str, Any]) -> None:
-        for w in self._writers:
+        for writer in self._writers:
             try:
-                w(record)
+                writer(record)
             except Exception:
-                # metrics must never break training
                 pass
 
     def close(self) -> None:
-        for w in self._writers:
-            close = getattr(w, "close", None)
+        for writer in self._writers:
+            close = getattr(writer, "close", None)
             if callable(close):
                 try:
                     close()
                 except Exception:
                     pass
 
-
-# ---------------------------------------------------------------------------
+    def update_summary(self, summary: dict[str, Any]) -> None:
+        for writer in self._writers:
+            update_summary = getattr(writer, "update_summary", None)
+            if callable(update_summary):
+                try:
+                    update_summary(summary)
+                except Exception:
+                    pass
 
 
 def _to_json_safe(obj: Any) -> Any:
-    """Best-effort: convert an arbitrary record to JSON-serializable form."""
+    """Best-effort: convert an arbitrary object to JSON-serializable form."""
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
     if isinstance(obj, dict):
-        return {str(k): _to_json_safe(v) for k, v in obj.items()}
+        return {str(key): _to_json_safe(value) for key, value in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [_to_json_safe(v) for v in obj]
+        return [_to_json_safe(value) for value in obj]
+    if isinstance(obj, Path):
+        return str(obj)
     return repr(obj)
+
+
+def _flatten_numeric_fields(obj: Any, *, prefix: str = "") -> dict[str, Any]:
+    """Flatten nested dicts, keeping only numeric/bool scalar leaves."""
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for key, value in obj.items():
+            key_str = str(key)
+            child_prefix = f"{prefix}/{key_str}" if prefix else key_str
+            out.update(_flatten_numeric_fields(value, prefix=child_prefix))
+        return out
+    if isinstance(obj, bool):
+        return {prefix: obj} if prefix else {}
+    if isinstance(obj, (int, float)):
+        return {prefix: float(obj)} if prefix else {}
+    return {}
+
+
+def _build_wandb_init_kwargs(
+    wb_cfg: dict[str, Any],
+    *,
+    output_dir: str | Path | None = None,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Translate YAML config + runtime metadata into ``wandb.init`` kwargs."""
+    init_kwargs = {
+        key: value
+        for key, value in wb_cfg.items()
+        if key not in {"enabled", "prefix", "finish_on_close", "config"}
+    }
+
+    if output_dir is not None and "dir" not in init_kwargs:
+        init_kwargs["dir"] = str(Path(output_dir) / "wandb")
+    if "project" not in init_kwargs:
+        init_kwargs["project"] = "hermes-agentic-rl"
+
+    config_payload: dict[str, Any] = {}
+    if context:
+        for key, value in context.items():
+            if key == "config" and isinstance(value, dict):
+                config_payload.update(_to_json_safe(value))
+                continue
+            if key in {"name", "group", "job_type", "entity", "mode", "notes"}:
+                if key not in init_kwargs and value is not None:
+                    init_kwargs[key] = value
+                continue
+            if key == "tags":
+                if "tags" not in init_kwargs and value is not None:
+                    init_kwargs["tags"] = list(value)
+                continue
+            config_payload[key] = _to_json_safe(value)
+
+    wb_config = wb_cfg.get("config")
+    if isinstance(wb_config, dict):
+        config_payload.update(_to_json_safe(wb_config))
+    elif wb_config is not None:
+        config_payload["config"] = _to_json_safe(wb_config)
+
+    if config_payload:
+        init_kwargs["config"] = config_payload
+
+    return init_kwargs
 
 
 def build_writer_from_config(
@@ -214,6 +304,7 @@ def build_writer_from_config(
     *,
     output_dir: str | Path | None = None,
     extra: list[Callable[[dict[str, Any]], None]] | None = None,
+    wandb_context: dict[str, Any] | None = None,
 ) -> MultiMetricsWriter | None:
     """Build a ``MultiMetricsWriter`` from a small YAML-friendly dict.
 
@@ -222,7 +313,14 @@ def build_writer_from_config(
         jsonl: <path>     # or true to default to <output_dir>/metrics.jsonl
         stdout: true
         tensorboard: <dir>  # or true to default to <output_dir>/tb
-        wandb: true | {prefix: "..."}
+        wandb: true | {
+          prefix: train,
+          project: hermes-agentic-rl,
+          name: my-run,
+          group: exp-a,
+          mode: online | offline | disabled,
+          tags: [grpo, echo],
+        }
 
     Returns None if cfg is falsy and no extras are provided.
     """
@@ -254,10 +352,23 @@ def build_writer_from_config(
 
     wb = cfg.get("wandb")
     if wb:
-        prefix = "train"
-        if isinstance(wb, dict):
-            prefix = str(wb.get("prefix", prefix))
-        writers.append(WandbMetricsWriter(prefix=prefix))
+        if isinstance(wb, dict) and str(wb.get("mode", "")).lower() == "disabled":
+            wb = None
+        if isinstance(wb, dict) and not bool(wb.get("enabled", True)):
+            wb = None
+        if wb:
+            wb_cfg = dict(wb) if isinstance(wb, dict) else {}
+            writers.append(
+                WandbMetricsWriter(
+                    prefix=str(wb_cfg.get("prefix", "train")),
+                    init_kwargs=_build_wandb_init_kwargs(
+                        wb_cfg,
+                        output_dir=output_dir,
+                        context=wandb_context,
+                    ),
+                    finish_on_close=bool(wb_cfg.get("finish_on_close", True)),
+                )
+            )
 
     if extra:
         writers.extend(extra)

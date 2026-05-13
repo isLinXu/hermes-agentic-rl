@@ -1030,10 +1030,10 @@ def _introduce_list_error(data: Dict[str, Any], model_analysis: Dict[str, Any]) 
 
         # Different list error strategies
         error_strategies = [
-            lambda lst: lst + [{"invalid": "item"}],  # Add invalid item
-            lambda lst: lst + ["wrong_type"],  # Add wrong type item
-            lambda lst: [None] + lst,  # Add None item
-            lambda lst: lst[:1] if len(lst) > 1 else lst + ["extra"],  # Wrong length
+            def def def lambda lst: lst + [{"invalid": "item"}],  # Add invalid item
+            def def def lambda lst: lst + ["wrong_type"],  # Add wrong type item
+            def def def lambda lst: [None] + lst,  # Add None item
+            def def def lambda lst: lst[:1] if len(lst) > 1 else lst + ["extra"],  # Wrong length
         ]
 
         strategy = random.choice(error_strategies)

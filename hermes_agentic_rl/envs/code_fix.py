@@ -17,7 +17,7 @@ Usage (standalone)::
     item = await env.get_next_item()
     prompt = env.format_prompt(item)
     # ... generate response ...
-    reward = env.compute_reward(item, response_text)
+    reward = env.score_response(item, response_text)
 """
 
 from __future__ import annotations
@@ -31,8 +31,9 @@ import textwrap
 from dataclasses import dataclass, field
 from typing import Any
 
-from hermes_agentic_rl.core.reward_manager import BaseReward, RewardResult, RewardSummary
+from hermes_agentic_rl.core.types import RewardResult, RewardSummary, Trajectory
 from hermes_agentic_rl.envs.base_env import BaseEnv
+from hermes_agentic_rl.rewards.base import BaseReward
 
 # ---------------------------------------------------------------------------
 # Bug database (curriculum levels 0-4)
@@ -315,6 +316,10 @@ class CodeFixEnv(BaseEnv):
         self._max_level = max_level
         self._items: list[dict[str, Any]] = self._generate_items()
 
+    async def setup(self) -> None:
+        """Reset the deterministic item stream for a fresh training run."""
+        self._items = self._generate_items()
+
     def _generate_items(self) -> list[dict[str, Any]]:
         items = []
         available = [b for b in self._bugs if b.level <= self._max_level]
@@ -353,59 +358,33 @@ class CodeFixEnv(BaseEnv):
         <code>
         """).strip()
 
-    def compute_reward(self, item: dict[str, Any], response: str) -> float:
+    def score_response(self, item: dict[str, Any], response: str) -> float:
         """Compute reward: test_pass_ratio (0-1) + format_bonus (0-0.2)."""
-        # Extract code from response
-        import re
+        score, _reason, _metadata = _score_codefix_response(item, response)
+        return score
 
-        m = re.search(r"<code>(.*?)</code>", response, re.DOTALL | re.IGNORECASE)
-        if not m:
-            # Try without tags
-            m = re.search(r"```(?:python)?\s*(.*?)```", response, re.DOTALL)
-        if not m:
-            # No code found: partial credit for mentioning expected keywords
-            kw_bonus = sum(
-                0.1 for kw in item.get("expected_keywords", [])
-                if kw.lower() in response.lower()
+    async def compute_reward(
+        self,
+        item: dict[str, Any],
+        trajectory: Trajectory,
+        tool_context: Any,
+    ) -> list[RewardResult]:
+        del tool_context
+        text = str(trajectory.final_output or "")
+        score, reason, metadata = _score_codefix_response(item, text)
+        return [
+            RewardResult(
+                name="codefix_reward",
+                score=score,
+                reason=reason,
+                metadata=metadata,
             )
-            return min(kw_bonus, 0.3)
-
-        fixed_code = m.group(1).strip()
-        if not fixed_code:
-            return 0.1  # empty code block
-
-        # Sandbox execution
-        all_pass, error = _run_tests_in_sandbox(
-            fixed_code, item["test_code"], timeout=5.0
-        )
-
-        if all_pass:
-            return 1.0
-
-        # Partial credit: if code compiles and runs (some tests may pass)
-        # Count how many test assertions pass by running each separately
-        test_lines = [
-            line.strip()
-            for line in item["test_code"].strip().split("\n")
-            if line.strip().startswith("assert")
         ]
-        if not test_lines:
-            return 0.2  # no tests defined
-
-        passed = 0
-        for test_line in test_lines:
-            all_pass_single, _ = _run_tests_in_sandbox(
-                fixed_code, test_line, timeout=3.0
-            )
-            if all_pass_single:
-                passed += 1
-
-        return passed / max(len(test_lines), 1)
 
     def compute_sequence_reward(
         self, item: dict[str, Any], sequence: str
     ) -> dict[str, Any]:
-        reward = self.compute_reward(item, sequence)
+        reward = self.score_response(item, sequence)
         return {
             "reward": reward,
             "passed": reward >= 1.0,
@@ -420,6 +399,8 @@ class CodeFixEnv(BaseEnv):
 
 class CodeFixReward(BaseReward):
     """Reward component for code-fix tasks."""
+
+    name = "codefix_reward"
 
     def __init__(self, weight: float = 1.0):
         self.weight = weight
@@ -440,14 +421,20 @@ class CodeFixReward(BaseReward):
         else:
             text = str(trajectory)
 
-        score = _compute_codefix_score(item, text)
+        score, reason, metadata = _score_codefix_response(item, text)
         return RewardResult(
-            score=score * self.weight,
-            components={"codefix_score": score},
+            name=self.name,
+            score=score,
+            reason=reason,
+            weight=self.weight,
+            metadata=metadata,
         )
 
 
-def _compute_codefix_score(item: dict[str, Any], response: str) -> float:
+def _score_codefix_response(
+    item: dict[str, Any],
+    response: str,
+) -> tuple[float, str, dict[str, Any]]:
     """Compute code-fix score from response text."""
     import re
 
@@ -455,11 +442,48 @@ def _compute_codefix_score(item: dict[str, Any], response: str) -> float:
     if not m:
         m = re.search(r"```(?:python)?\s*(.*?)```", response, re.DOTALL)
     if not m:
-        return 0.0
+        kw_bonus = sum(
+            0.1 for kw in item.get("expected_keywords", [])
+            if kw.lower() in response.lower()
+        )
+        score = min(kw_bonus, 0.3)
+        return score, "no code block found", {"keyword_bonus": score}
 
     fixed_code = m.group(1).strip()
-    all_pass, _ = _run_tests_in_sandbox(fixed_code, item["test_code"], timeout=5.0)
-    return 1.0 if all_pass else 0.0
+    if not fixed_code:
+        return 0.1, "empty code block", {"code_chars": 0}
+
+    all_pass, error = _run_tests_in_sandbox(fixed_code, item["test_code"], timeout=5.0)
+    if all_pass:
+        return 1.0, "all tests passed", {"all_pass": True, "code_chars": len(fixed_code)}
+
+    test_lines = [
+        line.strip()
+        for line in str(item.get("test_code", "")).strip().split("\n")
+        if line.strip().startswith("assert")
+    ]
+    if not test_lines:
+        return 0.2, "no tests defined", {"all_pass": False, "error": error}
+
+    passed = 0
+    for test_line in test_lines:
+        all_pass_single, _ = _run_tests_in_sandbox(
+            fixed_code, test_line, timeout=3.0
+        )
+        if all_pass_single:
+            passed += 1
+    score = passed / max(len(test_lines), 1)
+    return (
+        score,
+        f"partial tests passed {passed}/{len(test_lines)}",
+        {
+            "all_pass": False,
+            "passed_tests": passed,
+            "total_tests": len(test_lines),
+            "error": error,
+            "code_chars": len(fixed_code),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -482,8 +506,10 @@ class CodeFixRewardSummary(RewardSummary):
             text = trajectory.final_output
         else:
             text = str(trajectory)
-        score = _compute_codefix_score(item, text)
+        score, reason, metadata = _score_codefix_response(item, text)
         return RewardResult(
+            name="codefix_reward",
             score=score,
-            components={"codefix_score": score},
+            reason=reason,
+            metadata=metadata,
         )

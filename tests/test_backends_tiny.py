@@ -6,6 +6,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from hermes_agentic_rl.backends.batch_generate import BatchGenerateConfig, batch_generate
 from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 
 
@@ -23,14 +24,25 @@ def test_tokenizer_roundtrip():
     assert "hello world" in text
 
 
+def test_tokenizer_supports_tool_tags():
+    b = _fresh()
+    tok = b.tokenizer
+    text = "<tool_call>calc(1 + 2)</tool_call>"
+    ids = tok.encode(text)
+    assert tok.decode(ids) == text
+
+
 def test_generate_returns_sensible_output():
     b = _fresh()
     prompt = b.tokenizer.encode("say hi")
-    out = b.generate(prompt, max_new_tokens=5, temperature=1.0, seed=42)
+    out = b.generate(prompt, max_new_tokens=5, temperature=0.7, seed=42)
     assert len(out.response_ids) <= 5
     assert len(out.logprobs) == len(out.response_ids)
     # logprobs must be <= 0
     assert all(lp <= 0.0 for lp in out.logprobs)
+    scored = b.score(prompt, out.response_ids, temperature=0.7)
+    assert scored.shape == (len(out.response_ids),)
+    assert torch.allclose(scored.detach(), torch.tensor(out.logprobs), atol=1e-5)
 
 
 def test_greedy_is_deterministic():
@@ -61,3 +73,32 @@ def test_clone_frozen_has_no_grad():
     # forward pass still works (no-grad path)
     out = ref.generate(b.tokenizer.encode("x"), max_new_tokens=3, temperature=0.0)
     assert len(out.response_ids) <= 3
+
+
+def test_batch_generate_supports_tiny_backend():
+    b = _fresh()
+    prompts = [
+        b.tokenizer.encode("alpha"),
+        b.tokenizer.encode("gamma"),
+    ]
+    outs = batch_generate(
+        b.model,
+        b.tokenizer,
+        prompts,
+        BatchGenerateConfig(max_new_tokens=4, temperature=0.0, pad_token_id=b.tokenizer.pad_id),
+    )
+    assert len(outs) == 2
+    assert all(len(out.response_ids) <= 4 for out in outs)
+    assert all(len(out.response_ids) == len(out.logprobs) for out in outs)
+    batch_logp, mask = b.score_batch(
+        prompts,
+        [out.response_ids for out in outs],
+        temperature=0.0,
+    )
+    for i, out in enumerate(outs):
+        assert mask[i].sum().item() == len(out.response_ids)
+        assert torch.allclose(
+            batch_logp[i, : len(out.response_ids)].detach(),
+            torch.tensor(out.logprobs),
+            atol=1e-5,
+        )

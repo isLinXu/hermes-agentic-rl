@@ -40,11 +40,11 @@ _DEFAULT_CHARS = (
     "abcdefghijklmnopqrstuvwxyz"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     "0123456789"
-    " .,!?:;'\"()[]{}/_-+=\n\t"
+    " .,!?:;'\"()[]{}<>/_-+=\n\t"
 )
 
 
-class TinyTokenizer(TokenizerProtocol):
+class TinyTokenizer:
     """Char-level tokenizer with a few special ids."""
 
     def __init__(self, extra_chars: str = "") -> None:
@@ -87,43 +87,72 @@ class TinyTokenizer(TokenizerProtocol):
         return "".join(out)
 
 
+def _response_matches_stop(
+    tokenizer: TokenizerProtocol,
+    response_ids: list[int],
+    stop_strings: list[str] | None,
+) -> bool:
+    if not stop_strings:
+        return False
+    text = tokenizer.decode(response_ids)
+    return any(stop and text.endswith(stop) for stop in stop_strings)
+
+
+def _logprob_logits(logits: torch.Tensor, temperature: float) -> torch.Tensor:
+    """Return logits for the policy distribution whose logprobs we record.
+
+    Rollouts sample from ``softmax(logits / temperature)`` when temperature is
+    positive, so PPO/GRPO scoring must use the same distribution for its ratio.
+    Greedy generation (temperature <= 0) keeps the untempered model logits.
+    """
+    if temperature <= 0:
+        return logits
+    return logits / max(float(temperature), 1e-6)
+
+
 # ----------------------------------------------------------------------------
 # Tiny Transformer
 # ----------------------------------------------------------------------------
 
 
 class _CausalSelfAttention(nn.Module):
-    def __init__(self, dim: int, n_heads: int) -> None:
+    def __init__(self, dim: int, n_heads: int, use_sdpa: bool = False) -> None:
         super().__init__()
         assert dim % n_heads == 0
         self.n_heads = n_heads
         self.head_dim = dim // n_heads
         self.qkv = nn.Linear(dim, 3 * dim, bias=False)
         self.proj = nn.Linear(dim, dim, bias=False)
+        self._use_sdpa = use_sdpa
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, T, D]
         B, T, D = x.shape
         qkv = self.qkv(x)
         q, k, v = qkv.chunk(3, dim=-1)
         q = q.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
-        att = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        mask = torch.triu(
-            torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=1
-        )
-        att = att.masked_fill(mask, float("-inf"))
-        att = torch.softmax(att, dim=-1)
-        out = (att @ v).transpose(1, 2).contiguous().view(B, T, D)
+        if self._use_sdpa:
+            out = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, is_causal=True,
+            )
+        else:
+            att = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+            causal_mask = torch.triu(
+                torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=1
+            )
+            att = att.masked_fill(causal_mask, float("-inf"))
+            att = torch.softmax(att, dim=-1)
+            out = att @ v
+        out = out.transpose(1, 2).contiguous().view(B, T, D)
         return self.proj(out)
 
 
 class _Block(nn.Module):
-    def __init__(self, dim: int, n_heads: int, ff_mult: int = 2) -> None:
+    def __init__(self, dim: int, n_heads: int, ff_mult: int = 2, use_sdpa: bool = False) -> None:
         super().__init__()
         self.ln1 = nn.LayerNorm(dim)
-        self.attn = _CausalSelfAttention(dim, n_heads)
+        self.attn = _CausalSelfAttention(dim, n_heads, use_sdpa=use_sdpa)
         self.ln2 = nn.LayerNorm(dim)
         self.ff = nn.Sequential(
             nn.Linear(dim, ff_mult * dim),
@@ -146,13 +175,16 @@ class TinyCausalLM(nn.Module):
         n_layers: int = 2,
         max_len: int = 256,
         with_value_head: bool = False,
+        use_sdpa: bool = False,
     ) -> None:
         super().__init__()
         self.dim = dim
         self.max_len = max_len
         self.tok_emb = nn.Embedding(vocab_size, dim)
         self.pos_emb = nn.Embedding(max_len, dim)
-        self.blocks = nn.ModuleList([_Block(dim, n_heads) for _ in range(n_layers)])
+        self.blocks = nn.ModuleList(
+            [_Block(dim, n_heads, use_sdpa=use_sdpa) for _ in range(n_layers)]
+        )
         self.ln_f = nn.LayerNorm(dim)
         self.head = nn.Linear(dim, vocab_size, bias=False)
         self.value_head: nn.Linear | None = nn.Linear(dim, 1, bias=True) if with_value_head else None
@@ -198,6 +230,7 @@ class TinyBackendConfig:
     extra_chars: str = ""
     tokenizer: TinyTokenizer | None = field(default=None)
     with_value_head: bool = False
+    use_sdpa: bool = False
 
 
 class TinyCausalLMBackend(LLMBackend):
@@ -221,6 +254,7 @@ class TinyCausalLMBackend(LLMBackend):
             n_layers=self.cfg.n_layers,
             max_len=self.cfg.max_len,
             with_value_head=self.cfg.with_value_head,
+            use_sdpa=self.cfg.use_sdpa,
         ).to(self.cfg.device)
         self._lora_adapter: Any | None = None
 
@@ -238,13 +272,13 @@ class TinyCausalLMBackend(LLMBackend):
         max_new_tokens: int,
         temperature: float = 1.0,
         seed: int | None = None,
+        stop_strings: list[str] | None = None,
     ) -> GenerationOutput:
         self.model.eval()
-        gen = torch.Generator(device=self.cfg.device)
         if seed is not None:
-            gen.manual_seed(int(seed))
-        else:
-            gen.seed()
+            # MPS does not reliably support device-local generators. The global
+            # RNG works across CPU/MPS and keeps seeded rollouts reproducible.
+            torch.manual_seed(int(seed))
 
         ids = list(prompt_ids)
         response: list[int] = []
@@ -260,10 +294,10 @@ class TinyCausalLMBackend(LLMBackend):
                 next_id = int(torch.argmax(logits, dim=-1).item())
                 logp = float(torch.log_softmax(logits, dim=-1)[0, next_id].detach().item())
             else:
-                logits = logits / max(temperature, 1e-6)
-                logp_dist = torch.log_softmax(logits, dim=-1)
-                prob = torch.softmax(logits, dim=-1)
-                next_id = int(torch.multinomial(prob, 1, generator=gen).item())
+                policy_logits = _logprob_logits(logits, temperature)
+                logp_dist = torch.log_softmax(policy_logits, dim=-1)
+                prob = torch.softmax(policy_logits, dim=-1)
+                next_id = int(torch.multinomial(prob, 1).item())
                 logp = float(logp_dist[0, next_id].detach().item())
             ids.append(next_id)
             response.append(next_id)
@@ -271,21 +305,180 @@ class TinyCausalLMBackend(LLMBackend):
             if next_id == self.tokenizer.eos_id:
                 finished = True
                 break
+            if _response_matches_stop(self.tokenizer, response, stop_strings):
+                finished = True
+                break
 
         return GenerationOutput(
             response_ids=response,
             logprobs=logprobs,
             finished=finished,
-            metadata={"temperature": temperature, "seed": seed},
+            metadata={"temperature": temperature, "seed": seed, "stop_strings": stop_strings or []},
         )
 
-    def score(self, prompt_ids: list[int], response_ids: list[int]) -> torch.Tensor:
+    def score(
+        self,
+        prompt_ids: list[int],
+        response_ids: list[int],
+        temperature: float = 1.0,
+    ) -> torch.Tensor:
         """Differentiable per-response-token log-prob tensor. Shape: [R]."""
-        logp, _ent, _val = self._score_core(prompt_ids, response_ids, need_value=False, need_entropy=False)
+        logp, _ent, _val = self._score_core(
+            prompt_ids,
+            response_ids,
+            need_value=False,
+            need_entropy=False,
+            temperature=temperature,
+        )
         return logp
 
+    def score_batch(
+        self,
+        prompt_ids_list: list[list[int]],
+        response_ids_list: list[list[int]],
+        temperature: float = 1.0,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """True batched score.
+
+        Pads prompts (LEFT-padded to a common max prompt length) and
+        responses (RIGHT-padded to a common max response length), runs a
+        single forward pass, gathers per-token logprobs, and returns
+        ``(logprobs [B, T_max], mask [B, T_max])``.
+
+        Gradient flows through the returned tensor. Dropout etc. follow
+        ``torch.is_grad_enabled()``.
+        """
+        logp, _ent, _val, mask = self._score_core_batch(
+            prompt_ids_list,
+            response_ids_list,
+            need_value=False,
+            need_entropy=False,
+            temperature=temperature,
+        )
+        return logp, mask
+
+    def score_with_value_batch(
+        self,
+        prompt_ids_list: list[list[int]],
+        response_ids_list: list[list[int]],
+        temperature: float = 1.0,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Batched (logp, entropy, value, mask)."""
+        if self.model.value_head is None:
+            raise RuntimeError(
+                "score_with_value_batch() requires with_value_head=True; "
+                "rebuild backend with TinyBackendConfig(with_value_head=True)"
+            )
+        return self._score_core_batch(
+            prompt_ids_list,
+            response_ids_list,
+            need_value=True,
+            need_entropy=True,
+            temperature=temperature,
+        )
+
+    def _score_core_batch(
+        self,
+        prompt_ids_list: list[list[int]],
+        response_ids_list: list[list[int]],
+        *,
+        need_value: bool,
+        need_entropy: bool,
+        temperature: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        device = self.cfg.device
+        self.model.train(torch.is_grad_enabled())
+        B = len(prompt_ids_list)
+        assert len(response_ids_list) == B, "prompt/response batch size mismatch"
+        if B == 0:
+            empty = torch.zeros(0, 0, device=device)
+            return empty, empty, empty, torch.zeros(0, 0, dtype=torch.bool, device=device)
+
+        # Truncate each (prompt, response) from the left if it overflows max_len.
+        fulls: list[list[int]] = []
+        R_list: list[int] = []
+        for p_ids, r_ids in zip(prompt_ids_list, response_ids_list, strict=True):
+            full = list(p_ids) + list(r_ids)
+            if len(full) > self.cfg.max_len:
+                drop = len(full) - self.cfg.max_len
+                full = full[drop:]
+            fulls.append(full)
+            R_list.append(min(len(r_ids), max(0, len(full) - 1)))
+
+        # We need at least 2 tokens for teacher-forcing (input + target).
+        if all(R == 0 for R in R_list) or all(len(f) < 2 for f in fulls):
+            empty = torch.zeros(B, 0, device=device)
+            return empty, empty, empty, torch.zeros(B, 0, dtype=torch.bool, device=device)
+
+        # Sequence going into the model is full[:-1] (length L-1); targets are full[1:].
+        # Response tokens occupy the LAST R positions of the target sequence.
+        L_max = max(len(f) for f in fulls)
+        T_in = L_max - 1  # input / target length after next-token-prediction shift
+        R_max = max(R_list)
+
+        pad_id = int(getattr(self.tokenizer, "pad_id", 0))
+        inp = torch.full((B, T_in), pad_id, dtype=torch.long, device=device)
+        tgt = torch.full((B, T_in), pad_id, dtype=torch.long, device=device)
+        # `pad_mask_in` marks valid positions in the shifted sequence (left-aligned).
+        pad_mask_in = torch.zeros(B, T_in, dtype=torch.bool, device=device)
+
+        for i, full in enumerate(fulls):
+            n = len(full)
+            if n < 2:
+                continue
+            inp_ids = full[:-1]
+            tgt_ids = full[1:]
+            k = len(inp_ids)
+            inp[i, :k] = torch.tensor(inp_ids, dtype=torch.long, device=device)
+            tgt[i, :k] = torch.tensor(tgt_ids, dtype=torch.long, device=device)
+            pad_mask_in[i, :k] = True
+
+        # One forward over the padded batch.
+        if need_value:
+            logits, values_full = self.model.forward_with_value(inp)  # [B,T_in,V], [B,T_in]
+        else:
+            logits = self.model(inp)  # [B, T_in, V]
+            values_full = torch.zeros(B, T_in, dtype=logits.dtype, device=device)
+
+        policy_logits = _logprob_logits(logits, temperature)
+        logp_all = torch.log_softmax(policy_logits, dim=-1)      # [B, T_in, V]
+        per_tok_logp = logp_all.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)  # [B, T_in]
+
+        if need_entropy:
+            probs = torch.softmax(policy_logits, dim=-1)
+            ent_all = -(probs * logp_all).sum(dim=-1)            # [B, T_in]
+        else:
+            ent_all = torch.zeros_like(per_tok_logp)
+
+        # Zero out padding positions so padding never contributes to loss.
+        per_tok_logp = per_tok_logp * pad_mask_in.to(per_tok_logp.dtype)
+        ent_all = ent_all * pad_mask_in.to(ent_all.dtype)
+        values_full = values_full * pad_mask_in.to(values_full.dtype)
+
+        # Extract the LAST R_i response positions into a right-padded [B, R_max].
+        logp_out = torch.zeros(B, R_max, dtype=per_tok_logp.dtype, device=device)
+        ent_out = torch.zeros(B, R_max, dtype=ent_all.dtype, device=device)
+        val_out = torch.zeros(B, R_max, dtype=values_full.dtype, device=device)
+        mask_out = torch.zeros(B, R_max, dtype=torch.bool, device=device)
+
+        for i, full in enumerate(fulls):
+            R = R_list[i]
+            if R <= 0 or len(full) < 2:
+                continue
+            k = len(full) - 1  # length of valid tokens in row i
+            start = k - R  # response occupies [start, k) of the shifted seq
+            logp_out[i, :R] = per_tok_logp[i, start:k]
+            ent_out[i, :R] = ent_all[i, start:k]
+            val_out[i, :R] = values_full[i, start:k]
+            mask_out[i, :R] = True
+
+        return logp_out, ent_out, val_out, mask_out
+
     def score_with_value(
-        self, prompt_ids: list[int], response_ids: list[int]
+        self,
+        prompt_ids: list[int],
+        response_ids: list[int],
+        temperature: float = 1.0,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Differentiable (per-token logπ, per-token entropy, per-token value).
 
@@ -301,7 +494,13 @@ class TinyCausalLMBackend(LLMBackend):
                 "score_with_value() requires with_value_head=True; "
                 "rebuild backend with TinyBackendConfig(with_value_head=True)"
             )
-        return self._score_core(prompt_ids, response_ids, need_value=True, need_entropy=True)
+        return self._score_core(
+            prompt_ids,
+            response_ids,
+            need_value=True,
+            need_entropy=True,
+            temperature=temperature,
+        )
 
     def _score_core(
         self,
@@ -310,6 +509,7 @@ class TinyCausalLMBackend(LLMBackend):
         *,
         need_value: bool,
         need_entropy: bool,
+        temperature: float,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         self.model.train()
         full = list(prompt_ids) + list(response_ids)
@@ -328,12 +528,13 @@ class TinyCausalLMBackend(LLMBackend):
         else:
             logits = self.model(x).squeeze(0)
             values = torch.zeros(logits.shape[0], device=self.cfg.device)
-        logp_all = torch.log_softmax(logits, dim=-1)
+        policy_logits = _logprob_logits(logits, temperature)
+        logp_all = torch.log_softmax(policy_logits, dim=-1)
         per_tok_logp = logp_all.gather(-1, targets.unsqueeze(-1)).squeeze(-1)  # [T-1]
 
         # entropy per position (over next-token distribution)
         if need_entropy:
-            probs = torch.softmax(logits, dim=-1)
+            probs = torch.softmax(policy_logits, dim=-1)
             ent_all = -(probs * logp_all).sum(dim=-1)  # [T-1]
         else:
             ent_all = torch.zeros_like(per_tok_logp)

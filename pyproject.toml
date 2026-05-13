@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-agentic-rl"
-version = "0.6.0"
+version = "0.6.0.dev0"
 description = "Agentic RL framework for hermes-agent (GRPO + PPO + multi-turn + curriculum + dashboard + resumable checkpoints + K3 KL + pluggable metrics)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,16 +13,35 @@ dependencies = ["PyYAML>=6.0"]
 [project.optional-dependencies]
 # Real RL training (GRPO/PPO) needs torch. CPU build is fine for the MVP.
 rl = ["torch>=2.1"]
+# HF dataset loading / offline real-trace training.
+data = ["datasets>=2.19", "pyarrow>=14"]
+# Observability stack (TensorBoard + W&B).
+metrics = ["tensorboard>=2.14", "wandb>=0.17"]
 # HF backend (AutoModelForCausalLM) — optional.
 hf = ["torch>=2.1", "transformers>=4.40"]
 # Hermes integration is pulled in separately by the user.
-test = ["pytest>=7.4"]
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.24",
+    "coverage[toml]>=7.4",
+]
+# Documentation build stack. Keep upper bounds so CI docs do not unexpectedly
+# jump across major Sphinx/MyST compatibility boundaries.
+docs = ["sphinx>=7.3,<9", "sphinx-autodoc-typehints>=2.3,<3", "myst-parser>=3.0,<5"]
 # Development tooling (CI, linting, type-checking).
 dev = [
     "pytest>=7.4",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.24",
+    "coverage[toml]>=7.4",
     "ruff==0.6.9",
     "mypy==1.11.2",
+    "types-PyYAML>=6.0.12",
     "pre-commit>=3.7",
+    "pip-audit>=2.8",
+    "build>=1.2",
+    "twine>=5.1",
 ]
 
 [project.scripts]
@@ -45,6 +64,38 @@ addopts = [
     "--strict-markers",
     "-ra",
 ]
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: exercises multiple subsystems or local external fixtures",
+    "slow: longer-running tests that are skipped in fast local loops",
+]
+
+# ---------------------------------------------------------------------------
+# coverage.py — used by CI and local coverage runs.
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["hermes_agentic_rl"]
+omit = [
+    "*/__init__.py",
+    "*/tests/*",
+    "*/subprojects/*",
+    "*/atropos/*",
+    "*/outputs/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 45
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
 
 # ---------------------------------------------------------------------------
 # ruff — linting + formatting (replaces black + isort + flake8)
@@ -58,6 +109,7 @@ extend-exclude = [
     "atropos-main.zip",
     "tinker-atropos",
     "tinker-atropos-main.zip",
+    "subprojects/hermes-agent",
     "outputs",
     "output",
     "hermes_agentic_rl.egg-info",
@@ -101,14 +153,14 @@ ignore = [
 quote-style = "double"
 
 # ---------------------------------------------------------------------------
-# mypy — static type checking (runs non-blocking in CI)
+# mypy — static type checking (runs as a blocking full-package CI gate)
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
 warn_unused_ignores = false
 warn_redundant_casts = true
-check_untyped_defs = false
+check_untyped_defs = true
 # Soft start: accept dynamic typing initially, progressively tighten.
 disallow_untyped_defs = false
 disallow_incomplete_defs = false

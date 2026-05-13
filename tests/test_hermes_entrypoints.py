@@ -21,12 +21,13 @@ def test_find_hermes_entrypoint_returns_first_available(monkeypatch):
 
 
 def test_find_hermes_entrypoint_raises_when_all_missing(monkeypatch):
-    # 确保候选模块都不存在
-    for name in [
-        "run_agent",
-        "environments.agent_loop",
-    ]:
-        monkeypatch.delitem(__import__("sys").modules, name, raising=False)
+    def _missing_import(name: str, *args, **kwargs):
+        raise ImportError(f"missing {name}")
+
+    monkeypatch.setattr(
+        "hermes_agentic_rl.runtime.hermes_entrypoints.importlib.import_module",
+        _missing_import,
+    )
 
     with pytest.raises(HermesEntrypointNotFoundError):
         find_hermes_entrypoint()

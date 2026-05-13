@@ -11,7 +11,7 @@ class RolloutStep:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     reasoning: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(slots=True)
@@ -22,7 +22,7 @@ class Trajectory:
     final_output: str | None
     finished_naturally: bool
     turns_used: int
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(slots=True)
@@ -31,14 +31,14 @@ class RewardResult:
     score: float
     reason: str
     weight: float = 1.0
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(slots=True)
 class RewardSummary:
     final_score: float
     components: list[RewardResult]
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(slots=True)
@@ -48,7 +48,7 @@ class TrainSample:
     final_output: str | None
     reward: float
     trajectory: dict[str, Any]
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 def dataclass_to_dict(value: Any) -> dict[str, Any]:

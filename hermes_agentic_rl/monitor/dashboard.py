@@ -35,7 +35,7 @@ _HTML = r"""<!doctype html>
 </style>
 </head>
 <body>
-<h1>hermes-agentic-rl <span class="tag" id="algo">algo</span><span class="tag" id="iter">iter=—</span></h1>
+<h1>hermes-agentic-rl <span class="tag" id="algo">algo</span><span class="tag" id="iter">iter=—</span><span class="tag" id="event">event=—</span></h1>
 <div class="grid">
   <div class="panel"><canvas id="reward"></canvas></div>
   <div class="panel"><canvas id="loss"></canvas></div>
@@ -55,21 +55,38 @@ const charts = {
   kl:     make('kl',     'kl',          '#a0a'),
   value:  make('value',  'value_loss',  '#09c'),
 };
+function updateChart(chart, labels, values, label) {
+  chart.data.labels = labels;
+  chart.data.datasets[0].label = label;
+  chart.data.datasets[0].data = values;
+  chart.update('none');
+}
 async function tick() {
   try {
     const r = await fetch('/metrics');
     const data = await r.json();
-    for (const k of ['reward','loss','kl','value']) {
-      charts[k].data.labels = data.map(d => d.iter);
-    }
-    charts.reward.data.datasets[0].data = data.map(d => d.mean_reward ?? 0);
-    charts.loss.data.datasets[0].data   = data.map(d => d.loss ?? 0);
-    charts.kl.data.datasets[0].data     = data.map(d => d.kl ?? 0);
-    charts.value.data.datasets[0].data  = data.map(d => d.value_loss ?? 0);
-    for (const k of Object.keys(charts)) charts[k].update('none');
     if (data.length) {
-      document.getElementById('iter').textContent = 'iter=' + data[data.length - 1].iter;
-      document.getElementById('algo').textContent = data[data.length - 1].algo || 'algo';
+      const last = data[data.length - 1];
+      const isWorker = data.some(d => d.command === 'session-train-worker');
+      if (isWorker) {
+        const labels = data.map((d, i) => d.updates ?? i);
+        updateChart(charts.reward, labels, data.map(d => d.records_seen ?? 0), 'records_seen');
+        updateChart(charts.loss, labels, data.map(d => d.last_loss ?? 0), 'last_loss');
+        updateChart(charts.kl, labels, data.map(d => d.pending_pairs ?? 0), 'pending_pairs');
+        updateChart(charts.value, labels, data.map(d => (d.invalid_records ?? 0) + (d.quality_filtered_records ?? 0)), 'rejected_records');
+        document.getElementById('iter').textContent = 'updates=' + (last.updates ?? 0);
+        document.getElementById('algo').textContent = last.algo || last.command || 'worker';
+        document.getElementById('event').textContent = 'event=' + (last.event || 'worker');
+      } else {
+        const labels = data.map(d => d.iter);
+        updateChart(charts.reward, labels, data.map(d => d.mean_reward ?? 0), 'mean_reward');
+        updateChart(charts.loss, labels, data.map(d => d.loss ?? 0), 'loss');
+        updateChart(charts.kl, labels, data.map(d => d.kl ?? 0), 'kl');
+        updateChart(charts.value, labels, data.map(d => d.value_loss ?? 0), 'value_loss');
+        document.getElementById('iter').textContent = 'iter=' + (last.iter ?? '—');
+        document.getElementById('algo').textContent = last.algo || 'algo';
+        document.getElementById('event').textContent = 'event=' + (last.event || 'train');
+      }
     }
   } catch (e) { console.error(e); }
   setTimeout(tick, 1000);

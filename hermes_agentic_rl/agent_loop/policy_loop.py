@@ -29,12 +29,14 @@ class PolicyAgentLoop(BaseAgentLoop):
         max_new_tokens: int = 24,
         temperature: float = 1.0,
         seed: int | None = None,
+        stop_strings: list[str] | None = None,
     ) -> None:
         self.backend = backend
         self.encoder = encoder or PromptStateEncoder(backend.tokenizer)
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.seed = seed
+        self.stop_strings = list(stop_strings or [])
 
     async def run(self, prompt: str) -> dict[str, Any]:
         obs = self.encoder.encode({"instruction": prompt})
@@ -43,6 +45,7 @@ class PolicyAgentLoop(BaseAgentLoop):
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
             seed=self.seed,
+            stop_strings=self.stop_strings,
         )
         response_text = self.backend.tokenizer.decode(gen.response_ids)
 

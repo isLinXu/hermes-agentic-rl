@@ -19,7 +19,7 @@ plug it in by subclassing if you need it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 try:
     import torch
@@ -44,7 +44,8 @@ class HFBackendConfig:
     with_value_head: bool = False
     value_head_dim: int | None = None  # inferred from hidden_size if None
     trust_remote_code: bool = False
-    extra_model_kwargs: dict[str, Any] = field(default_factory=dict)
+    flash_attention: bool = False
+    extra_model_kwargs: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 class _HFTokenizerAdapter:
@@ -73,6 +74,23 @@ class _HFTokenizerAdapter:
         return str(self._tok.decode(list(ids), skip_special_tokens=True))
 
 
+def _response_matches_stop(
+    tokenizer: TokenizerProtocol,
+    response_ids: list[int],
+    stop_strings: list[str] | None,
+) -> bool:
+    if not stop_strings:
+        return False
+    text = tokenizer.decode(response_ids)
+    return any(stop and text.endswith(stop) for stop in stop_strings)
+
+
+def _logprob_logits(logits: torch.Tensor, temperature: float) -> torch.Tensor:
+    if temperature <= 0:
+        return logits
+    return logits / max(float(temperature), 1e-6)
+
+
 class HFCausalLMBackend(LLMBackend):
     """HF transformers AutoModelForCausalLM backend."""
 
@@ -96,20 +114,25 @@ class HFCausalLMBackend(LLMBackend):
             self._hf_tok.pad_token = self._hf_tok.eos_token or "<|pad|>"
         self.tokenizer: TokenizerProtocol = _HFTokenizerAdapter(self._hf_tok)
         dtype = getattr(torch, self.cfg.dtype, torch.float32)
+        extra_kw = dict(self.cfg.extra_model_kwargs)
+        if self.cfg.flash_attention:
+            extra_kw["attn_implementation"] = "flash_attention_2"
         self.model = AutoModelForCausalLM.from_pretrained(
             self.cfg.model_name_or_path,
             torch_dtype=dtype,
             trust_remote_code=self.cfg.trust_remote_code,
-            **self.cfg.extra_model_kwargs,
+            **extra_kw,
         ).to(self.cfg.device)
 
         self.value_head: nn.Module | None = None
         if self.cfg.with_value_head:
-            hidden = int(
+            inferred_hidden = (
                 self.cfg.value_head_dim
-                or getattr(self.model.config, "hidden_size", None)
+                if self.cfg.value_head_dim is not None
+                else getattr(self.model.config, "hidden_size", None)
                 or getattr(self.model.config, "n_embd", 768)
             )
+            hidden = int(cast(int | str | float, inferred_hidden))
             self.value_head = nn.Linear(hidden, 1, bias=True).to(self.cfg.device)
 
     # ---- helpers ----
@@ -126,6 +149,7 @@ class HFCausalLMBackend(LLMBackend):
         max_new_tokens: int,
         temperature: float = 1.0,
         seed: int | None = None,
+        stop_strings: list[str] | None = None,
     ) -> GenerationOutput:
         self.model.eval()
         # MPS: torch.Generator(device='mps') is broken (RuntimeError: Placeholder
@@ -145,9 +169,9 @@ class HFCausalLMBackend(LLMBackend):
                 next_id = int(torch.argmax(logits, dim=-1).item())
                 logp = float(torch.log_softmax(logits, dim=-1)[0, next_id].item())
             else:
-                logits = logits / max(temperature, 1e-6)
-                logp_all = torch.log_softmax(logits, dim=-1)
-                probs = torch.softmax(logits, dim=-1)
+                policy_logits = _logprob_logits(logits, temperature)
+                logp_all = torch.log_softmax(policy_logits, dim=-1)
+                probs = torch.softmax(policy_logits, dim=-1)
                 next_id = int(torch.multinomial(probs, 1).item())
                 logp = float(logp_all[0, next_id].item())
             ids.append(next_id)
@@ -156,11 +180,14 @@ class HFCausalLMBackend(LLMBackend):
             if next_id == self.tokenizer.eos_id:
                 finished = True
                 break
+            if _response_matches_stop(self.tokenizer, response, stop_strings):
+                finished = True
+                break
         return GenerationOutput(
             response_ids=response,
             logprobs=logprobs,
             finished=finished,
-            metadata={"temperature": temperature, "seed": seed},
+            metadata={"temperature": temperature, "seed": seed, "stop_strings": stop_strings or []},
         )
 
     def _set_mode(self) -> None:
@@ -180,7 +207,12 @@ class HFCausalLMBackend(LLMBackend):
         hidden = out.hidden_states[-1]  # type: ignore[union-attr]
         return out.logits, hidden
 
-    def score(self, prompt_ids: list[int], response_ids: list[int]) -> torch.Tensor:
+    def score(
+        self,
+        prompt_ids: list[int],
+        response_ids: list[int],
+        temperature: float = 1.0,
+    ) -> torch.Tensor:
         full = list(prompt_ids) + list(response_ids)
         R = len(response_ids)
         if R == 0 or len(full) < 2:
@@ -189,12 +221,139 @@ class HFCausalLMBackend(LLMBackend):
         x = self._to_tensor(full[:-1]).unsqueeze(0)
         targets = self._to_tensor(full[1:])
         logits = self.model(x).logits.squeeze(0)
-        logp_all = torch.log_softmax(logits, dim=-1)
+        policy_logits = _logprob_logits(logits, temperature)
+        logp_all = torch.log_softmax(policy_logits, dim=-1)
         per_tok = logp_all.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
         return per_tok[-R:]
 
+    def score_batch(
+        self,
+        prompt_ids_list: list[list[int]],
+        response_ids_list: list[list[int]],
+        temperature: float = 1.0,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """True batched score: one forward over a [B, T_in] padded batch."""
+        logp, _ent, _val, mask = self._score_core_batch(
+            prompt_ids_list,
+            response_ids_list,
+            need_value=False,
+            need_entropy=False,
+            temperature=temperature,
+        )
+        return logp, mask
+
+    def score_with_value_batch(
+        self,
+        prompt_ids_list: list[list[int]],
+        response_ids_list: list[list[int]],
+        temperature: float = 1.0,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self.value_head is None:
+            raise RuntimeError("score_with_value_batch requires with_value_head=True")
+        return self._score_core_batch(
+            prompt_ids_list,
+            response_ids_list,
+            need_value=True,
+            need_entropy=True,
+            temperature=temperature,
+        )
+
+    def _score_core_batch(
+        self,
+        prompt_ids_list: list[list[int]],
+        response_ids_list: list[list[int]],
+        *,
+        need_value: bool,
+        need_entropy: bool,
+        temperature: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        device = self.cfg.device
+        self._set_mode()
+        B = len(prompt_ids_list)
+        assert len(response_ids_list) == B, "prompt/response batch size mismatch"
+        if B == 0:
+            empty = torch.zeros(0, 0, device=device)
+            return empty, empty, empty, torch.zeros(0, 0, dtype=torch.bool, device=device)
+
+        fulls: list[list[int]] = []
+        R_list: list[int] = []
+        for p_ids, r_ids in zip(prompt_ids_list, response_ids_list, strict=True):
+            full = list(p_ids) + list(r_ids)
+            fulls.append(full)
+            R_list.append(min(len(r_ids), max(0, len(full) - 1)))
+
+        if all(R == 0 for R in R_list) or all(len(f) < 2 for f in fulls):
+            empty = torch.zeros(B, 0, device=device)
+            return empty, empty, empty, torch.zeros(B, 0, dtype=torch.bool, device=device)
+
+        L_max = max(len(f) for f in fulls)
+        T_in = L_max - 1
+        R_max = max(R_list)
+        pad_id = int(self.tokenizer.pad_id)
+
+        inp = torch.full((B, T_in), pad_id, dtype=torch.long, device=device)
+        tgt = torch.full((B, T_in), pad_id, dtype=torch.long, device=device)
+        attn_mask = torch.zeros(B, T_in, dtype=torch.long, device=device)
+        pad_mask_in = torch.zeros(B, T_in, dtype=torch.bool, device=device)
+
+        for i, full in enumerate(fulls):
+            if len(full) < 2:
+                continue
+            inp_ids = full[:-1]
+            tgt_ids = full[1:]
+            k = len(inp_ids)
+            inp[i, :k] = torch.tensor(inp_ids, dtype=torch.long, device=device)
+            tgt[i, :k] = torch.tensor(tgt_ids, dtype=torch.long, device=device)
+            attn_mask[i, :k] = 1
+            pad_mask_in[i, :k] = True
+
+        if need_value:
+            if self.value_head is None:
+                raise RuntimeError("value head is required for value scoring")
+            out = self.model(inp, attention_mask=attn_mask, output_hidden_states=True)
+            logits = out.logits  # [B, T_in, V]
+            hidden = out.hidden_states[-1]  # [B, T_in, D]
+            values_full = self.value_head(hidden).squeeze(-1)
+        else:
+            logits = self.model(inp, attention_mask=attn_mask).logits  # [B, T_in, V]
+            values_full = torch.zeros(B, T_in, dtype=logits.dtype, device=device)
+
+        policy_logits = _logprob_logits(logits, temperature)
+        logp_all = torch.log_softmax(policy_logits, dim=-1)
+        per_tok_logp = logp_all.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)  # [B, T_in]
+        if need_entropy:
+            probs = torch.softmax(policy_logits, dim=-1)
+            ent_all = -(probs * logp_all).sum(dim=-1)
+        else:
+            ent_all = torch.zeros_like(per_tok_logp)
+
+        per_tok_logp = per_tok_logp * pad_mask_in.to(per_tok_logp.dtype)
+        ent_all = ent_all * pad_mask_in.to(ent_all.dtype)
+        values_full = values_full * pad_mask_in.to(values_full.dtype)
+
+        logp_out = torch.zeros(B, R_max, dtype=per_tok_logp.dtype, device=device)
+        ent_out = torch.zeros(B, R_max, dtype=ent_all.dtype, device=device)
+        val_out = torch.zeros(B, R_max, dtype=values_full.dtype, device=device)
+        mask_out = torch.zeros(B, R_max, dtype=torch.bool, device=device)
+
+        for i, full in enumerate(fulls):
+            R = R_list[i]
+            if R <= 0 or len(full) < 2:
+                continue
+            k = len(full) - 1
+            start = k - R
+            logp_out[i, :R] = per_tok_logp[i, start:k]
+            ent_out[i, :R] = ent_all[i, start:k]
+            val_out[i, :R] = values_full[i, start:k]
+            mask_out[i, :R] = True
+
+        return logp_out, ent_out, val_out, mask_out
+
     def score_with_value(
-        self, prompt_ids: list[int], response_ids: list[int]
+        self,
+        prompt_ids: list[int],
+        response_ids: list[int],
+        temperature: float = 1.0,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if self.value_head is None:
             raise RuntimeError("HFCausalLMBackend: with_value_head=True is required")
@@ -208,9 +367,10 @@ class HFCausalLMBackend(LLMBackend):
         logits, hidden = self._forward_with_hidden(x)
         logits = logits.squeeze(0)
         hidden = hidden.squeeze(0)
-        logp_all = torch.log_softmax(logits, dim=-1)
+        policy_logits = _logprob_logits(logits, temperature)
+        logp_all = torch.log_softmax(policy_logits, dim=-1)
         per_tok = logp_all.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
-        probs = torch.softmax(logits, dim=-1)
+        probs = torch.softmax(policy_logits, dim=-1)
         ent_all = -(probs * logp_all).sum(dim=-1)
         values = self.value_head(hidden).squeeze(-1)
         return per_tok[-R:], ent_all[-R:], values[-R:]
@@ -226,3 +386,19 @@ class HFCausalLMBackend(LLMBackend):
 
     def is_trainable(self) -> bool:
         return any(p.requires_grad for p in self.model.parameters())
+
+    def clone_frozen(self) -> HFCausalLMBackend:
+        import copy
+
+        other = HFCausalLMBackend(self.cfg)
+        other.model.load_state_dict(copy.deepcopy(self.model.state_dict()))
+        for p in other.model.parameters():
+            p.requires_grad_(False)
+        if self.value_head is not None and other.value_head is not None:
+            other.value_head.load_state_dict(copy.deepcopy(self.value_head.state_dict()))
+            for p in other.value_head.parameters():
+                p.requires_grad_(False)
+        other.model.eval()
+        if other.value_head is not None:
+            other.value_head.eval()
+        return other

@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 # ---------------------------------------------------------------------------
 # Atomic save helper
@@ -205,7 +205,7 @@ class CheckpointManager:
         with open(state_path, encoding="utf-8") as f:
             trainer_state = json.load(f)
 
-        config = {}
+        config: dict[str, Any] = {}
         if config_path.exists():
             with open(config_path, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}

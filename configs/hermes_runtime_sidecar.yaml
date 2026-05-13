@@ -1,0 +1,38 @@
+runtime:
+  integration: hermes
+  # Local child checkout or explicit path to `hermes-agent`.
+  repo_path: subprojects/hermes-agent
+  provider: openrouter
+  model: your-model
+  max_agent_turns: 20
+  session_sidecar:
+    enabled: true
+    session_log_path: outputs/hermes_sessions.jsonl
+    replay_output_path: outputs/hermes_replay.jsonl
+    flush_interval_sec: 0.25
+    max_batch_size: 8
+    judge:
+      components:
+        - name: session_user_feedback_reward
+          weight: 0.5
+        - name: session_tool_feedback_reward
+          weight: 0.3
+        - name: session_toolcall_reward
+          weight: 0.2
+    backend:
+      # Match the tokenizer family you plan to train with.
+      name: tiny
+      # HF example:
+      # name: hf
+      # model_name_or_path: gpt2
+
+environment:
+  dataset_path: data/minimal_terminal_tasks.jsonl
+
+reward:
+  components:
+    - name: next_turn_feedback_reward
+      weight: 1.0
+
+trainer:
+  export_training_path: outputs/train.jsonl

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 from hermes_agentic_rl.monitor.writers import (
     JsonlMetricsWriter,
@@ -99,3 +103,158 @@ def test_stdout_writer_no_exception(capsys) -> None:
     out = capsys.readouterr().out
     assert "[metrics]" in out
     assert "iter=5" in out
+
+
+class _FakeWandbRun:
+    def __init__(self) -> None:
+        self.summary: dict[str, float | bool] = {}
+
+
+class _FakeWandb(ModuleType):
+    def __init__(self) -> None:
+        super().__init__("wandb")
+        self.run = None
+        self.init_calls: list[dict] = []
+        self.log_calls: list[tuple[dict, int]] = []
+        self.define_metric_calls: list[tuple[tuple, dict]] = []
+        self.finish_calls = 0
+
+    def init(self, **kwargs):
+        self.init_calls.append(kwargs)
+        self.run = _FakeWandbRun()
+        return self.run
+
+    def log(self, payload, step=None):
+        self.log_calls.append((dict(payload), step))
+
+    def define_metric(self, *args, **kwargs):
+        self.define_metric_calls.append((args, kwargs))
+
+    def finish(self):
+        self.finish_calls += 1
+        self.run = None
+
+
+def test_build_writer_from_config_auto_inits_wandb_and_logs_nested_scalars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_wandb = _FakeWandb()
+    monkeypatch.setitem(sys.modules, "wandb", fake_wandb)
+
+    writer = build_writer_from_config(
+        {
+            "wandb": {
+                "project": "unit-test-project",
+                "prefix": "rl",
+                "mode": "offline",
+            }
+        },
+        output_dir=tmp_path,
+        wandb_context={
+            "name": "writer-smoke",
+            "job_type": "train-rl",
+            "tags": ["grpo", "echo"],
+            "command": "train-rl",
+            "config_path": "/tmp/train.yaml",
+            "config": {
+                "algo": "grpo",
+                "train_rl": {"n_iters": 2},
+            },
+        },
+    )
+
+    assert writer is not None
+    writer(
+        {
+            "iter": 3,
+            "mean_reward": 0.75,
+            "loss": -0.25,
+            "lagrangian": {"lambda": 0.1},
+            "algo": "grpo",
+        }
+    )
+    writer.update_summary(
+        {
+            "last_mean_reward": 0.75,
+            "curriculum_snapshot": {"level": 2},
+        }
+    )
+    writer.close()
+
+    assert fake_wandb.init_calls
+    init_kwargs = fake_wandb.init_calls[0]
+    assert init_kwargs["project"] == "unit-test-project"
+    assert init_kwargs["name"] == "writer-smoke"
+    assert init_kwargs["job_type"] == "train-rl"
+    assert init_kwargs["dir"] == str(tmp_path / "wandb")
+    assert init_kwargs["config"]["algo"] == "grpo"
+    assert init_kwargs["config"]["train_rl"]["n_iters"] == 2
+    assert init_kwargs["config"]["command"] == "train-rl"
+
+    assert fake_wandb.log_calls == [
+        (
+            {
+                "rl/iter": 3.0,
+                "rl/mean_reward": 0.75,
+                "rl/loss": -0.25,
+                "rl/lagrangian/lambda": 0.1,
+            },
+            3,
+        )
+    ]
+    assert fake_wandb.run is None
+    assert fake_wandb.finish_calls == 1
+
+
+def test_build_writer_from_config_wandb_summary_updates_before_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_wandb = _FakeWandb()
+    monkeypatch.setitem(sys.modules, "wandb", fake_wandb)
+
+    writer = build_writer_from_config(
+        {"wandb": True},
+        output_dir=tmp_path,
+        wandb_context={"config": {"algo": "ppo"}},
+    )
+    assert writer is not None
+    writer.update_summary({"best_mean_reward": 1.2, "snapshot": {"level": 4}})
+    assert fake_wandb.run is not None
+    assert fake_wandb.run.summary["best_mean_reward"] == 1.2
+    assert fake_wandb.run.summary["snapshot/level"] == 4.0
+
+
+def test_build_writer_from_config_wandb_clamps_negative_log_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_wandb = _FakeWandb()
+    monkeypatch.setitem(sys.modules, "wandb", fake_wandb)
+
+    writer = build_writer_from_config(
+        {"wandb": {"prefix": "train", "mode": "offline"}},
+        output_dir=tmp_path,
+    )
+    assert writer is not None
+
+    writer({"iter": -1, "algo": "sft_bootstrap", "loss": 0.5})
+
+    assert fake_wandb.log_calls == [
+        (
+            {
+                "train/iter": -1.0,
+                "train/loss": 0.5,
+            },
+            0,
+        )
+    ]
+
+
+def test_build_writer_from_config_wandb_can_be_disabled(tmp_path: Path) -> None:
+    writer = build_writer_from_config(
+        {"wandb": {"enabled": False}},
+        output_dir=tmp_path,
+    )
+    assert writer is None

@@ -1,6 +1,9 @@
 runtime:
   integration: hermes
-  api_key_env: LKEAP_API_KEY
+  api_key_envs:
+    - NEWAPI_API_KEY
+    - LKEAP_API_KEY
+    - OPENAI_API_KEY
   provider: openai
   base_url: https://api.lkeap.cloud.tencent.com/v1
   model: deepseek-v3.2

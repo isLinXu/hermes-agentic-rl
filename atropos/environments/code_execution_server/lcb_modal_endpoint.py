@@ -73,7 +73,7 @@ class Capturing(list):
         self._stdout = sys.stdout
         sys.stdout = self._stringio = StringIO()
         # Make closing the StringIO a no-op
-        self._stringio.close = lambda x: 1
+        self._stringio.close = def def def lambda x: 1
         return self
 
     def __exit__(self, *args):

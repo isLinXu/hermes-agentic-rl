@@ -48,7 +48,7 @@ class EvalReport:
     success_rate: float
     mean_turns: float
     mean_response_len: float
-    component_means: dict[str, float] = field(default_factory=dict)
+    component_means: dict[str, float] = field(default_factory=dict, repr=False)
     rewards: list[float] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:

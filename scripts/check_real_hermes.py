@@ -1,20 +1,25 @@
+"""Hermes runtime sanity check script."""
+# ruff: noqa: I001, E402
+
 from __future__ import annotations
 
 import importlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Import after sys.path injection so the script works from a plain checkout.
 from hermes_agentic_rl.runtime.hermes_adapter import HermesRuntimeAdapter
 from hermes_agentic_rl.runtime.hermes_entrypoints import (
-    HermesEntrypointNotFoundError,
     find_hermes_entrypoint,
 )
+from hermes_agentic_rl.integrations.hermes_repo import prepare_hermes_imports
 
 
 def check_python_version(version_info: tuple[int, int, int]) -> dict[str, str]:
@@ -37,6 +42,7 @@ def check_path_exists(path: Path, label: str) -> dict[str, str]:
 
 
 def default_run_agent_importer() -> Any:
+    prepare_hermes_imports(base_dir=PROJECT_ROOT)
     return importlib.import_module("run_agent")
 
 
@@ -45,7 +51,7 @@ def check_run_agent_import(importer: Callable[[], Any] | None = None) -> dict[st
     try:
         module = importer()
         return {"status": "ok", "details": "run_agent importable", "module": module}
-    except ImportError as exc:
+    except Exception as exc:
         return {"status": "error", "details": str(exc), "module": None}
 
 
@@ -65,7 +71,7 @@ def check_entrypoint_detection(detector: Callable[[], Any] | None = None) -> dic
             "status": "ok",
             "details": f"detected entrypoint: {entrypoint.module_name}:{entrypoint.attr_name}",
         }
-    except HermesEntrypointNotFoundError as exc:
+    except Exception as exc:
         return {"status": "error", "details": str(exc)}
 
 
@@ -112,6 +118,7 @@ def format_summary_lines(checks: dict[str, dict[str, str]]) -> list[str]:
 
 def run_checks() -> dict[str, Any]:
     workspace_root = PROJECT_ROOT
+    repo_resolution = prepare_hermes_imports(base_dir=workspace_root)
     python_result = check_python_version(sys.version_info[:3])
     run_agent_result = check_run_agent_import()
     ai_agent_result = check_ai_agent_symbol(run_agent_result.get("module"))
@@ -125,9 +132,18 @@ def run_checks() -> dict[str, Any]:
         workspace_root / "data" / "minimal_terminal_tasks.jsonl",
         "sample_dataset",
     )
+    repo_result = {
+        "status": "ok" if repo_resolution.is_present and repo_resolution.has_run_agent else "warning",
+        "details": (
+            f"hermes repo: {repo_resolution.repo_path}"
+            if repo_resolution.repo_path
+            else "local hermes-agent subproject missing"
+        ),
+    }
 
     checks = {
         "python_version": python_result,
+        "hermes_repo": repo_result,
         "run_agent_import": {k: v for k, v in run_agent_result.items() if k != "module"},
         "ai_agent_symbol": ai_agent_result,
         "entrypoint_detection": entrypoint_result,

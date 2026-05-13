@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
-from hermes_agentic_rl.envs.base_env import BaseEnv
+from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
 
 
 @dataclass(slots=True)
@@ -38,7 +38,7 @@ class CurriculumState:
     total_items: int = 0
     promotions: int = 0
     demotions: int = 0
-    recent_rewards: deque[float] = field(default_factory=lambda: deque(maxlen=32))
+    recent_rewards: deque[float] = field(default_factory=lambda: deque(maxlen=32), repr=False)
     level_history: list[tuple[int, int]] = field(default_factory=list)
     # (item_index_global, level) — one entry per transition
 
@@ -99,6 +99,9 @@ class CurriculumEnv(BaseEnv):
         tool_context: Any,
     ) -> list[RewardResult]:
         return await self.active.compute_reward(item, trajectory, tool_context)
+
+    def build_supervised_samples(self, item: dict[str, Any]) -> list[SupervisedSample]:
+        return self.active.build_supervised_samples(item)
 
     # --- curriculum control ---
 

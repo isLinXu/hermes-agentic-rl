@@ -9,6 +9,7 @@ Verifies:
 from __future__ import annotations
 
 from statistics import mean
+from types import MethodType
 
 import pytest
 
@@ -81,6 +82,86 @@ def test_agent_loop_emits_rl_metadata():
     assert set(rl.keys()) >= {"prompt_ids", "response_ids", "old_logprobs"}
     assert len(rl["response_ids"]) == len(rl["old_logprobs"])
     assert len(rl["response_ids"]) <= 4
+
+
+def test_grpo_batch_generate_path_runs(monkeypatch):
+    backend = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=2, seed=0))
+    env = EchoTaskEnv(build_default_echo_dataset())
+    rm = RewardManager([EchoRewardComponent(weight=1.0)])
+
+    calls: list[int] = []
+    from hermes_agentic_rl.backends.batch_generate import BatchRolloutGenerator
+
+    original = BatchRolloutGenerator.generate
+
+    def _spy(self, prompt_ids_list, seed=None):
+        calls.append(len(prompt_ids_list))
+        return original(self, prompt_ids_list, seed=seed)
+
+    monkeypatch.setattr(BatchRolloutGenerator, "generate", _spy)
+
+    trainer = GRPOTrainer(
+        policy=backend,
+        env=env,
+        reward_manager=rm,
+        cfg=GRPOTrainerConfig(
+            n_iters=1,
+            group_size=4,
+            prompts_per_iter=1,
+            lr=5e-3,
+            max_new_tokens=6,
+            temperature=1.0,
+            log_every=100,
+            seed=7,
+            batch_generate=True,
+        ),
+    )
+    stats = trainer.train()
+
+    assert calls == [4]
+    assert len(stats.iters) == 1
+
+
+def test_grpo_update_epochs_preserve_group_boundaries():
+    backend = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=2, seed=0))
+    env = EchoTaskEnv(build_default_echo_dataset())
+    rm = RewardManager([EchoRewardComponent(weight=1.0)])
+    trainer = GRPOTrainer(
+        policy=backend,
+        env=env,
+        reward_manager=rm,
+        cfg=GRPOTrainerConfig(
+            n_iters=1,
+            group_size=4,
+            prompts_per_iter=2,
+            lr=5e-3,
+            max_new_tokens=6,
+            temperature=1.0,
+            log_every=100,
+            seed=7,
+            update_epochs=2,
+            minibatch_size=3,
+        ),
+    )
+
+    calls: list[tuple[int, list[int]]] = []
+    original = trainer.algo.compute_loss
+
+    def _spy(self, policy, ref_policy, batch):
+        calls.append((len(batch.records), sorted(len(v) for v in batch.by_group().values())))
+        return original(policy, ref_policy, batch)
+
+    trainer.algo.compute_loss = MethodType(_spy, trainer.algo)
+    stats = trainer.train()
+
+    assert len(stats.iters) == 1
+    rec = stats.iters[0]
+    assert rec["n_optimizer_steps"] == 4
+    assert rec["update_epochs"] == 2
+    assert rec["n_minibatches"] == 4
+    assert len(calls) == 4
+    assert all(batch_size == 4 for batch_size, _ in calls)
+    assert all(group_sizes == [4] for _, group_sizes in calls)
 
 
 def test_deprecated_atropos_shim_still_works():

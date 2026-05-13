@@ -27,8 +27,10 @@ import ast
 import operator as op
 from typing import Any
 
+from hermes_agentic_rl.agent_loop.multi_turn_loop import DEFAULT_TOOL_RESULT_TEMPLATE
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
-from hermes_agentic_rl.envs.base_env import BaseEnv
+from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
+from hermes_agentic_rl.rewards.base import BaseReward
 
 SAFE_OPS: dict[type[ast.AST], Any] = {
     ast.Add: op.add,
@@ -106,7 +108,7 @@ def build_sim_tool_dataset(n: int = 16, *, seed: int = 0) -> list[dict[str, Any]
     return items
 
 
-class SimToolRewardComponent:
+class SimToolRewardComponent(BaseReward):
     name = "sim_tool_reward"
 
     def __init__(self, weight: float = 1.0) -> None:
@@ -189,3 +191,25 @@ class SimToolEnv(BaseEnv):
         tool_context: Any,
     ) -> list[RewardResult]:
         return [await self._reward.evaluate(item, trajectory, tool_context)]
+
+    def build_supervised_samples(self, item: dict[str, Any]) -> list[SupervisedSample]:
+        instruction = str(item.get("instruction", "")).strip()
+        expr = str(item.get("expr", "")).strip()
+        target = str(item.get("target", "")).strip()
+        if not instruction or not expr or not target:
+            return []
+        tool_call = f"<tool_call>calc({expr})</tool_call>"
+        tool_result = DEFAULT_TOOL_RESULT_TEMPLATE.format(result=target)
+        return [
+            SupervisedSample(
+                instruction=instruction,
+                response=tool_call,
+                metadata={"turn_index": 0, "kind": "tool_call"},
+            ),
+            SupervisedSample(
+                instruction=instruction,
+                prompt_suffix=tool_call + tool_result,
+                response=f"answer={target}",
+                metadata={"turn_index": 1, "kind": "final_answer"},
+            ),
+        ]

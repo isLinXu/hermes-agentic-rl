@@ -15,7 +15,7 @@ class TokenAction:
     token_ids: list[int]
     logprobs: list[float]
     finished: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass(slots=True)
@@ -30,7 +30,7 @@ class TextAction:
     text: str
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 # Alias: some callers just want "an action" without caring about the flavor.

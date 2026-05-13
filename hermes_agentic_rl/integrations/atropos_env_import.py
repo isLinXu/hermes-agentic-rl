@@ -88,7 +88,6 @@ def _require_atropos(full: bool = False) -> Any:
             APIServerConfig,
             ReasoningConfig,
         )
-        from atroposlib.envs.server_handling.server_manager import ServerManager
     except Exception as exc:  # pragma: no cover — depends on env
         raise AtroposUnavailableError(
             "atroposlib is not importable. Install it with:\n"
@@ -99,7 +98,6 @@ def _require_atropos(full: bool = False) -> Any:
         "APIServer": APIServer,
         "APIServerConfig": APIServerConfig,
         "ReasoningConfig": ReasoningConfig,
-        "ServerManager": ServerManager,
     }
     if full:
         try:

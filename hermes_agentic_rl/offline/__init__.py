@@ -18,8 +18,8 @@ __all__ = [
     "BCConfig",
     "BCTrainer",
     "DPOConfig",
-    "DPOTrainer",
     "DPOPair",
+    "DPOTrainer",
     "ReplayBuffer",
     "TrainSample",
 ]
