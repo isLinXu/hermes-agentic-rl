@@ -1,0 +1,2 @@
+{"task_id":"task-1","instruction":"Create hello.txt and write hello","expected_output":"done","expected_files":[{"path":"hello.txt","equals":"hello"}]}
+{"task_id":"task-2","instruction":"Create notes/todo.txt and write buy milk","expected_output":"done","expected_files":[{"path":"notes/todo.txt","equals":"buy milk"}]}
