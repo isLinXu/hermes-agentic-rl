@@ -46,7 +46,7 @@ benchmarks.
 | Dimension | What this project provides |
 |---|---|
 | Agent focus | Tool use, terminal-command actions, multi-turn recovery, protocol adherence |
-| Training paths | `train-rl` for GRPO/PPO, `online-cycle` for Hermes replay plus worker training |
+| Training paths | `train-rl` for GRPO/PPO, `online-cycle` for Hermes replay plus worker training, `online-self-evolve` for the full closed loop |
 | Trainable surfaces | Tiny/HF policy backends, PPO value heads, LoRA adapters, reward-model heads, BC/DPO workers |
 | Data sources | Hugging Face traces, local parquet shards, real Hermes session logs, replay JSONL |
 | Evaluation | Held-out grouped trace benchmarks, checkpoint ranking, paired A/B comparisons |
@@ -155,6 +155,7 @@ stable entry points.
 | Held-out RL benchmark | `eval-rl` | Baseline vs checkpoint on grouped held-out traces with structured metrics. |
 | Prompt/context benchmark | `configs/context_benchmark_eval_rl.yaml` | Measures long-context fact recall, constraint preservation, tool-summary retention, distractor avoidance, and concise synthesis. |
 | Online Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export. |
+| Online self-evolution loop | `configs/online_self_evolve.yaml` | Online cycle -> Skill candidates -> optional eval gate report. |
 | Directional self-evolution | `self-evolution-batch` | Batch replay, worker training, validation splits, and per-direction summaries. |
 | Self-evolution export | `session-eval-export` | Writes `task_input` / `expected_behavior` JSONL splits. |
 | Observability | `metrics:` | JSONL, stdout, TensorBoard, W&B, and optional live dashboard. |
@@ -415,6 +416,23 @@ Each candidate directory contains `SKILL.md`, `manifest.json`, and
 evidence so the generated Skill draft can cite the user task, observed assistant
 behavior, feedback, reward, and capability axes.
 
+### Online Self-Evolution
+
+Use `online-self-evolve` when you want the full loop in one command: real Hermes
+session collection, replay mining, worker training, self-evolution export,
+Skill candidate export, and optional `eval-gate`.
+
+```bash
+python -m hermes_agentic_rl.cli.main online-self-evolve \
+  --config configs/online_self_evolve.yaml \
+  --once \
+  --limit 1
+```
+
+The orchestrator writes `online_self_evolve_summary.json` and
+`online_self_evolve_report.md` with stage status, replay counts, Skill
+candidate counts, and optional promotion-gate recommendation.
+
 ## Key Configurations
 
 | Config | Purpose |
@@ -430,6 +448,7 @@ behavior, feedback, reward, and capability axes.
 | `configs/context_benchmark_eval_rl.yaml` | Prompt-context benchmark for fact recall, constraint retention, and distractor avoidance. |
 | `configs/self_evolution_batch.yaml` | Batch directional self-evolution replay, worker training, and export. |
 | `configs/skill_export.yaml` | Export replay-mined Skill candidates and validation examples. |
+| `configs/online_self_evolve.yaml` | Full online self-evolution loop: online-cycle, Skill export, and optional eval gate. |
 | `configs/hermes_online_cycle.yaml` | Real Hermes online rollout plus replay worker and self-evolution export. |
 | `configs/hermes_runtime_sidecar.yaml` | Runtime sidecar example for session/replay capture. |
 | `configs/session_train_worker.yaml` | BC worker over replay JSONL. |
@@ -446,6 +465,7 @@ python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
+python -m hermes_agentic_rl.cli.main online-self-evolve --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
 python -m hermes_agentic_rl.cli.main session-train-worker --config <config> --once
 python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
@@ -465,7 +485,7 @@ hermes_agentic_rl/
   offline/       BC, DPO, reward-model training
   rewards/       Outcome, tool-call, filesystem, feedback, RM components
   monitor/       JSONL, TensorBoard, W&B, dashboard writers
-  cli/           Rollout, train, train-rl, eval-rl, eval-gate, self-evolution-batch, online-cycle, replay workers, skill-export
+  cli/           Rollout, train, train-rl, eval-rl, eval-gate, self-evolution-batch, online-cycle, online-self-evolve, replay workers, skill-export
 ```
 
 Data flow:

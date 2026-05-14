@@ -44,7 +44,7 @@ model，并通过 held-out benchmark 验证改进。
 | 维度 | 本项目提供什么 |
 |---|---|
 | Agent 目标 | 工具调用、终端命令动作、多轮恢复、协议遵守 |
-| 训练路径 | `train-rl` 负责 GRPO/PPO on-policy 训练，`online-cycle` 负责 Hermes replay + worker 训练 |
+| 训练路径 | `train-rl` 负责 GRPO/PPO on-policy 训练，`online-cycle` 负责 Hermes replay + worker 训练，`online-self-evolve` 负责完整闭环 |
 | 可训练对象 | Tiny/HF policy backend、PPO value head、LoRA adapter、reward-model head、BC/DPO worker |
 | 数据来源 | Hugging Face traces、本地 parquet shard、真实 Hermes session log、replay JSONL |
 | 评估方式 | held-out grouped trace benchmark、checkpoint ranking、paired A/B 对比 |
@@ -145,6 +145,7 @@ flowchart LR
 | Held-out RL benchmark | `eval-rl` | 在分组 held-out traces 上对比 baseline 与 checkpoint。 |
 | Prompt/context benchmark | `configs/context_benchmark_eval_rl.yaml` | 测量长上下文事实召回、约束保留、工具摘要保留、干扰规避和简洁回答。 |
 | 在线 Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export。 |
+| 在线 self-evolution 闭环 | `configs/online_self_evolve.yaml` | Online cycle -> Skill 候选 -> 可选 eval gate 报告。 |
 | 定向 self-evolution | `self-evolution-batch` | 批量 replay、worker 训练、验证集导出和方向级 summary。 |
 | Self-evolution 导出 | `session-eval-export` | 写出 `task_input` / `expected_behavior` JSONL split。 |
 | 可观测性 | `metrics:` | JSONL、stdout、TensorBoard、W&B、可选 live dashboard。 |
@@ -393,6 +394,22 @@ python -m hermes_agentic_rl.cli.main skill-export \
 记录还会保留紧凑的 `metadata.source_turn` 证据，让生成的 Skill 草案能够引用用户任务、
 assistant 行为、反馈、reward 和 capability axes。
 
+### Online Self-Evolution
+
+当你希望用一个命令跑完整闭环时，可以使用 `online-self-evolve`：真实 Hermes session
+采集、replay mining、本地 worker 训练、self-evolution 导出、Skill 候选导出，以及可选
+`eval-gate`。
+
+```bash
+python -m hermes_agentic_rl.cli.main online-self-evolve \
+  --config configs/online_self_evolve.yaml \
+  --once \
+  --limit 1
+```
+
+编排器会写出 `online_self_evolve_summary.json` 和 `online_self_evolve_report.md`，
+汇总 stage 状态、replay 数量、Skill 候选数量以及可选 promotion-gate 结论。
+
 ## 关键配置
 
 | 配置 | 用途 |
@@ -408,6 +425,7 @@ assistant 行为、反馈、reward 和 capability axes。
 | `configs/context_benchmark_eval_rl.yaml` | prompt-context benchmark，覆盖事实召回、约束保留和干扰规避。 |
 | `configs/self_evolution_batch.yaml` | 按方向批量运行 self-evolution replay、worker 训练和导出。 |
 | `configs/skill_export.yaml` | 导出 replay mining 得到的 Skill 候选和验证样本。 |
+| `configs/online_self_evolve.yaml` | 完整 online self-evolution 闭环：online-cycle、Skill export 和可选 eval gate。 |
 | `configs/hermes_online_cycle.yaml` | 真实 Hermes online rollout、replay worker 和 self-evolution export。 |
 | `configs/hermes_runtime_sidecar.yaml` | runtime sidecar 示例，用于 session / replay capture。 |
 | `configs/session_train_worker.yaml` | 基于 replay JSONL 的 BC worker。 |
@@ -424,6 +442,7 @@ python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
+python -m hermes_agentic_rl.cli.main online-self-evolve --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
 python -m hermes_agentic_rl.cli.main session-train-worker --config <config> --once
 python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
@@ -443,7 +462,7 @@ hermes_agentic_rl/
   offline/       BC、DPO、reward-model training
   rewards/       Outcome、tool-call、filesystem、feedback、RM components
   monitor/       JSONL、TensorBoard、W&B、dashboard writers
-  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、replay workers、skill-export
+  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、online-self-evolve、replay workers、skill-export
 ```
 
 数据流：

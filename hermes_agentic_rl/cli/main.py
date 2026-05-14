@@ -117,6 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
             "session-train-worker",
             "session-eval-export",
             "self-evolution-batch",
+            "online-self-evolve",
             "skill-export",
         ],
     )
@@ -556,6 +557,19 @@ def main() -> int:
             )
 
             return run_self_evolution_batch(args.config_path)
+        if args.command == "online-self-evolve":
+            if not args.config_path:
+                raise RuntimeError("--config is required for online-self-evolve")
+            from hermes_agentic_rl.cli.online_self_evolve_cli import (
+                run_online_self_evolve,
+            )
+
+            return run_online_self_evolve(
+                args.config_path,
+                limit=args.limit,
+                seed=args.seed,
+                once=bool(args.once),
+            )
         if args.command == "skill-export":
             if not args.config_path:
                 raise RuntimeError("--config is required for skill-export")
