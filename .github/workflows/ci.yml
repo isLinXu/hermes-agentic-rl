@@ -48,7 +48,7 @@ jobs:
           python -m pip install -e '.[dev]'
 
       - name: Ruff
-        run: python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py
+        run: python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py scripts/ci_eval_gate_smoke.py
 
       - name: Mypy
         run: python -m mypy --follow-imports=skip hermes_agentic_rl
@@ -96,6 +96,9 @@ jobs:
           --cov=hermes_agentic_rl
           --cov-report=term-missing
           --cov-report=xml
+
+      - name: Run eval-gate smoke
+        run: python scripts/ci_eval_gate_smoke.py
 
       - name: Upload coverage XML
         if: always()

@@ -289,6 +289,12 @@ python -m hermes_agentic_rl.cli.main eval-rl \
 建议在宣称 checkpoint 提升 agentic behavior 之前，同时查看 held-out reward delta、
 paired A/B、`tool_call_parse_ok`、`tool_name_match` 和 argument-overlap 等指标。
 
+`eval-rl` 会写出 `promotion.md` 和 `capability_report.md`。后者会把底层指标聚合成
+更贴近 Hermes Agent 的能力维度，例如任务成功、工具调用可靠性、交互控制和
+self-evolution 信号。这样我们下一轮优化时，不只看单个 reward，而是能判断到底
+是哪类 agent 能力在提升。自动化流程可以使用 `eval-gate`；当 promotion gate
+建议 `hold` 时，它会返回退出码 `3`。
+
 命令动作阶段的评估：
 
 ```bash
@@ -411,7 +417,7 @@ hermes_agentic_rl/
   offline/       BC、DPO、reward-model training
   rewards/       Outcome、tool-call、filesystem、feedback、RM components
   monitor/       JSONL、TensorBoard、W&B、dashboard writers
-  cli/           Rollout、train、train-rl、eval-rl、self-evolution-batch、online-cycle、replay workers
+  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、replay workers
 ```
 
 数据流：

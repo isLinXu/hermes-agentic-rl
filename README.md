@@ -307,6 +307,13 @@ The recommended gate before promoting a checkpoint is to compare held-out
 reward deltas, paired A/B results, `tool_call_parse_ok`, `tool_name_match`, and
 argument-overlap metrics.
 
+`eval-rl` writes `promotion.md` and `capability_report.md`. The capability
+report groups raw metrics into Hermes-agent capabilities such as task success,
+tool-use reliability, interaction control, and self-evolution signal, which is
+more useful than a single reward when you decide what to optimize next. For
+automation, use `eval-gate`; it returns exit code `3` when the promotion gate
+recommends `hold`.
+
 For the command-action stage:
 
 ```bash
@@ -430,7 +437,7 @@ hermes_agentic_rl/
   offline/       BC, DPO, reward-model training
   rewards/       Outcome, tool-call, filesystem, feedback, RM components
   monitor/       JSONL, TensorBoard, W&B, dashboard writers
-  cli/           Rollout, train, train-rl, eval-rl, self-evolution-batch, online-cycle, replay workers
+  cli/           Rollout, train, train-rl, eval-rl, eval-gate, self-evolution-batch, online-cycle, replay workers
 ```
 
 Data flow:

@@ -154,6 +154,11 @@ eval_rl:
   max_new_tokens: 4
   success_metric: metadata/argument_value_similarity
   success_threshold: 0.0
+  promotion_gate:
+    min_reward_delta: 10.0
+    min_success_rate_delta: 1.1
+    min_rank_metric_delta: 10.0
+    require_paired_winner: true
   include_rollout_text: true
   policies:
     - name: baseline
@@ -193,11 +198,28 @@ metrics:
         "candidate:policy_iter_0003",
     }
     assert summary["best_policy"]["score"] == summary["ranking"][0]["score"]
+    assert summary["promotion_readout"]["baseline"] == "baseline"
+    assert summary["promotion_readout"]["candidate"] in {
+        "candidate:iter_00001",
+        "candidate:iter_00002",
+        "candidate:policy_iter_0003",
+    }
+    assert summary["promotion_readout"]["recommendation"] == "hold"
+    assert summary["promotion_readout"]["passed"] is False
+    assert "min_reward_delta" in summary["promotion_readout"]["failed_checks"]
+    assert "min_rank_metric_delta" in summary["promotion_readout"]["failed_checks"]
+    assert summary["capability_report"]["baseline"] == "baseline"
+    assert summary["capability_report"]["axes"][0]["name"] == "task_success"
+    assert "tool_use_reliability" in {
+        axis["name"] for axis in summary["capability_report"]["axes"]
+    }
     assert "metadata/tool_call_parse_ok" in summary["policies"][0]["metrics"]
     assert "success_score_mean" in summary["policies"][0]["metrics"]
     assert (output_dir / "eval_rollouts.jsonl").exists()
     assert "| baseline |" in (output_dir / "leaderboard.md").read_text(encoding="utf-8")
     assert "| rank | name | mean_reward |" in (output_dir / "ranking.md").read_text(encoding="utf-8")
+    assert "Recommendation: `hold`" in (output_dir / "promotion.md").read_text(encoding="utf-8")
+    assert "| task_success |" in (output_dir / "capability_report.md").read_text(encoding="utf-8")
     assert (output_dir / "metrics.jsonl").exists()
     metrics = [
         json.loads(line)
@@ -205,3 +227,182 @@ metrics:
         if line.strip()
     ]
     assert [record["iter"] for record in metrics] == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+
+def test_eval_rl_cli_can_fail_on_hold_promotion_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset_path = tmp_path / "traces.jsonl"
+    _write_jsonl(dataset_path, [_trace_row(i) for i in range(4)])
+
+    checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint_path = checkpoint_dir / "iter_00001" / "model.pt"
+    checkpoint_path.parent.mkdir(parents=True)
+    backend = TinyCausalLMBackend(
+        TinyBackendConfig(seed=99, dim=16, n_heads=2, n_layers=1, max_len=512)
+    )
+    torch.save(backend.model.state_dict(), checkpoint_path)
+
+    output_dir = tmp_path / "eval_out_fail"
+    config_path = tmp_path / "eval_rl_fail.yaml"
+    config_path.write_text(
+        f"""
+environment:
+  type: hermes_reasoning_traces
+  dataset_path: {dataset_path}
+  dataset_limit: 4
+  shuffle: false
+  history_window_messages: 4
+  max_prompt_chars: 512
+  require_target_substring: '{{"name": "terminal"'
+  tool_call_format_hint: true
+  assistant_response_prefix: |-
+    <think>
+    </think>
+    <tool_call>
+    {{"name": "terminal", "arguments": {{"command": "
+  reward_mode: hybrid
+  tool_call_reward_weight: 0.85
+  text_reward_weight: 0.15
+agent_loop:
+  type: policy
+  stop_strings:
+    - "</tool_call>"
+backend:
+  name: tiny
+  dim: 16
+  n_heads: 2
+  n_layers: 1
+  max_len: 512
+  device: cpu
+  seed: 0
+eval_rl:
+  output_dir: {output_dir}
+  split: val
+  split_by: source_trace_id
+  val_ratio: 0.5
+  test_ratio: 0.0
+  seed: 0
+  n_rollouts: 2
+  temperature: 0.0
+  max_new_tokens: 4
+  success_metric: metadata/argument_value_similarity
+  success_threshold: 0.0
+  promotion_gate:
+    fail_on_hold: true
+    min_reward_delta: 10.0
+    min_success_rate_delta: 1.1
+    min_rank_metric_delta: 10.0
+    require_paired_winner: true
+  policies:
+    - name: baseline
+    - name: candidate
+      checkpoint_dir: {checkpoint_dir}
+metrics:
+  jsonl: true
+  wandb:
+    enabled: false
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["hermes-agentic-rl", "eval-rl", "--config", str(config_path)],
+    )
+
+    assert main() == 3
+    summary = json.loads((output_dir / "eval_summary.json").read_text(encoding="utf-8"))
+    assert summary["promotion_readout"]["recommendation"] == "hold"
+    assert summary["promotion_readout"]["gate"]["fail_on_hold"] is True
+
+
+def test_eval_gate_cli_forces_fail_on_hold_and_updates_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset_path = tmp_path / "traces.jsonl"
+    _write_jsonl(dataset_path, [_trace_row(i) for i in range(4)])
+
+    checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint_path = checkpoint_dir / "iter_00001" / "model.pt"
+    checkpoint_path.parent.mkdir(parents=True)
+    backend = TinyCausalLMBackend(
+        TinyBackendConfig(seed=99, dim=16, n_heads=2, n_layers=1, max_len=512)
+    )
+    torch.save(backend.model.state_dict(), checkpoint_path)
+
+    output_dir = tmp_path / "eval_gate_out"
+    config_path = tmp_path / "eval_gate.yaml"
+    config_path.write_text(
+        f"""
+environment:
+  type: hermes_reasoning_traces
+  dataset_path: {dataset_path}
+  dataset_limit: 4
+  shuffle: false
+  history_window_messages: 4
+  max_prompt_chars: 512
+  require_target_substring: '{{"name": "terminal"'
+  tool_call_format_hint: true
+  assistant_response_prefix: |-
+    <think>
+    </think>
+    <tool_call>
+    {{"name": "terminal", "arguments": {{"command": "
+  reward_mode: hybrid
+  tool_call_reward_weight: 0.85
+  text_reward_weight: 0.15
+agent_loop:
+  type: policy
+  stop_strings:
+    - "</tool_call>"
+backend:
+  name: tiny
+  dim: 16
+  n_heads: 2
+  n_layers: 1
+  max_len: 512
+  device: cpu
+  seed: 0
+eval_rl:
+  output_dir: {output_dir}
+  split: val
+  split_by: source_trace_id
+  val_ratio: 0.5
+  test_ratio: 0.0
+  seed: 0
+  n_rollouts: 2
+  temperature: 0.0
+  max_new_tokens: 4
+  success_metric: metadata/argument_value_similarity
+  success_threshold: 0.0
+  promotion_gate:
+    min_reward_delta: 10.0
+    min_success_rate_delta: 1.1
+    min_rank_metric_delta: 10.0
+    require_paired_winner: true
+  policies:
+    - name: baseline
+    - name: candidate
+      checkpoint_dir: {checkpoint_dir}
+metrics:
+  jsonl: true
+  wandb:
+    enabled: false
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["hermes-agentic-rl", "eval-gate", "--config", str(config_path)],
+    )
+
+    assert main() == 3
+    summary = json.loads((output_dir / "eval_summary.json").read_text(encoding="utf-8"))
+    assert summary["command"] == "eval-gate"
+    assert summary["promotion_readout"]["gate"]["fail_on_hold"] is True

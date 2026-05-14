@@ -11,6 +11,7 @@ import yaml  # type: ignore[import-untyped]
 from hermes_agentic_rl.cli.session_eval_export_cli import run_session_eval_export_config
 from hermes_agentic_rl.cli.session_replay_cli import run_session_replay_config
 from hermes_agentic_rl.cli.session_train_worker_cli import run_session_train_worker_config
+from hermes_agentic_rl.eval.capability_axes import infer_objective_axes
 
 
 def _load_config(path: str | Path) -> dict[str, Any]:
@@ -230,6 +231,18 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             "slug": slug,
             "description": direction_cfg.get("description", ""),
             "objective": direction_cfg.get("objective", {}),
+            "capability_plan": {
+                "target_metrics": (
+                    direction_cfg.get("objective", {}).get("target_metrics", [])
+                    if isinstance(direction_cfg.get("objective"), dict)
+                    else []
+                ),
+                "axes": infer_objective_axes(
+                    direction_cfg.get("objective", {}).get("target_metrics", [])
+                    if isinstance(direction_cfg.get("objective"), dict)
+                    else []
+                ),
+            },
             "paths": {
                 "directory": str(direction_dir),
                 "replay": str(replay_path),
@@ -286,6 +299,13 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             "replay_samples": replay_samples_total,
             "worker_updates": worker_updates_total,
         },
+        "capability_axes": sorted(
+            {
+                axis
+                for direction in direction_summaries
+                for axis in direction.get("capability_plan", {}).get("axes", [])
+            }
+        ),
     }
     _json_dump(output_dir / "batch_summary.json", batch_summary)
     print(
