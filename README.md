@@ -326,7 +326,7 @@ python -m hermes_agentic_rl.cli.main eval-rl \
 `online-cycle` is the end-to-end online path:
 
 1. Run real Hermes on task prompts.
-2. Write raw session traces and replay samples with the session sidecar.
+2. Write raw session traces and direction-aware replay samples with the session sidecar.
 3. Train a local worker from replay, using `bc`, `dpo`, or `rm` worker configs.
 4. Export the same traces as a self-evolution dataset.
 5. Log worker metrics to JSONL and W&B.
@@ -348,6 +348,11 @@ Main outputs:
 - `outputs/hermes_online_cycle/worker_state.json`
 - `outputs/hermes_online_cycle/worker_metrics.jsonl`
 - `outputs/hermes_online_cycle/self_evolution_dataset/`
+
+Replay records include `metadata.replay_mining`, which tags capability axes,
+mining reasons, recommended uses, and Skill-candidate signals. The matching
+quality report aggregates these tags so we can filter replay data by direction
+instead of treating every session turn as the same kind of training signal.
 
 ### Self-Evolution Export
 
@@ -389,6 +394,9 @@ Main outputs:
 
 Use this when you want to compare optimization directions such as tool-call
 reliability, recovery behavior, or completion quality in one repeatable run.
+The batch summary also reports `mined_replay_axes` and `skill_candidates`,
+which are early signals for deciding whether the next loop should train
+weights, mine more sessions, or export candidate Skills.
 
 ## Key Configurations
 
@@ -430,7 +438,7 @@ python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
 hermes_agentic_rl/
   runtime/       Hermes and fake runtime adapters
   framework/     EnvTrainingPipeline and SessionTrainingPipeline
-  collectors/    Session sidecar, replay export, quality filters
+  collectors/    Session sidecar, replay export, quality filters, replay mining
   envs/          Echo, simulated tool, curriculum, Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
   eval/          Held-out eval, leaderboard, paired A/B comparison

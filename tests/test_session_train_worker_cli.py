@@ -176,6 +176,103 @@ def test_session_train_worker_cli_respects_min_reward_filter(tmp_path: Path, mon
     assert not save_path.exists()
 
 
+def test_session_train_worker_cli_filters_by_replay_mining_metadata(
+    tmp_path: Path,
+    monkeypatch,
+):
+    replay_path = tmp_path / "mining_replay.jsonl"
+    replay_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "prompt_ids": [1, 10, 11],
+                        "response_ids": [12, 13],
+                        "reward": 1.0,
+                        "metadata": {
+                            "session_id": "sess-tool",
+                            "capability_axes": ["tool_use_reliability"],
+                            "replay_mining": {
+                                "axes": ["tool_use_reliability"],
+                                "recommended_uses": ["tool_reliability_replay"],
+                                "skill_candidate": False,
+                            },
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "prompt_ids": [1, 20, 21],
+                        "response_ids": [22, 23],
+                        "reward": 1.0,
+                        "metadata": {
+                            "session_id": "sess-task",
+                            "capability_axes": ["task_success"],
+                            "replay_mining": {
+                                "axes": ["task_success"],
+                                "recommended_uses": ["positive_replay"],
+                                "skill_candidate": False,
+                            },
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    save_path = tmp_path / "mining_policy.pt"
+    state_path = tmp_path / "mining_state.json"
+    quarantine_path = tmp_path / "mining_quarantine.jsonl"
+    config_path = tmp_path / "mining_worker.yaml"
+    config_path.write_text(
+        (
+            "algo: bc\n"
+            f"input_path: {replay_path}\n"
+            f"save_path: {save_path}\n"
+            f"state_path: {state_path}\n"
+            f"quarantine_path: {quarantine_path}\n"
+            "backend:\n"
+            "  name: tiny\n"
+            "  dim: 16\n"
+            "  n_heads: 2\n"
+            "  n_layers: 2\n"
+            "train:\n"
+            "  n_epochs: 1\n"
+            "  batch_size: 1\n"
+            "  min_reward: 0.0\n"
+            "  replay_filter:\n"
+            "    require_any_capability_axes: [tool_use_reliability]\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hermes-agentic-rl",
+            "session-train-worker",
+            "--config",
+            str(config_path),
+            "--once",
+        ],
+    )
+
+    assert main() == 0
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["updates"] == 1
+    assert state["trained_samples"] == 1
+    assert state["metadata_filtered_records"] == 1
+    quarantine_rows = [
+        json.loads(line)
+        for line in quarantine_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert quarantine_rows[0]["kind"] == "metadata_filtered_replay_record"
+    assert quarantine_rows[0]["reason"] == "missing_any_capability_axis"
+
+
 def test_session_train_worker_cli_bc_recovers_after_checkpoint_loss(
     tmp_path: Path, monkeypatch, capsys
 ):

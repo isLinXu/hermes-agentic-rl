@@ -17,3 +17,12 @@ backend:
 #   min_response_tokens: 8
 #   max_abs_reward: 5.0
 #   dedupe_within_scan: true
+
+# Direction-aware replay mining is enabled by default. It annotates each replay
+# record with capability axes, reasons, recommended uses, and whether it looks
+# like a future Skill candidate.
+replay_mining:
+  enabled: true
+  min_skill_reward: 0.5
+  long_context_messages: 8
+  long_context_chars: 3000

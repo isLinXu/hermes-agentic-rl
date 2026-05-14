@@ -89,6 +89,7 @@ def _default_worker_state() -> dict[str, Any]:
         "invalid_json_lines": 0,
         "invalid_records": 0,
         "quality_filtered_records": 0,
+        "metadata_filtered_records": 0,
         "quarantined_records": 0,
         "seen_pair_fingerprints": [],
     }
@@ -197,6 +198,85 @@ def _read_new_jsonl_records(
     return records, safe_offset, {"invalid_json_lines": len(rejected), "rejected": rejected}
 
 
+def _apply_replay_metadata_filters(
+    records: list[dict[str, Any]],
+    cfg: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    config = cfg or {}
+    if not config:
+        return records, []
+
+    require_any_axes = _string_set(config.get("require_any_capability_axes"))
+    require_all_axes = _string_set(config.get("require_all_capability_axes"))
+    require_any_uses = _string_set(config.get("require_any_recommended_uses"))
+    require_all_uses = _string_set(config.get("require_all_recommended_uses"))
+    require_skill_raw = config.get("require_skill_candidate")
+    require_skill = require_skill_raw if isinstance(require_skill_raw, bool) else None
+
+    valid: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for idx, record in enumerate(records):
+        metadata = record.get("metadata", {})
+        mining = metadata.get("replay_mining", {}) if isinstance(metadata, dict) else {}
+        axes = _metadata_values(metadata, mining, "capability_axes", "axes")
+        uses = _metadata_values(metadata, mining, "recommended_uses", "recommended_uses")
+        skill_candidate = bool(mining.get("skill_candidate")) if isinstance(mining, dict) else False
+
+        reason = None
+        if require_any_axes and not (axes & require_any_axes):
+            reason = "missing_any_capability_axis"
+        elif require_all_axes and not require_all_axes.issubset(axes):
+            reason = "missing_required_capability_axis"
+        elif require_any_uses and not (uses & require_any_uses):
+            reason = "missing_any_recommended_use"
+        elif require_all_uses and not require_all_uses.issubset(uses):
+            reason = "missing_required_recommended_use"
+        elif require_skill is not None and skill_candidate is not require_skill:
+            reason = "skill_candidate_mismatch"
+
+        if reason is not None:
+            rejected.append(
+                {
+                    "kind": "metadata_filtered_replay_record",
+                    "index": idx,
+                    "reason": reason,
+                    "required": dict(config),
+                    "record": record,
+                }
+            )
+            continue
+        valid.append(record)
+    return valid, rejected
+
+
+def _string_set(value: Any) -> set[str]:
+    if value is None or value is False:
+        return set()
+    if isinstance(value, str):
+        return {value} if value else set()
+    if isinstance(value, list):
+        return {str(item) for item in value if str(item)}
+    return set()
+
+
+def _metadata_values(
+    metadata: Any,
+    mining: Any,
+    metadata_key: str,
+    mining_key: str,
+) -> set[str]:
+    values: set[str] = set()
+    if isinstance(metadata, dict):
+        raw = metadata.get(metadata_key)
+        if isinstance(raw, list):
+            values.update(str(item) for item in raw if str(item))
+    if isinstance(mining, dict):
+        raw = mining.get(mining_key)
+        if isinstance(raw, list):
+            values.update(str(item) for item in raw if str(item))
+    return values
+
+
 def _source_state(path: str | Path) -> dict[str, Any]:
     target = Path(path)
     if not target.exists():
@@ -290,6 +370,7 @@ def _emit_worker_metrics(
         "invalid_json_lines": int(state.get("invalid_json_lines", 0)),
         "invalid_records": int(state.get("invalid_records", 0)),
         "quality_filtered_records": int(state.get("quality_filtered_records", 0)),
+        "metadata_filtered_records": int(state.get("metadata_filtered_records", 0)),
         "quarantined_records": int(state.get("quarantined_records", 0)),
     }
     if "last_loss" in state:
@@ -330,6 +411,7 @@ def run_session_train_worker_config(
     run_once = bool(cfg.get("run_once", False)) or once
     train_only_new_pairs = bool(train_cfg.get("train_only_new_pairs", True))
     quality_cfg = train_cfg.get("data_quality", {}) or {}
+    replay_filter_cfg = train_cfg.get("replay_filter", cfg.get("replay_filter", {}) or {}) or {}
     dashboard_cfg = cfg.get("dashboard", {}) or {}
     dashboard: LiveDashboard | None = None
     extra_sinks: list[Any] = []
@@ -456,13 +538,20 @@ def run_session_train_worker_config(
 
             valid_records, invalid_records = _normalize_replay_records(records)
             valid_records, quality_rejected = _apply_record_quality_filters(valid_records, quality_cfg)
-            total_rejected = scan_rejected + invalid_records + quality_rejected
+            valid_records, metadata_rejected = _apply_replay_metadata_filters(
+                valid_records,
+                replay_filter_cfg,
+            )
+            total_rejected = scan_rejected + invalid_records + quality_rejected + metadata_rejected
             if total_rejected and wrote_rejects_this_scan:
                 state["invalid_json_lines"] = int(state.get("invalid_json_lines", 0)) + len(scan_rejected)
                 state["invalid_records"] = int(state.get("invalid_records", 0)) + len(invalid_records)
                 state["quality_filtered_records"] = int(
                     state.get("quality_filtered_records", 0)
                 ) + len(quality_rejected)
+                state["metadata_filtered_records"] = int(
+                    state.get("metadata_filtered_records", 0)
+                ) + len(metadata_rejected)
                 if quarantine_path:
                     append_jsonl(quarantine_path, total_rejected)
                     state["quarantined_records"] = int(state.get("quarantined_records", 0)) + len(total_rejected)
@@ -482,6 +571,7 @@ def run_session_train_worker_config(
                         "scan_rejected": len(scan_rejected),
                         "invalid_records_this_scan": len(invalid_records),
                         "quality_rejected_this_scan": len(quality_rejected),
+                        "metadata_rejected_this_scan": len(metadata_rejected),
                     },
                 )
                 if run_once or (max_idle_polls > 0 and idle_polls >= max_idle_polls):
@@ -504,6 +594,7 @@ def run_session_train_worker_config(
                 "scan_rejected": len(scan_rejected),
                 "invalid_records_this_scan": len(invalid_records),
                 "quality_rejected_this_scan": len(quality_rejected),
+                "metadata_rejected_this_scan": len(metadata_rejected),
                 "quarantine_path": str(quarantine_path) if quarantine_path else "",
             }
 

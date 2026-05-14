@@ -43,9 +43,10 @@ capability improved?" rather than only "did reward go up?".
    capability axes.
 
 2. Direction-aware replay mining.
-   Extend session replay reports so each replay sample records why it is useful:
-   tool reliability, recovery, context preservation, or Skill-worthy procedure.
-   This makes self-evolution datasets easier to filter and compare.
+   Implemented in this batch. Session replay records now include
+   `metadata.replay_mining` and `metadata.capability_axes`, while quality
+   reports summarize axes, reasons, recommended uses, and Skill-candidate
+   counts. This makes self-evolution datasets easier to filter and compare.
 
 3. Skill export loop.
    Add an exporter that converts repeated high-quality sessions into
@@ -83,3 +84,5 @@ Review:
 - `capability_report.md`
 - W&B summary -> `capability_report`
 - `outputs/hermes_self_evolution_batch/batch_summary.json` -> `capability_axes`
+- `replay.jsonl` -> `metadata.replay_mining`
+- `replay_quality_report.json` -> `replay_mining`
