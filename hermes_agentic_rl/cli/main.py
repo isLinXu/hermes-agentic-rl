@@ -117,6 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
             "session-train-worker",
             "session-eval-export",
             "self-evolution-batch",
+            "skill-export",
         ],
     )
     return parser
@@ -555,6 +556,16 @@ def main() -> int:
             )
 
             return run_self_evolution_batch(args.config_path)
+        if args.command == "skill-export":
+            if not args.config_path:
+                raise RuntimeError("--config is required for skill-export")
+            from hermes_agentic_rl.cli.skill_export_cli import run_skill_export
+
+            return run_skill_export(
+                args.config_path,
+                input_path=args.input,
+                output_path=args.output_path,
+            )
         if args.command == "atropos-preflight":
             from hermes_agentic_rl.integrations.atropos_preflight import run_atropos_preflight
 

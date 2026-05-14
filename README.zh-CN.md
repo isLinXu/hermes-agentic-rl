@@ -376,6 +376,21 @@ python -m hermes_agentic_rl.cli.main self-evolution-batch \
 batch summary 也会输出 `mined_replay_axes` 和 `skill_candidates`，帮助判断下一轮
 应该继续训练权重、采集更多 session，还是导出候选 Skills。
 
+### Skill Candidate 导出
+
+Replay mining 现在可以进一步沉淀为具体的 agent 能力资产。`skill-export` 会读取
+replay JSONL，筛选 `metadata.replay_mining.skill_candidate` 标记的样本，并导出
+可人工 review 的 Skill 候选和验证样本。
+
+```bash
+python -m hermes_agentic_rl.cli.main skill-export \
+  --config configs/skill_export.yaml
+```
+
+每个候选目录包含 `SKILL.md`、`manifest.json` 和 `validation.jsonl`。新的 replay
+记录还会保留紧凑的 `metadata.source_turn` 证据，让生成的 Skill 草案能够引用用户任务、
+assistant 行为、反馈、reward 和 capability axes。
+
 ## 关键配置
 
 | 配置 | 用途 |
@@ -389,6 +404,7 @@ batch summary 也会输出 `mined_replay_axes` 和 `skill_candidates`，帮助�
 | `configs/hermes_reasoning_traces_eval_rl.yaml` | held-out benchmark，对比 baseline 与 RL checkpoint。 |
 | `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | stage-2 command-action checkpoint 的 held-out benchmark。 |
 | `configs/self_evolution_batch.yaml` | 按方向批量运行 self-evolution replay、worker 训练和导出。 |
+| `configs/skill_export.yaml` | 导出 replay mining 得到的 Skill 候选和验证样本。 |
 | `configs/hermes_online_cycle.yaml` | 真实 Hermes online rollout、replay worker 和 self-evolution export。 |
 | `configs/hermes_runtime_sidecar.yaml` | runtime sidecar 示例，用于 session / replay capture。 |
 | `configs/session_train_worker.yaml` | 基于 replay JSONL 的 BC worker。 |
@@ -408,6 +424,7 @@ python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --lim
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
 python -m hermes_agentic_rl.cli.main session-train-worker --config <config> --once
 python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
+python -m hermes_agentic_rl.cli.main skill-export --config <config>
 ```
 
 ## 架构
@@ -416,14 +433,14 @@ python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
 hermes_agentic_rl/
   runtime/       Hermes 和 fake runtime adapters
   framework/     EnvTrainingPipeline 和 SessionTrainingPipeline
-  collectors/    Session sidecar、replay export、quality filters、replay mining
+  collectors/    Session sidecar、replay export、quality filters、replay mining、Skill export
   envs/          Echo、simulated tool、curriculum、Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
   eval/          Held-out eval、leaderboard、paired A/B comparison
   offline/       BC、DPO、reward-model training
   rewards/       Outcome、tool-call、filesystem、feedback、RM components
   monitor/       JSONL、TensorBoard、W&B、dashboard writers
-  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、replay workers
+  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、replay workers、skill-export
 ```
 
 数据流：

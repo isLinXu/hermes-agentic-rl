@@ -1,0 +1,9 @@
+skill_export:
+  input_path: outputs/hermes_self_evolution_batch/tool_use_reliability/replay.jsonl
+  output_dir: outputs/hermes_skill_candidates
+  require_skill_candidate: true
+  min_reward: 0.25
+  group_by: primary_axis
+  min_examples_per_skill: 1
+  max_examples_per_skill: 8
+  name_prefix: hermes

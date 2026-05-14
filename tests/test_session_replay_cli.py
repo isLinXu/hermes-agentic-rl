@@ -226,12 +226,15 @@ def test_session_replay_cli_adds_direction_aware_replay_mining(
     assert main() == 0
     buffer = ReplayBuffer.load_jsonl(output_path)
     mining = buffer.samples[0].metadata["replay_mining"]
+    source_turn = buffer.samples[0].metadata["source_turn"]
     assert mining["skill_candidate"] is True
     assert "tool_use_reliability" in mining["axes"]
     assert "skill_learning" in mining["axes"]
     assert "tool_reliability_replay" in mining["recommended_uses"]
     assert "skill_candidate" in mining["recommended_uses"]
     assert buffer.samples[0].metadata["capability_axes"] == mining["axes"]
+    assert source_turn["prompt_messages"][0]["content"] == "Create a report file"
+    assert source_turn["assistant_message"]["content"] == "I created the report file."
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["replay_mining"]["samples_scored"] == 1
