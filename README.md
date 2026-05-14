@@ -49,7 +49,7 @@ benchmarks.
 | Training paths | `train-rl` for GRPO/PPO, `online-cycle` for Hermes replay plus worker training, `online-self-evolve` for the full closed loop |
 | Trainable surfaces | Tiny/HF policy backends, PPO value heads, LoRA adapters, reward-model heads, BC/DPO workers |
 | Data sources | Hugging Face traces, local parquet shards, real Hermes session logs, replay JSONL |
-| Evaluation | Held-out grouped trace benchmarks, checkpoint ranking, paired A/B comparisons |
+| Evaluation | Held-out grouped trace benchmarks, benchmark-suite scorecards, checkpoint ranking, paired A/B comparisons |
 | Observability | W&B, TensorBoard, JSONL metrics, live dashboard, structured reward components |
 
 ## Recommended Paths
@@ -61,6 +61,7 @@ benchmarks.
 | Train a small on-policy policy quickly | `configs/hermes_reasoning_traces_grpo_smoke.yaml` |
 | Train on a local parquet shard with MPS | `configs/hermes_reasoning_traces_parquet_mps_filtered.yaml` |
 | Verify whether RL improved behavior | `configs/hermes_reasoning_traces_eval_rl.yaml` |
+| Run a unified benchmark scorecard | `configs/benchmark_suite.yaml` |
 | Batch self-evolution validation by direction | `configs/self_evolution_batch.yaml` |
 | Run Hermes, replay, worker training, and export in one loop | `configs/hermes_online_cycle.yaml` |
 
@@ -153,6 +154,7 @@ stable entry points.
 | Local RL validation run | `train-rl` | CPU-friendly Tiny backend with GRPO/PPO and W&B/TensorBoard metrics. |
 | Real dataset RL | `configs/hermes_reasoning_traces_grpo.yaml` | Uses `lambda/hermes-agent-reasoning-traces`; the smoke config is only for quick validation. |
 | Held-out RL benchmark | `eval-rl` | Baseline vs checkpoint on grouped held-out traces with structured metrics. |
+| Benchmark suite scorecard | `benchmark-suite` | Runs multiple held-out benchmarks and writes unified pass/fail scorecards. |
 | Prompt/context benchmark | `configs/context_benchmark_eval_rl.yaml` | Measures long-context fact recall, constraint preservation, tool-summary retention, distractor avoidance, and concise synthesis. |
 | Online Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export. |
 | Online self-evolution loop | `configs/online_self_evolve.yaml` | Online cycle -> Skill candidates -> optional eval gate report. |
@@ -452,6 +454,7 @@ recommendation.
 | `configs/hermes_reasoning_traces_eval_rl.yaml` | Held-out benchmark comparing baseline vs RL checkpoint on grouped traces. |
 | `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | Held-out benchmark for stage-2 command-action checkpoints. |
 | `configs/context_benchmark_eval_rl.yaml` | Prompt-context benchmark for fact recall, constraint retention, and distractor avoidance. |
+| `configs/benchmark_suite.yaml` | Unified benchmark suite that writes `scorecard.json` and `scorecard.md`. |
 | `configs/self_evolution_batch.yaml` | Batch directional self-evolution replay, worker training, and export. |
 | `configs/skill_export.yaml` | Export replay-mined Skill candidates and validation examples. |
 | `configs/online_self_evolve.yaml` | Full online self-evolution loop: online-cycle, Skill export, and optional eval gate. |
@@ -469,6 +472,7 @@ python -m hermes_agentic_rl.cli.main rollout --config <config> --output outputs/
 python -m hermes_agentic_rl.cli.main train --config <config>
 python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
+python -m hermes_agentic_rl.cli.main benchmark-suite --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main online-self-evolve --config <config> --once --limit 1
@@ -487,11 +491,11 @@ hermes_agentic_rl/
   collectors/    Session sidecar, replay export, quality filters, replay mining, Skill export
   envs/          Echo, simulated tool, curriculum, Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
-  eval/          Held-out eval, leaderboard, paired A/B comparison
+  eval/          Held-out eval, benchmark suites, leaderboard, paired A/B comparison
   offline/       BC, DPO, reward-model training
   rewards/       Outcome, tool-call, filesystem, feedback, RM components
   monitor/       JSONL, TensorBoard, W&B, dashboard writers
-  cli/           Rollout, train, train-rl, eval-rl, eval-gate, self-evolution-batch, online-cycle, online-self-evolve, replay workers, skill-export
+  cli/           Rollout, train, train-rl, eval-rl, eval-gate, benchmark-suite, self-evolution-batch, online-cycle, online-self-evolve, replay workers, skill-export
 ```
 
 Data flow:

@@ -305,6 +305,50 @@ If `required_capability_axes`, `capability_thresholds`, or
 `capability_report.deltas`, so a candidate cannot pass merely by improving the
 aggregate reward while regressing an important agent capability.
 
+## Benchmark Suite Scorecards
+
+`benchmark-suite` runs multiple `eval-rl` configs and aggregates them into a
+single release-style scorecard:
+
+```yaml
+benchmark_suite:
+  name: hermes-agentic-scorecard
+  output_dir: outputs/hermes_benchmark_suite
+  fail_on_required_failure: true
+  benchmarks:
+    - name: hermes-tool-call-heldout
+      config_path: configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
+      required: true
+      weight: 1.0
+      score_metric: mean_reward
+      thresholds:
+        min_score: 0.0
+        min_success_rate: 0.0
+    - name: prompt-context-retention
+      config_path: configs/context_benchmark_eval_rl.yaml
+      required: true
+      weight: 1.0
+      score_metric: metadata/context_required_fact_recall
+      thresholds:
+        min_score: 0.0
+```
+
+```bash
+python -m hermes_agentic_rl.cli.main benchmark-suite \
+  --config configs/benchmark_suite.yaml
+```
+
+Each benchmark writes its normal `eval_summary.json`, `promotion.md`, and
+`capability_report.md` under the suite output directory. The suite then writes
+`scorecard.json` and `scorecard.md` with per-benchmark status, best policy,
+promotion recommendation, threshold checks, required pass rate, and weighted
+score. Use `require_promotion: true` on a benchmark when the suite should fail
+unless that benchmark's promotion gate recommends `promote`. If an individual
+benchmark crashes or fails to write a valid summary, the suite still records the
+error in the scorecard so CI can report the broken benchmark directly.
+`config_path` entries may be absolute, relative to the suite file, or relative
+to the command's current working directory.
+
 ## Skill Candidate Export
 
 `skill-export` converts replay records tagged by `metadata.replay_mining` into

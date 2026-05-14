@@ -109,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
             "train-rl",
             "eval-rl",
             "eval-gate",
+            "benchmark-suite",
             "online-cycle",
             "atropos-preflight",
             "hermes-preflight",
@@ -499,6 +500,12 @@ def main() -> int:
             from hermes_agentic_rl.eval.rl_eval import run_eval_gate
 
             return run_eval_gate(args.config_path, output_dir=args.output_path)
+        if args.command == "benchmark-suite":
+            if not args.config_path:
+                raise RuntimeError("--config is required for benchmark-suite")
+            from hermes_agentic_rl.eval.benchmark_suite import run_benchmark_suite
+
+            return run_benchmark_suite(args.config_path, output_dir=args.output_path)
         if args.command == "online-cycle":
             if not args.config_path:
                 raise RuntimeError("--config is required for online-cycle")
