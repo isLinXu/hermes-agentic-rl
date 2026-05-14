@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ CLI (cli/)                                                  │
-│   main.py      rollout / train / train-rl / eval-rl / offline│
+│   main.py      rollout / train / train-rl / eval-rl / eval-gate / offline│
 │   train_rl.py  YAML → trainer factory                       │
 └─────────────┬───────────────────────────────────────────────┘
               ↓
@@ -89,7 +89,8 @@ MetricsWriter(record) [jsonl / tb / wandb / dashboard]
 | Offline | `offline/` | `BCTrainer`, `DPOTrainer`, `ReplayBuffer` |
 | PEFT | `peft/` | `LoRALinear`, `inject_lora` |
 | Env | `envs/` | `EchoTaskEnv`, `SimToolEnv`, `LetterCountingEnv`, `CurriculumEnv` |
-| Eval | `eval/` | `EvalHarness`, `run_eval_rl`, `VersionManager`, `run_ab`, `paired_welch_t` |
+| Eval | `eval/` | `EvalHarness`, `run_eval_rl`, `run_eval_gate`, `VersionManager`, `run_ab`, `paired_welch_t` |
+| Capability eval | `eval/capability_axes.py` | Agent capability axes for task success, tool reliability, interaction control, and self-evolution signal |
 | Monitor | `monitor/` | `LiveDashboard`, `JsonlMetricsWriter`, `TensorBoardMetricsWriter`, `WandbMetricsWriter`, `MultiMetricsWriter` |
 | Distributed | `distributed/` | `MPRolloutPool` (stdlib multiprocessing) |
 | Integration | `integrations/` | `AtroposEnvAdapter`, `HermesAPIServer`, `AtroposRewardComponent` |

@@ -5,6 +5,7 @@
 | [architecture.md](architecture.md) | 14-layer architecture overview, data flow, extension points |
 | [hermes-native-training-framework.md](hermes-native-training-framework.md) | Hermes-native training facade and pipeline mapping |
 | [experiments.md](experiments.md) | Run snapshots, W&B links, and benchmark notes |
+| [hermes-agentic-rl-optimization-plan.md](hermes-agentic-rl-optimization-plan.md) | Article-based optimization roadmap for Hermes-style self-evolution + RL |
 | [self-evolution-export.md](self-evolution-export.md) | Export Hermes session traces into self-evolution-friendly eval datasets |
 | [training_loop.md](training_loop.md) | Full `OnPolicyTrainer` lifecycle: rollout → reward → loss → step |
 | [configuration.md](configuration.md) | YAML schema reference for `train-rl` |

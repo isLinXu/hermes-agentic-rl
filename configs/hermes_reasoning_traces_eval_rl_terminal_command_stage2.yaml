@@ -54,6 +54,25 @@ eval_rl:
   success_metric: metadata/argument_value_similarity
   success_threshold: 0.2
   rank_metric: mean_reward
+  promotion_gate:
+    min_reward_delta: 0.01
+    min_success_rate_delta: 0.02
+    min_rank_metric_delta: 0.01
+    require_paired_winner: true
+    max_p_value: 0.10
+  capability_axes:
+    tool_use_reliability:
+      description: Valid Hermes tool-call structure and terminal command fidelity.
+      metrics:
+        - metadata/tool_call_parse_ok
+        - metadata/tool_name_match
+        - metadata/argument_key_overlap
+        - metadata/argument_value_similarity
+    command_content:
+      description: Whether the generated terminal command matches the target action.
+      metrics:
+        - metadata/argument_value_similarity
+        - success_rate
   include_rollout_text: true
   include_trajectories: false
   policies:
