@@ -47,7 +47,7 @@ model，并通过 held-out benchmark 验证改进。
 | 训练路径 | `train-rl` 负责 GRPO/PPO on-policy 训练，`online-cycle` 负责 Hermes replay + worker 训练，`online-self-evolve` 负责完整闭环 |
 | 可训练对象 | Tiny/HF policy backend、PPO value head、LoRA adapter、reward-model head、BC/DPO worker |
 | 数据来源 | Hugging Face traces、本地 parquet shard、真实 Hermes session log、replay JSONL |
-| 评估方式 | held-out grouped trace benchmark、checkpoint ranking、paired A/B 对比 |
+| 评估方式 | held-out grouped trace benchmark、benchmark-suite scorecard、checkpoint ranking、paired A/B 对比 |
 | 可观测性 | W&B、TensorBoard、JSONL metrics、live dashboard、结构化 reward components |
 
 ## 推荐入口
@@ -59,6 +59,7 @@ model，并通过 held-out benchmark 验证改进。
 | 快速做一个小型 on-policy 训练 | `configs/hermes_reasoning_traces_grpo_smoke.yaml` |
 | 在本地 parquet shard 上用 MPS 训练 | `configs/hermes_reasoning_traces_parquet_mps_filtered.yaml` |
 | 验证 RL 是否真的带来提升 | `configs/hermes_reasoning_traces_eval_rl.yaml` |
+| 运行统一 benchmark scorecard | `configs/benchmark_suite.yaml` |
 | 按优化方向批量验证 agent 自进化 | `configs/self_evolution_batch.yaml` |
 | 跑真实 Hermes、replay、worker 训练和导出闭环 | `configs/hermes_online_cycle.yaml` |
 
@@ -143,6 +144,7 @@ flowchart LR
 | 本地 RL 快速验证 | `train-rl` | CPU 友好的 Tiny backend，支持 GRPO/PPO 与 W&B/TensorBoard 指标。 |
 | 真实数据 RL | `configs/hermes_reasoning_traces_grpo.yaml` | 使用 `lambda/hermes-agent-reasoning-traces`；smoke 配置只用于快速验证。 |
 | Held-out RL benchmark | `eval-rl` | 在分组 held-out traces 上对比 baseline 与 checkpoint。 |
+| Benchmark suite scorecard | `benchmark-suite` | 运行多个 held-out benchmark，并写出统一 pass/fail scorecard。 |
 | Prompt/context benchmark | `configs/context_benchmark_eval_rl.yaml` | 测量长上下文事实召回、约束保留、工具摘要保留、干扰规避和简洁回答。 |
 | 在线 Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export。 |
 | 在线 self-evolution 闭环 | `configs/online_self_evolve.yaml` | Online cycle -> Skill 候选 -> 可选 eval gate 报告。 |
@@ -428,6 +430,7 @@ promotion-gate 结论。
 | `configs/hermes_reasoning_traces_eval_rl.yaml` | held-out benchmark，对比 baseline 与 RL checkpoint。 |
 | `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | stage-2 command-action checkpoint 的 held-out benchmark。 |
 | `configs/context_benchmark_eval_rl.yaml` | prompt-context benchmark，覆盖事实召回、约束保留和干扰规避。 |
+| `configs/benchmark_suite.yaml` | 统一 benchmark suite，写出 `scorecard.json` 和 `scorecard.md`。 |
 | `configs/self_evolution_batch.yaml` | 按方向批量运行 self-evolution replay、worker 训练和导出。 |
 | `configs/skill_export.yaml` | 导出 replay mining 得到的 Skill 候选和验证样本。 |
 | `configs/online_self_evolve.yaml` | 完整 online self-evolution 闭环：online-cycle、Skill export 和可选 eval gate。 |
@@ -445,6 +448,7 @@ python -m hermes_agentic_rl.cli.main rollout --config <config> --output outputs/
 python -m hermes_agentic_rl.cli.main train --config <config>
 python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
+python -m hermes_agentic_rl.cli.main benchmark-suite --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main online-self-evolve --config <config> --once --limit 1
@@ -463,11 +467,11 @@ hermes_agentic_rl/
   collectors/    Session sidecar、replay export、quality filters、replay mining、Skill export
   envs/          Echo、simulated tool、curriculum、Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
-  eval/          Held-out eval、leaderboard、paired A/B comparison
+  eval/          Held-out eval、benchmark suites、leaderboard、paired A/B comparison
   offline/       BC、DPO、reward-model training
   rewards/       Outcome、tool-call、filesystem、feedback、RM components
   monitor/       JSONL、TensorBoard、W&B、dashboard writers
-  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、online-self-evolve、replay workers、skill-export
+  cli/           Rollout、train、train-rl、eval-rl、eval-gate、benchmark-suite、self-evolution-batch、online-cycle、online-self-evolve、replay workers、skill-export
 ```
 
 数据流：
