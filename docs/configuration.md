@@ -212,6 +212,18 @@ eval_rl:
     min_rank_metric_delta: 0.01
     require_paired_winner: true
     max_p_value: 0.10
+  capability_axes:                   # false disables; omitted uses defaults
+    tool_use_reliability:
+      description: Hermes tool-call structure and argument fidelity
+      metrics:
+        - metadata/tool_call_parse_ok
+        - metadata/tool_name_match
+        - metadata/argument_key_overlap
+        - metadata/argument_value_similarity
+    task_success:
+      metrics:
+        - { name: mean_reward, weight: 0.6 }
+        - { name: success_rate, weight: 0.4 }
   policies:
     - name: baseline
     - name: rl_checkpoint
@@ -221,11 +233,19 @@ eval_rl:
       max_checkpoints: 3
 ```
 
-Outputs are `eval_summary.json`, `eval_rollouts.jsonl`, `leaderboard.md`, and
-`ranking.md`. The summary also includes `best_policy`, `ranking`,
-`success_metric`, and `success_threshold` so you can pick the strongest
-checkpoint directly and understand what "success" means. W&B/TensorBoard/JSONL
-logging is controlled by the same `metrics:` block used for training.
+Outputs are `eval_summary.json`, `eval_rollouts.jsonl`, `leaderboard.md`,
+`ranking.md`, `promotion.md`, and `capability_report.md`. The summary also
+includes `best_policy`, `ranking`, `success_metric`, `success_threshold`, and
+`capability_report` so you can pick the strongest checkpoint directly and see
+which agent capability moved. W&B/TensorBoard/JSONL logging is controlled by
+the same `metrics:` block used for training.
+
+`capability_axes` groups raw eval metrics into agent-level improvement axes.
+This is where Hermes-style self-evolution becomes measurable beyond a single
+reward number: tool reliability, task success, interaction control, and
+signals useful for deciding whether an experience should become replay data or
+a Skill. Omit the block to use the default axes, or set it to `false` to skip
+the report.
 
 `eval_summary.json` also includes `promotion_readout`, a compact checkpoint
 triage block for the strongest non-baseline candidate versus the baseline. It

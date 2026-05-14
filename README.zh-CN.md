@@ -284,6 +284,11 @@ paired A/B、`tool_call_parse_ok`、`tool_name_match` 和 argument-overlap 等�
 可以把 `eval_rl.promotion_gate.fail_on_hold` 设为 `true`，这样 gate 未通过时
 `eval-rl` 会返回退出码 `3`。
 
+`eval-rl` 也会写出 `capability_report.md`。它把底层指标聚合成更贴近 Hermes
+Agent 的能力维度，例如任务成功、工具调用可靠性、交互控制和 self-evolution
+信号。这样我们下一轮优化时，不只看单个 reward，而是能判断到底是哪类 agent
+能力在提升。
+
 命令动作阶段的评估：
 
 ```bash

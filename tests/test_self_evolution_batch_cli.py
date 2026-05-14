@@ -151,6 +151,9 @@ def test_self_evolution_batch_cli_runs_directional_training_pipeline(
         "tool_call_parse_ok",
         "tool_name_match",
     ]
+    assert first["capability_plan"]["axes"] == ["tool_use_reliability"]
+    assert "tool_use_reliability" in summary["capability_axes"]
+    assert "task_success" in summary["capability_axes"]
     assert first["replay"]["samples_written"] == 3
     assert first["worker"]["updates"] == 1
 

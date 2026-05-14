@@ -303,6 +303,11 @@ config and review the generated `promotion.md`. For automation, set
 `eval_rl.promotion_gate.fail_on_hold: true` so `eval-rl` returns exit code `3`
 when the gate does not approve promotion.
 
+`eval-rl` also writes `capability_report.md`. It groups raw metrics into
+Hermes-agent capabilities such as task success, tool-use reliability,
+interaction control, and self-evolution signal, which is more useful than a
+single reward when you are deciding what to optimize next.
+
 For the command-action stage:
 
 ```bash

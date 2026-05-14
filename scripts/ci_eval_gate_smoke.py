@@ -186,13 +186,17 @@ def main(argv: list[str] | None = None) -> int:
 
         summary_path = output_dir / "eval_summary.json"
         promotion_path = output_dir / "promotion.md"
+        capability_path = output_dir / "capability_report.md"
         if not summary_path.exists():
             raise RuntimeError(f"missing eval summary: {summary_path}")
         if not promotion_path.exists():
             raise RuntimeError(f"missing promotion markdown: {promotion_path}")
+        if not capability_path.exists():
+            raise RuntimeError(f"missing capability markdown: {capability_path}")
 
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         promotion = promotion_path.read_text(encoding="utf-8")
+        capability = capability_path.read_text(encoding="utf-8")
 
         if summary.get("command") != "eval-gate":
             raise RuntimeError(f"unexpected command field: {summary.get('command')!r}")
@@ -206,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError("eval-gate smoke did not force fail_on_hold=true")
         if "Recommendation: `hold`" not in promotion:
             raise RuntimeError("promotion.md did not record the expected hold recommendation")
+        if "| task_success |" not in capability:
+            raise RuntimeError("capability_report.md did not include the default task_success axis")
 
         print(f"eval-gate smoke passed: {summary_path}")
         print(f"workspace: {workspace}")

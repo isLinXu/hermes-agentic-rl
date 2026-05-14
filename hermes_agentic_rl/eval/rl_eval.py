@@ -30,6 +30,11 @@ from hermes_agentic_rl.core.rollout_manager import RolloutManager
 from hermes_agentic_rl.core.trajectory import trajectory_to_dict
 from hermes_agentic_rl.core.types import RewardSummary, Trajectory
 from hermes_agentic_rl.eval.ab_test import paired_welch_t
+from hermes_agentic_rl.eval.capability_axes import (
+    build_capability_report,
+    capability_report_markdown,
+    normalize_capability_axes,
+)
 from hermes_agentic_rl.monitor.writers import MultiMetricsWriter, build_writer_from_config
 
 STRUCTURED_METADATA_KEYS = (
@@ -958,6 +963,11 @@ def run_eval_rl(
             rank_metric=rank_metric,
             eval_cfg=eval_cfg,
         )
+        capability_axes = normalize_capability_axes(eval_cfg.get("capability_axes"))
+        capability_report = build_capability_report(
+            policy_reports,
+            axes=capability_axes,
+        )
         ranking_summary = [
             {
                 "rank": index + 1,
@@ -989,6 +999,7 @@ def run_eval_rl(
             "ranking": ranking_summary,
             "success_threshold": float(eval_cfg.get("success_threshold", 0.5)),
             "promotion_readout": promotion_readout,
+            "capability_report": capability_report,
             "policies": policy_reports,
             "comparisons": comparisons,
             "artifacts": {
@@ -997,6 +1008,7 @@ def run_eval_rl(
                 "leaderboard": str(out_dir / "leaderboard.md"),
                 "ranking": str(out_dir / "ranking.md"),
                 "promotion": str(out_dir / "promotion.md"),
+                "capability_report": str(out_dir / "capability_report.md"),
             },
         }
         _json_dump(out_dir / "eval_summary.json", summary)
@@ -1012,6 +1024,10 @@ def run_eval_rl(
             _promotion_markdown(promotion_readout),
             encoding="utf-8",
         )
+        (out_dir / "capability_report.md").write_text(
+            capability_report_markdown(capability_report),
+            encoding="utf-8",
+        )
         if isinstance(metrics_writer, MultiMetricsWriter):
             metrics_writer.update_summary(
                 {
@@ -1020,6 +1036,7 @@ def run_eval_rl(
                     "success_metric": str(eval_cfg.get("success_metric", "reward")),
                     "success_threshold": float(eval_cfg.get("success_threshold", 0.5)),
                     "promotion_readout": promotion_readout,
+                    "capability_report": capability_report,
                     "policy_metrics": {
                         report["name"]: report["metrics"] for report in policy_reports
                     },

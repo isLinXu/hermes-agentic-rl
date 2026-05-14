@@ -208,12 +208,18 @@ metrics:
     assert summary["promotion_readout"]["passed"] is False
     assert "min_reward_delta" in summary["promotion_readout"]["failed_checks"]
     assert "min_rank_metric_delta" in summary["promotion_readout"]["failed_checks"]
+    assert summary["capability_report"]["baseline"] == "baseline"
+    assert summary["capability_report"]["axes"][0]["name"] == "task_success"
+    assert "tool_use_reliability" in {
+        axis["name"] for axis in summary["capability_report"]["axes"]
+    }
     assert "metadata/tool_call_parse_ok" in summary["policies"][0]["metrics"]
     assert "success_score_mean" in summary["policies"][0]["metrics"]
     assert (output_dir / "eval_rollouts.jsonl").exists()
     assert "| baseline |" in (output_dir / "leaderboard.md").read_text(encoding="utf-8")
     assert "| rank | name | mean_reward |" in (output_dir / "ranking.md").read_text(encoding="utf-8")
     assert "Recommendation: `hold`" in (output_dir / "promotion.md").read_text(encoding="utf-8")
+    assert "| task_success |" in (output_dir / "capability_report.md").read_text(encoding="utf-8")
     assert (output_dir / "metrics.jsonl").exists()
     metrics = [
         json.loads(line)

@@ -90,6 +90,7 @@ MetricsWriter(record) [jsonl / tb / wandb / dashboard]
 | PEFT | `peft/` | `LoRALinear`, `inject_lora` |
 | Env | `envs/` | `EchoTaskEnv`, `SimToolEnv`, `LetterCountingEnv`, `CurriculumEnv` |
 | Eval | `eval/` | `EvalHarness`, `run_eval_rl`, `VersionManager`, `run_ab`, `paired_welch_t` |
+| Capability eval | `eval/capability_axes.py` | Agent capability axes for task success, tool reliability, interaction control, and self-evolution signal |
 | Monitor | `monitor/` | `LiveDashboard`, `JsonlMetricsWriter`, `TensorBoardMetricsWriter`, `WandbMetricsWriter`, `MultiMetricsWriter` |
 | Distributed | `distributed/` | `MPRolloutPool` (stdlib multiprocessing) |
 | Integration | `integrations/` | `AtroposEnvAdapter`, `HermesAPIServer`, `AtroposRewardComponent` |
