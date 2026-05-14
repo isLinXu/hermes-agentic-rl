@@ -8,6 +8,7 @@ __all__ = [
     "build_tokenizer_from_config",
     "close_all_sidecars",
     "collect_session_turn_samples",
+    "export_skill_candidates",
     "get_or_create_sidecar",
     "judge_session_turn_sample",
     "mine_session_turn_sample",
@@ -105,6 +106,10 @@ def __getattr__(name: str):
             "normalize_replay_mining_config": normalize_replay_mining_config,
             "summarize_replay_mining": summarize_replay_mining,
         }[name]
+    if name in {"export_skill_candidates"}:
+        from hermes_agentic_rl.collectors.skill_export import export_skill_candidates
+
+        return {"export_skill_candidates": export_skill_candidates}[name]
     if name in {
         "LocalSessionSidecar",
         "LocalSessionSidecarConfig",

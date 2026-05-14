@@ -398,6 +398,22 @@ The batch summary also reports `mined_replay_axes` and `skill_candidates`,
 which are early signals for deciding whether the next loop should train
 weights, mine more sessions, or export candidate Skills.
 
+### Skill Candidate Export
+
+Replay mining can now become a concrete agent-improvement artifact. `skill-export`
+reads replay JSONL, selects records tagged as `metadata.replay_mining.skill_candidate`,
+and writes reviewable Skill candidates with validation examples.
+
+```bash
+python -m hermes_agentic_rl.cli.main skill-export \
+  --config configs/skill_export.yaml
+```
+
+Each candidate directory contains `SKILL.md`, `manifest.json`, and
+`validation.jsonl`. New replay records also keep compact `metadata.source_turn`
+evidence so the generated Skill draft can cite the user task, observed assistant
+behavior, feedback, reward, and capability axes.
+
 ## Key Configurations
 
 | Config | Purpose |
@@ -411,6 +427,7 @@ weights, mine more sessions, or export candidate Skills.
 | `configs/hermes_reasoning_traces_eval_rl.yaml` | Held-out benchmark comparing baseline vs RL checkpoint on grouped traces. |
 | `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | Held-out benchmark for stage-2 command-action checkpoints. |
 | `configs/self_evolution_batch.yaml` | Batch directional self-evolution replay, worker training, and export. |
+| `configs/skill_export.yaml` | Export replay-mined Skill candidates and validation examples. |
 | `configs/hermes_online_cycle.yaml` | Real Hermes online rollout plus replay worker and self-evolution export. |
 | `configs/hermes_runtime_sidecar.yaml` | Runtime sidecar example for session/replay capture. |
 | `configs/session_train_worker.yaml` | BC worker over replay JSONL. |
@@ -430,6 +447,7 @@ python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --lim
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
 python -m hermes_agentic_rl.cli.main session-train-worker --config <config> --once
 python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
+python -m hermes_agentic_rl.cli.main skill-export --config <config>
 ```
 
 ## Architecture
@@ -438,14 +456,14 @@ python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
 hermes_agentic_rl/
   runtime/       Hermes and fake runtime adapters
   framework/     EnvTrainingPipeline and SessionTrainingPipeline
-  collectors/    Session sidecar, replay export, quality filters, replay mining
+  collectors/    Session sidecar, replay export, quality filters, replay mining, Skill export
   envs/          Echo, simulated tool, curriculum, Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
   eval/          Held-out eval, leaderboard, paired A/B comparison
   offline/       BC, DPO, reward-model training
   rewards/       Outcome, tool-call, filesystem, feedback, RM components
   monitor/       JSONL, TensorBoard, W&B, dashboard writers
-  cli/           Rollout, train, train-rl, eval-rl, eval-gate, self-evolution-batch, online-cycle, replay workers
+  cli/           Rollout, train, train-rl, eval-rl, eval-gate, self-evolution-batch, online-cycle, replay workers, skill-export
 ```
 
 Data flow:

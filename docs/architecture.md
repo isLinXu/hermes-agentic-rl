@@ -86,7 +86,7 @@ MetricsWriter(record) [jsonl / tb / wandb / dashboard]
 | Algo | `algos/` | `BaseAlgo`, `GRPO`, `PPO`, `common.{advantage, gae, kl, loss, reinforce_pp}` |
 | Rewards | `rewards/` | `RewardManager`, `OutcomeReward`, `ToolcallReward`, `FileSystemVerifierReward`, `RewardModel`, `LagrangianController` |
 | Trainer | `trainers/` | `OnPolicyTrainer`, `GRPOTrainer`, `PPOTrainer`, `CheckpointManager` |
-| Collectors | `collectors/` | Session sidecar, replay export, replay quality filters, direction-aware replay mining |
+| Collectors | `collectors/` | Session sidecar, replay export, replay quality filters, direction-aware replay mining, Skill candidate export |
 | Offline | `offline/` | `BCTrainer`, `DPOTrainer`, `ReplayBuffer` |
 | PEFT | `peft/` | `LoRALinear`, `inject_lora` |
 | Env | `envs/` | `EchoTaskEnv`, `SimToolEnv`, `LetterCountingEnv`, `CurriculumEnv` |

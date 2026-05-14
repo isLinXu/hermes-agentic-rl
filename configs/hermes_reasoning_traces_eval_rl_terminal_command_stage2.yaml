@@ -60,6 +60,9 @@ eval_rl:
     min_rank_metric_delta: 0.01
     require_paired_winner: true
     max_p_value: 0.10
+    required_capability_axes: [tool_use_reliability, command_content]
+    min_capability_delta: 0.01
+    max_capability_regression: 0.02
   capability_axes:
     tool_use_reliability:
       description: Valid Hermes tool-call structure and terminal command fidelity.

@@ -49,10 +49,10 @@ capability improved?" rather than only "did reward go up?".
    counts. This makes self-evolution datasets easier to filter and compare.
 
 3. Skill export loop.
-   Add an exporter that converts repeated high-quality sessions into
-   Skill-style Markdown candidates with metadata, validation samples, and
-   failure cases. The goal is external agent improvement before or alongside
-   RL weight updates.
+   Implemented in this batch. `skill-export` converts high-quality replay
+   records tagged as `skill_candidate` into reviewable Skill directories with
+   `SKILL.md`, `manifest.json`, and `validation.jsonl`. The goal is external
+   agent improvement before or alongside RL weight updates.
 
 4. Context and prompt harness benchmarks.
    Add held-out scenarios that stress long context, compression, memory recall,
@@ -60,8 +60,9 @@ capability improved?" rather than only "did reward go up?".
    `prompt_context` capability axis.
 
 5. RL promotion with capability thresholds.
-   Extend `promotion_gate` so a run can require improvements on selected
-   capability axes, not only reward/success-rate deltas.
+   Implemented in this batch. `promotion_gate` can require improvements on
+   selected capability axes and enforce a maximum allowed regression across the
+   capability report, not only reward/success-rate deltas.
 
 6. Online self-evolution cycle.
    Combine real Hermes sessions, replay mining, Skill candidate export,
@@ -86,3 +87,5 @@ Review:
 - `outputs/hermes_self_evolution_batch/batch_summary.json` -> `capability_axes`
 - `replay.jsonl` -> `metadata.replay_mining`
 - `replay_quality_report.json` -> `replay_mining`
+- `skill-export` -> `SKILL.md`, `manifest.json`, `validation.jsonl`
+- `promotion_readout.checks` -> `capability_axis/<axis>/min_delta`
