@@ -74,6 +74,11 @@ def session_turn_sample_to_train_sample(
             "session_id": sample.session_id,
             "task_id": sample.task_id,
             "turn_index": sample.turn_index,
+            "source_turn": {
+                "prompt_messages": [dict(m) for m in sample.prompt_messages],
+                "assistant_message": dict(sample.assistant_message),
+                "feedback_messages": [dict(m) for m in sample.feedback_messages],
+            },
             "feedback_messages": [dict(m) for m in sample.feedback_messages],
             "reward_components": [
                 {

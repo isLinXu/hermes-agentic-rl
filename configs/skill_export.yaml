@@ -1,0 +1,17 @@
+skill_export:
+  input_path: outputs/hermes_self_evolution_batch/tool_use_reliability/replay.jsonl
+  output_dir: outputs/hermes_skill_candidates
+  require_skill_candidate: true
+  min_reward: 0.25
+  group_by: primary_axis
+  min_examples_per_skill: 1
+  max_examples_per_skill: 8
+  quality_min_examples: 2
+  quality_min_mean_reward: 0.25
+  quality_min_mean_usefulness: 0.5
+  quality_min_axis_consistency: 0.6
+  quality_min_validation_examples: 1
+  quality_max_negative_signal_ratio: 0.25
+  quality_ready_min_score: 0.75
+  quality_blocked_max_score: 0.35
+  name_prefix: hermes

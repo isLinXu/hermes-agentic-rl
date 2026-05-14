@@ -1,0 +1,109 @@
+runtime:
+  integration: hermes
+  repo_path: subprojects/hermes-agent
+  api_key_envs:
+    - NEWAPI_API_KEY
+    - LKEAP_API_KEY
+    - OPENAI_API_KEY
+  provider: openai
+  base_url: https://ai.shukelongda.cn/v1
+  model: gpt-5.4-mini
+  max_agent_turns: 20
+  enabled_toolsets:
+    - terminal
+    - file
+  session_sidecar:
+    enabled: true
+    session_log_path: outputs/hermes_online_self_evolve/sessions.jsonl
+    replay_output_path: outputs/hermes_online_self_evolve/replay.raw.jsonl
+    flush_interval_sec: 0.25
+    max_batch_size: 8
+
+environment:
+  dataset_path: data/minimal_terminal_tasks.jsonl
+  system_prompt: null
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+
+judge:
+  components:
+    - name: session_user_feedback_reward
+      weight: 0.5
+    - name: session_tool_feedback_reward
+      weight: 0.3
+    - name: session_toolcall_reward
+      weight: 0.2
+
+online_cycle:
+  cycles: 1
+  limit: 4
+  seed: 0
+  session_replay:
+    output_path: outputs/hermes_online_self_evolve/replay.jsonl
+    quarantine_path: outputs/hermes_online_self_evolve/replay_quarantine.jsonl
+    quality_report_path: outputs/hermes_online_self_evolve/replay_quality_report.json
+    data_quality:
+      min_prompt_tokens: 2
+      min_response_tokens: 2
+      dedupe_within_scan: true
+    replay_mining:
+      min_skill_reward: 0.25
+  session_train_worker:
+    algo: bc
+    save_path: outputs/hermes_online_self_evolve/policy.pt
+    state_path: outputs/hermes_online_self_evolve/worker_state.json
+    quarantine_path: outputs/hermes_online_self_evolve/worker_quarantine.jsonl
+    train:
+      n_epochs: 1
+      batch_size: 8
+      lr: 0.001
+      min_reward: 0.0
+      max_records_per_update: 256
+      poll_interval_sec: 1.0
+    metrics:
+      jsonl: outputs/hermes_online_self_evolve/worker_metrics.jsonl
+      wandb:
+        enabled: true
+        project: hermes-agentic-rl
+        name: hermes-online-self-evolve
+        prefix: train
+        mode: online
+        tags: [hermes, online-self-evolve, bc]
+  session_eval_export:
+    output_path: outputs/hermes_online_self_evolve/self_evolution_dataset
+    source: hermes-session
+    train_ratio: 0.7
+    val_ratio: 0.2
+    min_reward: 0.0
+
+online_self_evolve:
+  output_dir: outputs/hermes_online_self_evolve
+  stages:
+    online_cycle: true
+    skill_export: true
+    eval_gate: false
+  skill_export:
+    input_path: outputs/hermes_online_self_evolve/replay.jsonl
+    output_dir: outputs/hermes_online_self_evolve/skill_candidates
+    require_skill_candidate: true
+    min_reward: 0.25
+    min_examples_per_skill: 1
+    max_examples_per_skill: 8
+    quality_min_examples: 2
+    quality_min_mean_reward: 0.25
+    quality_min_mean_usefulness: 0.5
+    quality_min_axis_consistency: 0.6
+    quality_min_validation_examples: 1
+    quality_max_negative_signal_ratio: 0.25
+    quality_ready_min_score: 0.75
+    quality_blocked_max_score: 0.35
+  # Optional promotion gate stage. Enable after pointing config_path at a
+  # held-out benchmark such as configs/context_benchmark_eval_rl.yaml.
+  eval_gate:
+    enabled: false
+    config_path: configs/context_benchmark_eval_rl.yaml
+    output_dir: outputs/hermes_online_self_evolve/eval_gate
