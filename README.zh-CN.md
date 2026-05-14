@@ -307,7 +307,7 @@ python -m hermes_agentic_rl.cli.main eval-rl \
 `online-cycle` 是端到端在线路径：
 
 1. 在任务 prompt 上运行真实 Hermes。
-2. 使用 session sidecar 写出原始 session trace 和 replay samples。
+2. 使用 session sidecar 写出原始 session trace 和带方向标注的 replay samples。
 3. 从 replay 训练本地 worker，可选 `bc`、`dpo` 或 `rm` worker 配置。
 4. 把同一批 trace 导出为 self-evolution dataset。
 5. 将 worker metrics 记录到 JSONL 和 W&B。
@@ -329,6 +329,10 @@ python -m hermes_agentic_rl.cli.main online-cycle \
 - `outputs/hermes_online_cycle/worker_state.json`
 - `outputs/hermes_online_cycle/worker_metrics.jsonl`
 - `outputs/hermes_online_cycle/self_evolution_dataset/`
+
+Replay 记录会包含 `metadata.replay_mining`，用于标注 capability axes、挖掘原因、
+推荐用途以及 Skill-candidate 信号。对应的 quality report 会聚合这些标签，让我们
+可以按优化方向筛选 replay，而不是把所有 session turn 当成同一种训练信号。
 
 ### Self-Evolution 导出
 
@@ -369,6 +373,8 @@ python -m hermes_agentic_rl.cli.main self-evolution-batch \
 - `outputs/hermes_self_evolution_batch/<direction>/self_evolution_dataset/`
 
 适合用来同时比较多个优化方向，例如工具调用稳定性、失败恢复能力和任务完成质量。
+batch summary 也会输出 `mined_replay_axes` 和 `skill_candidates`，帮助判断下一轮
+应该继续训练权重、采集更多 session，还是导出候选 Skills。
 
 ## 关键配置
 
@@ -410,7 +416,7 @@ python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
 hermes_agentic_rl/
   runtime/       Hermes 和 fake runtime adapters
   framework/     EnvTrainingPipeline 和 SessionTrainingPipeline
-  collectors/    Session sidecar、replay export、quality filters
+  collectors/    Session sidecar、replay export、quality filters、replay mining
   envs/          Echo、simulated tool、curriculum、Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
   eval/          Held-out eval、leaderboard、paired A/B comparison
