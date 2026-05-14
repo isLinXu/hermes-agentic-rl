@@ -415,6 +415,11 @@ Each candidate directory contains `SKILL.md`, `manifest.json`, and
 `validation.jsonl`. New replay records also keep compact `metadata.source_turn`
 evidence so the generated Skill draft can cite the user task, observed assistant
 behavior, feedback, reward, and capability axes.
+The exporter also writes `quality_report.json` and embeds a `quality` block in
+each manifest and generated `SKILL.md`. Candidates are labeled
+`ready_for_review`, `draft`, or `blocked` based on explainable checks for
+sample count, mean reward, replay usefulness, dominant capability-axis
+consistency, validation examples, and negative feedback ratio.
 
 ### Online Self-Evolution
 
@@ -431,7 +436,8 @@ python -m hermes_agentic_rl.cli.main online-self-evolve \
 
 The orchestrator writes `online_self_evolve_summary.json` and
 `online_self_evolve_report.md` with stage status, replay counts, Skill
-candidate counts, and optional promotion-gate recommendation.
+candidate counts, Skill quality status counts, and optional promotion-gate
+recommendation.
 
 ## Key Configurations
 
