@@ -186,6 +186,51 @@ See `configs/echo_grpo_v06.yaml` for a config that exercises:
 - Final run summary metrics such as `last_mean_reward`, `best_mean_reward`,
   and `reward_delta` are written into the W&B run summary at the end.
 
+## Session Replay Mining
+
+`session-replay`, `online-cycle`, and `self-evolution-batch` can annotate replay
+records with direction-aware mining metadata:
+
+```yaml
+replay_mining:
+  enabled: true
+  min_skill_reward: 0.5
+  long_context_messages: 8
+  long_context_chars: 3000
+```
+
+When enabled, each replay sample gets `metadata.replay_mining` plus a flat
+`metadata.capability_axes` list. The annotation includes capability axes,
+reasons, recommended uses, a usefulness score, and whether the turn looks like
+a Skill candidate. Quality reports include aggregate counts under
+`replay_mining`, and `self-evolution-batch` rolls these up into
+`mined_replay_axes` and `skill_candidates`.
+
+Use these fields to filter the same session trace pool into different
+optimization queues: tool reliability replay, failure recovery replay, context
+benchmark seeds, or candidate Skill exports.
+
+`session-train-worker` can consume the same annotations:
+
+```yaml
+session_train_worker:
+  train:
+    replay_filter:
+      require_any_capability_axes: [tool_use_reliability]
+      require_any_recommended_uses: [tool_reliability_replay]
+      require_skill_candidate: false
+```
+
+Supported filter keys are `require_any_capability_axes`,
+`require_all_capability_axes`, `require_any_recommended_uses`,
+`require_all_recommended_uses`, and `require_skill_candidate`.
+`self-evolution-batch` automatically injects a `require_any_capability_axes`
+filter from each direction's `objective.target_metrics` when a direction maps
+to known capability axes.
+Set `replay_mining: false` or `replay_mining.enabled: false` to keep replay
+records unannotated; in that mode `self-evolution-batch` also skips automatic
+directional replay filters.
+
 ## `eval-rl` Held-Out Evaluation
 
 `eval-rl` reuses the same `backend`, `environment`, `agent_loop`, and
