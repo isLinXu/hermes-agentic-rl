@@ -8,6 +8,10 @@ from typing import Any
 import yaml  # type: ignore[import-untyped]
 
 from hermes_agentic_rl.collectors.replay_export import append_jsonl
+from hermes_agentic_rl.collectors.replay_mining import (
+    mine_session_turn_sample,
+    summarize_replay_mining,
+)
 from hermes_agentic_rl.collectors.replay_quality import (
     apply_record_quality_filters,
     load_jsonl_records_best_effort,
@@ -135,6 +139,7 @@ def _build_quality_report(
     replay_invalid: list[dict[str, Any]],
     quality_filtered: list[dict[str, Any]],
     quality_cfg: dict[str, Any],
+    replay_mining_cfg: Any,
 ) -> dict[str, Any]:
     quarantined = input_rejections + session_rejections + replay_invalid + quality_filtered
     return {
@@ -155,6 +160,10 @@ def _build_quality_report(
         "quality_filtered": summarize_rejections(quality_filtered),
         "quarantined": summarize_rejections(quarantined),
         "data_quality": dict(quality_cfg),
+        "replay_mining": summarize_replay_mining(
+            written_records,
+            config=replay_mining_cfg,
+        ),
     }
 
 
@@ -177,6 +186,7 @@ def run_session_replay_config(
     quarantine_path = cfg.get("quarantine_path")
     quality_report_path = cfg.get("quality_report_path")
     quality_cfg = cfg.get("data_quality", {}) or {}
+    replay_mining_cfg = cfg.get("replay_mining", {})
     exported_records: list[dict[str, Any]] = []
     session_rejections: list[dict[str, Any]] = []
     session_count = 0
@@ -216,6 +226,15 @@ def run_session_replay_config(
                     tokenizer=session_api.tokenizer,
                     reward_summary=reward_summary,
                 )
+                mining = mine_session_turn_sample(
+                    sample,
+                    reward=train_sample.reward,
+                    metadata=train_sample.metadata,
+                    config=replay_mining_cfg,
+                )
+                if mining is not None:
+                    train_sample.metadata["replay_mining"] = mining
+                    train_sample.metadata["capability_axes"] = list(mining.get("axes", []))
             except Exception as exc:
                 session_rejections.append(
                     _session_rejection(
@@ -257,6 +276,7 @@ def run_session_replay_config(
         replay_invalid=replay_invalid,
         quality_filtered=quality_filtered,
         quality_cfg=quality_cfg,
+        replay_mining_cfg=replay_mining_cfg,
     )
     if quality_report_path:
         _write_json(quality_report_path, report)

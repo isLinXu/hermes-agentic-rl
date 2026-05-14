@@ -10,12 +10,15 @@ __all__ = [
     "collect_session_turn_samples",
     "get_or_create_sidecar",
     "judge_session_turn_sample",
+    "mine_session_turn_sample",
+    "normalize_replay_mining_config",
     "record_to_session_turn_samples",
     "records_to_train_samples",
     "render_messages_for_training",
     "replay_jsonl_payloads_from_record",
     "session_turn_sample_to_train_sample",
     "session_turn_samples_to_replay_buffer",
+    "summarize_replay_mining",
     "trajectory_to_session_turn_samples",
 ]
 
@@ -85,6 +88,22 @@ def __getattr__(name: str):
         return {
             "build_session_reward_results": build_session_reward_results,
             "judge_session_turn_sample": judge_session_turn_sample,
+        }[name]
+    if name in {
+        "mine_session_turn_sample",
+        "normalize_replay_mining_config",
+        "summarize_replay_mining",
+    }:
+        from hermes_agentic_rl.collectors.replay_mining import (
+            mine_session_turn_sample,
+            normalize_replay_mining_config,
+            summarize_replay_mining,
+        )
+
+        return {
+            "mine_session_turn_sample": mine_session_turn_sample,
+            "normalize_replay_mining_config": normalize_replay_mining_config,
+            "summarize_replay_mining": summarize_replay_mining,
         }[name]
     if name in {
         "LocalSessionSidecar",
