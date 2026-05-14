@@ -118,6 +118,13 @@ def _stage_options(stage_cfg: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def _write_report(path: Path, summary: dict[str, Any]) -> None:
+    signals = summary.get("signals", {})
+    skill_quality = signals.get("skill_quality", {}) if isinstance(signals, dict) else {}
+    status_counts = (
+        skill_quality.get("status_counts", {})
+        if isinstance(skill_quality, dict)
+        else {}
+    )
     lines = [
         "# Online Self-Evolution Report",
         "",
@@ -161,6 +168,9 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
             f"- Sessions: `{summary.get('signals', {}).get('sessions', 0)}`",
             f"- Replay records: `{summary.get('signals', {}).get('replay_records', 0)}`",
             f"- Skill candidates exported: `{summary.get('signals', {}).get('skills_exported', 0)}`",
+            f"- Skill ready_for_review: `{status_counts.get('ready_for_review', 0)}`",
+            f"- Skill draft: `{status_counts.get('draft', 0)}`",
+            f"- Skill blocked: `{status_counts.get('blocked', 0)}`",
             f"- Eval recommendation: `{summary.get('signals', {}).get('eval_recommendation', '')}`",
         ]
     )
@@ -229,7 +239,13 @@ def run_online_self_evolve_config(
             "input_path": str(skill_cfg["input_path"]),
             "output_dir": str(skill_cfg["output_dir"]),
             "summary_path": str(Path(str(skill_cfg["output_dir"])) / "summary.json"),
+            "quality_report_path": str(Path(str(skill_cfg["output_dir"])) / "quality_report.json"),
             "skills_exported": int(skill_summary.get("skills_exported", 0) or 0),
+            "status_counts": (
+                skill_summary.get("quality", {}).get("status_counts", {})
+                if isinstance(skill_summary.get("quality"), dict)
+                else {}
+            ),
         }
     else:
         stages["skill_export"] = {"enabled": False}
@@ -271,6 +287,11 @@ def run_online_self_evolve_config(
             "sessions": _count_jsonl(session_log_path),
             "replay_records": _count_jsonl(replay_path),
             "skills_exported": int(skill_summary.get("skills_exported", 0) or 0),
+            "skill_quality": (
+                skill_summary.get("quality", {})
+                if isinstance(skill_summary.get("quality"), dict)
+                else {}
+            ),
             "eval_recommendation": (
                 stages.get("eval_gate", {}).get("recommendation")
                 if isinstance(stages.get("eval_gate"), dict)

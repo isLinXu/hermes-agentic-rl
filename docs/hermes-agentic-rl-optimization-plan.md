@@ -52,7 +52,9 @@ capability improved?" rather than only "did reward go up?".
    Implemented in this batch. `skill-export` converts high-quality replay
    records tagged as `skill_candidate` into reviewable Skill directories with
    `SKILL.md`, `manifest.json`, and `validation.jsonl`. The goal is external
-   agent improvement before or alongside RL weight updates.
+   agent improvement before or alongside RL weight updates. A Skill Quality
+   Gate now writes `quality_report.json` and marks each candidate as
+   `ready_for_review`, `draft`, or `blocked` from explainable replay evidence.
 
 4. Context and prompt harness benchmarks.
    Implemented in this batch. `context_benchmark` adds held-out scenarios that
@@ -91,6 +93,7 @@ Review:
 - `replay.jsonl` -> `metadata.replay_mining`
 - `replay_quality_report.json` -> `replay_mining`
 - `skill-export` -> `SKILL.md`, `manifest.json`, `validation.jsonl`
+- `skill-export` -> `quality_report.json`, `quality.status_counts`
 - `promotion_readout.checks` -> `capability_axis/<axis>/min_delta`
 - `context_benchmark` -> `metadata/context_required_fact_recall`,
   `metadata/context_constraint_satisfaction`, `metadata/context_compression_ok`

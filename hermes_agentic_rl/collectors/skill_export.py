@@ -59,6 +59,12 @@ def export_skill_candidates(
         )
         skill_summaries.append(skill_summary)
 
+    quality_report = _build_quality_report(
+        skill_summaries=skill_summaries,
+        candidates=candidates,
+        rejected=rejected,
+        config=cfg,
+    )
     summary = {
         "schema_version": SKILL_EXPORT_SCHEMA_VERSION,
         "input_path": str(input_path),
@@ -77,9 +83,11 @@ def export_skill_candidates(
             "group_by": cfg["group_by"],
         },
         "rejection_reasons": dict(sorted(Counter(item["reason"] for item in rejected).items())),
+        "quality": quality_report,
         "skills": skill_summaries,
     }
     _write_json(out_dir / "summary.json", summary)
+    _write_json(out_dir / "quality_report.json", quality_report)
     return summary
 
 
@@ -100,6 +108,14 @@ def _normalize_skill_export_config(raw: dict[str, Any] | None) -> dict[str, Any]
         "group_by": str(cfg.get("group_by", "primary_axis")),
         "min_examples_per_skill": max(1, int(cfg.get("min_examples_per_skill", 1))),
         "max_examples_per_skill": max(1, int(cfg.get("max_examples_per_skill", 8))),
+        "quality_min_examples": max(1, int(cfg.get("quality_min_examples", 2))),
+        "quality_min_mean_reward": float(cfg.get("quality_min_mean_reward", cfg.get("min_reward", 0.0))),
+        "quality_min_mean_usefulness": float(cfg.get("quality_min_mean_usefulness", 0.5)),
+        "quality_min_axis_consistency": float(cfg.get("quality_min_axis_consistency", 0.6)),
+        "quality_min_validation_examples": max(1, int(cfg.get("quality_min_validation_examples", 1))),
+        "quality_max_negative_signal_ratio": float(cfg.get("quality_max_negative_signal_ratio", 0.25)),
+        "quality_ready_min_score": float(cfg.get("quality_ready_min_score", 0.75)),
+        "quality_blocked_max_score": float(cfg.get("quality_blocked_max_score", 0.35)),
         "include_full_records": bool(cfg.get("include_full_records", False)),
     }
 
@@ -206,6 +222,12 @@ def _write_skill_candidate(
     skill_dir = output_dir / skill_name
     skill_dir.mkdir(parents=True, exist_ok=True)
     examples = [_record_to_example(record) for record in selected]
+    quality = _skill_quality(
+        records=selected,
+        examples=examples,
+        axis_counts=axis_counts,
+        config=config,
+    )
 
     skill_md = _skill_markdown(
         skill_name=skill_name,
@@ -214,6 +236,7 @@ def _write_skill_candidate(
         axis_counts=axis_counts,
         use_counts=use_counts,
         description_prefix=str(config["description_prefix"]),
+        quality=quality,
     )
     (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
     _write_jsonl(skill_dir / "validation.jsonl", [_validation_example(item) for item in examples])
@@ -223,6 +246,7 @@ def _write_skill_candidate(
         "group_key": group_key,
         "source_records": len(records),
         "examples_written": len(examples),
+        "quality": quality,
         "axis_counts": dict(sorted(axis_counts.items())),
         "recommended_use_counts": dict(sorted(use_counts.items())),
         "artifacts": {
@@ -240,6 +264,7 @@ def _write_skill_candidate(
         "group_key": group_key,
         "source_records": len(records),
         "examples_written": len(examples),
+        "quality": quality,
         "axis_counts": dict(sorted(axis_counts.items())),
         "recommended_use_counts": dict(sorted(use_counts.items())),
         "path": str(skill_dir),
@@ -254,6 +279,7 @@ def _skill_markdown(
     axis_counts: Counter[str],
     use_counts: Counter[str],
     description_prefix: str,
+    quality: dict[str, Any],
 ) -> str:
     title = _title(skill_name)
     description = (
@@ -275,7 +301,16 @@ def _skill_markdown(
         "",
         "## Status",
         "",
-        "This is an auto-mined Skill candidate generated from high-reward Hermes replay turns. Treat it as a reviewable draft, not a fully trusted production Skill.",
+        f"Quality status: `{quality.get('status', 'draft')}`. "
+        "This is an auto-mined Skill candidate generated from Hermes replay turns. "
+        "Review and harden it before installing as a production Skill.",
+        "",
+        "## Quality Gate",
+        "",
+        f"- Score: `{float(quality.get('score', 0.0)):.4f}`",
+        f"- Status: `{quality.get('status', 'draft')}`",
+        f"- Reasons: `{', '.join(str(item) for item in quality.get('reasons', []))}`",
+        f"- Blockers: `{', '.join(str(item) for item in quality.get('blockers', []))}`",
         "",
         "## When To Use",
         "",
@@ -320,9 +355,192 @@ def _skill_markdown(
             f"- Source examples: `{len(examples)}`",
             f"- Capability axes: `{dict(sorted(axis_counts.items()))}`",
             f"- Recommended uses: `{dict(sorted(use_counts.items()))}`",
+            f"- Quality metrics: `{quality.get('metrics', {})}`",
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def _build_quality_report(
+    *,
+    skill_summaries: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    rejected: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    statuses = Counter(
+        str(skill.get("quality", {}).get("status", "draft"))
+        for skill in skill_summaries
+        if isinstance(skill.get("quality"), dict)
+    )
+    scores = [
+        float(skill.get("quality", {}).get("score", 0.0))
+        for skill in skill_summaries
+        if isinstance(skill.get("quality"), dict)
+    ]
+    blocked_reasons = Counter(
+        reason
+        for skill in skill_summaries
+        if isinstance(skill.get("quality"), dict)
+        for reason in skill["quality"].get("blockers", [])
+    )
+    return {
+        "schema_version": SKILL_EXPORT_SCHEMA_VERSION,
+        "skills_evaluated": len(skill_summaries),
+        "candidate_records": len(candidates),
+        "rejected_records": len(rejected),
+        "status_counts": {
+            "ready_for_review": statuses.get("ready_for_review", 0),
+            "draft": statuses.get("draft", 0),
+            "blocked": statuses.get("blocked", 0),
+        },
+        "mean_quality_score": (sum(scores) / len(scores)) if scores else 0.0,
+        "blocked_reasons": dict(sorted(blocked_reasons.items())),
+        "thresholds": {
+            "quality_min_examples": config["quality_min_examples"],
+            "quality_min_mean_reward": config["quality_min_mean_reward"],
+            "quality_min_mean_usefulness": config["quality_min_mean_usefulness"],
+            "quality_min_axis_consistency": config["quality_min_axis_consistency"],
+            "quality_min_validation_examples": config["quality_min_validation_examples"],
+            "quality_max_negative_signal_ratio": config["quality_max_negative_signal_ratio"],
+            "quality_ready_min_score": config["quality_ready_min_score"],
+            "quality_blocked_max_score": config["quality_blocked_max_score"],
+        },
+        "skills": [
+            {
+                "name": skill.get("name"),
+                "group_key": skill.get("group_key"),
+                "path": skill.get("path"),
+                "quality": skill.get("quality", {}),
+            }
+            for skill in skill_summaries
+        ],
+    }
+
+
+def _skill_quality(
+    *,
+    records: list[dict[str, Any]],
+    examples: list[dict[str, Any]],
+    axis_counts: Counter[str],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    sample_count = len(records)
+    rewards = [_record_reward(record) for record in records]
+    usefulness_scores = [
+        _usefulness(_mining(_metadata(record)), _record_reward(record))
+        for record in records
+    ]
+    negative_signals = sum(
+        1
+        for record in records
+        if _has_negative_signal(_mining(_metadata(record)), _metadata(record))
+    )
+    mean_reward = (sum(rewards) / len(rewards)) if rewards else 0.0
+    mean_usefulness = (
+        sum(usefulness_scores) / len(usefulness_scores)
+        if usefulness_scores
+        else 0.0
+    )
+    # Capability traces are multi-label. A good candidate may consistently include
+    # one dominant axis while also carrying skill-learning/self-evolution signals.
+    axis_consistency = (
+        min(1.0, max(axis_counts.values()) / sample_count)
+        if sample_count and axis_counts
+        else 0.0
+    )
+    validation_examples = len(examples)
+    negative_signal_ratio = (
+        negative_signals / sample_count
+        if sample_count
+        else 1.0
+    )
+
+    checks: dict[str, dict[str, Any]] = {
+        "min_examples": {
+            "required": int(config["quality_min_examples"]),
+            "actual": sample_count,
+            "passed": sample_count >= int(config["quality_min_examples"]),
+        },
+        "min_mean_reward": {
+            "required": float(config["quality_min_mean_reward"]),
+            "actual": mean_reward,
+            "passed": mean_reward >= float(config["quality_min_mean_reward"]),
+        },
+        "min_mean_usefulness": {
+            "required": float(config["quality_min_mean_usefulness"]),
+            "actual": mean_usefulness,
+            "passed": mean_usefulness >= float(config["quality_min_mean_usefulness"]),
+        },
+        "min_axis_consistency": {
+            "required": float(config["quality_min_axis_consistency"]),
+            "actual": axis_consistency,
+            "passed": axis_consistency >= float(config["quality_min_axis_consistency"]),
+        },
+        "min_validation_examples": {
+            "required": int(config["quality_min_validation_examples"]),
+            "actual": validation_examples,
+            "passed": validation_examples >= int(config["quality_min_validation_examples"]),
+        },
+        "max_negative_signal_ratio": {
+            "required": float(config["quality_max_negative_signal_ratio"]),
+            "actual": negative_signal_ratio,
+            "passed": negative_signal_ratio <= float(config["quality_max_negative_signal_ratio"]),
+        },
+    }
+    passed = sum(1 for item in checks.values() if bool(item["passed"]))
+    score = passed / len(checks) if checks else 0.0
+    blockers = [name for name, payload in checks.items() if not bool(payload["passed"])]
+    ready_min_score = float(config["quality_ready_min_score"])
+    blocked_max_score = float(config["quality_blocked_max_score"])
+    if blockers and score <= blocked_max_score:
+        status = "blocked"
+    elif not blockers and score >= ready_min_score:
+        status = "ready_for_review"
+    else:
+        status = "draft"
+    reasons = [
+        name
+        for name, payload in checks.items()
+        if bool(payload["passed"])
+    ]
+    return {
+        "status": status,
+        "score": round(score, 6),
+        "checks": checks,
+        "blockers": blockers,
+        "reasons": reasons,
+        "metrics": {
+            "sample_count": sample_count,
+            "mean_reward": round(mean_reward, 6),
+            "mean_usefulness_score": round(mean_usefulness, 6),
+            "axis_consistency": round(axis_consistency, 6),
+            "validation_examples": validation_examples,
+            "negative_signal_ratio": round(negative_signal_ratio, 6),
+        },
+    }
+
+
+def _has_negative_signal(mining: dict[str, Any], metadata: dict[str, Any]) -> bool:
+    signals = mining.get("signals")
+    if isinstance(signals, dict) and bool(signals.get("negative_feedback", False)):
+        return True
+    reasons = mining.get("reasons")
+    if isinstance(reasons, list) and any(str(reason) == "negative_feedback" for reason in reasons):
+        return True
+    source_turn = metadata.get("source_turn", {})
+    if isinstance(source_turn, dict) and "feedback_messages" in source_turn:
+        feedback_messages = source_turn.get("feedback_messages")
+    else:
+        feedback_messages = metadata.get("feedback_messages")
+    if isinstance(feedback_messages, list):
+        joined = " ".join(
+            _message_content(message)
+            for message in feedback_messages
+            if isinstance(message, dict)
+        ).lower()
+        return any(keyword in joined for keyword in ("wrong", "error", "failed", "不对", "错误", "失败"))
+    return False
 
 
 def _record_to_example(record: dict[str, Any]) -> dict[str, Any]:

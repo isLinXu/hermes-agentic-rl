@@ -318,6 +318,14 @@ skill_export:
   min_reward: 0.25
   group_by: primary_axis             # primary_axis | recommended_use | single
   max_examples_per_skill: 8
+  quality_min_examples: 2
+  quality_min_mean_reward: 0.25
+  quality_min_mean_usefulness: 0.5
+  quality_min_axis_consistency: 0.6
+  quality_min_validation_examples: 1
+  quality_max_negative_signal_ratio: 0.25
+  quality_ready_min_score: 0.75
+  quality_blocked_max_score: 0.35
 ```
 
 ```bash
@@ -329,6 +337,19 @@ Each exported candidate directory contains `SKILL.md`, `manifest.json`, and
 `validation.jsonl`. New `session-replay` outputs include compact
 `metadata.source_turn` evidence so the generated `SKILL.md` can cite the user
 task, observed assistant behavior, feedback, reward, and capability axes.
+The exporter also writes `quality_report.json` beside `summary.json`, and each
+candidate `manifest.json` includes a `quality` block. Statuses are deliberately
+review-oriented: `ready_for_review` means all configured checks passed,
+`draft` means the candidate has promise but needs more evidence, and `blocked`
+means the candidate failed enough checks that it should not be promoted without
+new traces.
+
+The quality gate is heuristic and explainable. It checks sample count, mean
+reward, mean replay-usefulness score, dominant capability-axis consistency,
+validation examples, and the ratio of negative feedback signals. For Hermes
+traces, axis consistency treats capability labels as multi-label: repeated
+tool-use traces can still pass even when they also carry `skill_learning` or
+`self_evolution_signal`.
 
 ## Online Self-Evolution
 
@@ -348,6 +369,8 @@ online_self_evolve:
     output_dir: outputs/hermes_online_self_evolve/skill_candidates
     require_skill_candidate: true
     min_reward: 0.25
+    quality_min_examples: 2
+    quality_ready_min_score: 0.75
   eval_gate:
     enabled: false
     config_path: configs/context_benchmark_eval_rl.yaml
@@ -363,7 +386,8 @@ python -m hermes_agentic_rl.cli.main online-self-evolve \
 
 Outputs include `online_self_evolve_summary.json` and
 `online_self_evolve_report.md`, which summarize sessions, replay records, Skill
-candidates, optional promotion-gate results, and stage artifact paths.
+candidates, Skill quality status counts, optional promotion-gate results, and
+stage artifact paths.
 
 ## Hermes Reasoning Traces
 

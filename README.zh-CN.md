@@ -393,6 +393,10 @@ python -m hermes_agentic_rl.cli.main skill-export \
 每个候选目录包含 `SKILL.md`、`manifest.json` 和 `validation.jsonl`。新的 replay
 记录还会保留紧凑的 `metadata.source_turn` 证据，让生成的 Skill 草案能够引用用户任务、
 assistant 行为、反馈、reward 和 capability axes。
+导出器还会写出 `quality_report.json`，并在每个 `manifest.json` 和生成的
+`SKILL.md` 中嵌入 `quality` 区块。候选 Skill 会被标记为
+`ready_for_review`、`draft` 或 `blocked`，依据是可解释检查项：样本数、平均
+reward、replay usefulness、主导 capability axis 一致性、验证样本数，以及负反馈比例。
 
 ### Online Self-Evolution
 
@@ -408,7 +412,8 @@ python -m hermes_agentic_rl.cli.main online-self-evolve \
 ```
 
 编排器会写出 `online_self_evolve_summary.json` 和 `online_self_evolve_report.md`，
-汇总 stage 状态、replay 数量、Skill 候选数量以及可选 promotion-gate 结论。
+汇总 stage 状态、replay 数量、Skill 候选数量、Skill 质量状态分布以及可选
+promotion-gate 结论。
 
 ## 关键配置
 

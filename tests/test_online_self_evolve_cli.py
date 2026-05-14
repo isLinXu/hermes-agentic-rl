@@ -137,6 +137,7 @@ def test_online_self_evolve_cli_runs_cycle_and_skill_export(
             f"    output_dir: {skill_output_path}\n"
             "    require_skill_candidate: true\n"
             "    min_reward: 0.0\n"
+            "    quality_min_examples: 1\n"
         ),
         encoding="utf-8",
     )
@@ -164,5 +165,7 @@ def test_online_self_evolve_cli_runs_cycle_and_skill_export(
     assert summary["signals"]["sessions"] == 1
     assert summary["signals"]["replay_records"] == 1
     assert summary["signals"]["skills_exported"] == 1
+    assert summary["signals"]["skill_quality"]["status_counts"]["ready_for_review"] == 1
     assert summary["stages"]["online_cycle"]["exit_code"] == 0
     assert summary["stages"]["skill_export"]["skills_exported"] == 1
+    assert summary["stages"]["skill_export"]["status_counts"]["ready_for_review"] == 1
