@@ -330,6 +330,41 @@ Each exported candidate directory contains `SKILL.md`, `manifest.json`, and
 `metadata.source_turn` evidence so the generated `SKILL.md` can cite the user
 task, observed assistant behavior, feedback, reward, and capability axes.
 
+## Online Self-Evolution
+
+`online-self-evolve` is the higher-level closed-loop orchestrator. It reuses
+the existing `online-cycle` stages, then optionally exports Skill candidates
+and runs `eval-gate`:
+
+```yaml
+online_self_evolve:
+  output_dir: outputs/hermes_online_self_evolve
+  stages:
+    online_cycle: true
+    skill_export: true
+    eval_gate: false
+  skill_export:
+    input_path: outputs/hermes_online_self_evolve/replay.jsonl
+    output_dir: outputs/hermes_online_self_evolve/skill_candidates
+    require_skill_candidate: true
+    min_reward: 0.25
+  eval_gate:
+    enabled: false
+    config_path: configs/context_benchmark_eval_rl.yaml
+    output_dir: outputs/hermes_online_self_evolve/eval_gate
+```
+
+```bash
+python -m hermes_agentic_rl.cli.main online-self-evolve \
+  --config configs/online_self_evolve.yaml \
+  --once \
+  --limit 1
+```
+
+Outputs include `online_self_evolve_summary.json` and
+`online_self_evolve_report.md`, which summarize sessions, replay records, Skill
+candidates, optional promotion-gate results, and stage artifact paths.
+
 ## Hermes Reasoning Traces
 
 - `environment.type: hermes_reasoning_traces` loads

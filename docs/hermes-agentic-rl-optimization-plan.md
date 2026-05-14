@@ -66,8 +66,10 @@ capability improved?" rather than only "did reward go up?".
    capability report, not only reward/success-rate deltas.
 
 6. Online self-evolution cycle.
-   Combine real Hermes sessions, replay mining, Skill candidate export,
-   train/eval, W&B reports, and `eval-gate` into one repeatable loop.
+   Implemented in this batch. `online-self-evolve` combines real Hermes
+   sessions, replay mining, local worker training, self-evolution export, Skill
+   candidate export, W&B-ready metrics, and optional `eval-gate` into one
+   repeatable loop with a unified summary and Markdown report.
 
 ## Immediate Result
 
@@ -92,3 +94,5 @@ Review:
 - `promotion_readout.checks` -> `capability_axis/<axis>/min_delta`
 - `context_benchmark` -> `metadata/context_required_fact_recall`,
   `metadata/context_constraint_satisfaction`, `metadata/context_compression_ok`
+- `online-self-evolve` -> `online_self_evolve_summary.json`,
+  `online_self_evolve_report.md`
