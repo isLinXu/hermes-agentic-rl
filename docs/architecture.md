@@ -89,7 +89,7 @@ MetricsWriter(record) [jsonl / tb / wandb / dashboard]
 | Collectors | `collectors/` | Session sidecar, replay export, replay quality filters, direction-aware replay mining, Skill candidate export |
 | Offline | `offline/` | `BCTrainer`, `DPOTrainer`, `ReplayBuffer` |
 | PEFT | `peft/` | `LoRALinear`, `inject_lora` |
-| Env | `envs/` | `EchoTaskEnv`, `SimToolEnv`, `LetterCountingEnv`, `CurriculumEnv` |
+| Env | `envs/` | `EchoTaskEnv`, `SimToolEnv`, `LetterCountingEnv`, `ContextBenchmarkEnv`, `CurriculumEnv` |
 | Eval | `eval/` | `EvalHarness`, `run_eval_rl`, `run_eval_gate`, `VersionManager`, `run_ab`, `paired_welch_t` |
 | Capability eval | `eval/capability_axes.py` | Agent capability axes for task success, tool reliability, interaction control, and self-evolution signal |
 | Monitor | `monitor/` | `LiveDashboard`, `JsonlMetricsWriter`, `TensorBoardMetricsWriter`, `WandbMetricsWriter`, `MultiMetricsWriter` |

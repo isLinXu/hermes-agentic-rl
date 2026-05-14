@@ -55,9 +55,10 @@ capability improved?" rather than only "did reward go up?".
    agent improvement before or alongside RL weight updates.
 
 4. Context and prompt harness benchmarks.
-   Add held-out scenarios that stress long context, compression, memory recall,
-   and tool-result summarization. These should produce metrics that can feed the
-   `prompt_context` capability axis.
+   Implemented in this batch. `context_benchmark` adds held-out scenarios that
+   stress long context, compression, memory recall, distractor avoidance, and
+   tool-result summarization. Its reward metadata now feeds the `prompt_context`
+   capability axis.
 
 5. RL promotion with capability thresholds.
    Implemented in this batch. `promotion_gate` can require improvements on
@@ -89,3 +90,5 @@ Review:
 - `replay_quality_report.json` -> `replay_mining`
 - `skill-export` -> `SKILL.md`, `manifest.json`, `validation.jsonl`
 - `promotion_readout.checks` -> `capability_axis/<axis>/min_delta`
+- `context_benchmark` -> `metadata/context_required_fact_recall`,
+  `metadata/context_constraint_satisfaction`, `metadata/context_compression_ok`

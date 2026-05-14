@@ -347,6 +347,36 @@ task, observed assistant behavior, feedback, reward, and capability axes.
   `success_metric: metadata/argument_value_similarity` with an explicit
   threshold. This keeps command-content success separate from the fixed wrapper
   structure that the adapter already guarantees.
+
+## Context Benchmark
+
+`environment.type: context_benchmark` creates a lightweight benchmark for the
+`prompt_context` capability axis. It stresses long-context fact retention,
+user-constraint preservation, tool-result summarization, distractor avoidance,
+and concise synthesis:
+
+```yaml
+environment:
+  type: context_benchmark
+  dataset_size: 12
+  dataset_seed: 0
+  noise_blocks: 10
+  max_response_chars: 360
+eval_rl:
+  success_metric: metadata/context_required_fact_recall
+  rank_metric: metadata/context_required_fact_recall
+  promotion_gate:
+    required_capability_axes: [prompt_context]
+    min_capability_delta: 0.01
+    max_capability_regression: 0.02
+```
+
+The reward component writes metadata including
+`context_required_fact_recall`, `context_constraint_satisfaction`,
+`context_tool_summary_retention`, `context_distractor_avoidance`,
+`context_precision`, and `context_compression_ok`. These feed the default
+`prompt_context` capability axis and can be used directly as `success_metric`
+or `rank_metric`.
 - This works best with `bootstrap_sft_rounds` or `interleave_sft_every` to warm
   start on the real traces before continuing RL updates.
 - See `configs/hermes_reasoning_traces_grpo_smoke.yaml` for a conservative

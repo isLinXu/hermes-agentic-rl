@@ -11,6 +11,7 @@ def test_normalize_capability_axes_uses_defaults_when_omitted() -> None:
     axes = normalize_capability_axes(None)
 
     assert [axis.name for axis in axes] == [axis.name for axis in DEFAULT_CAPABILITY_AXES]
+    assert "prompt_context" in [axis.name for axis in axes]
 
 
 def test_normalize_capability_axes_accepts_yaml_mapping_shape() -> None:
@@ -57,9 +58,11 @@ def test_infer_objective_axes_maps_target_metrics_to_agent_capabilities() -> Non
             "argument_value_similarity",
             "finished_naturally_rate",
             "success_rate",
+            "context_required_fact_recall",
         ]
     ) == [
         "tool_use_reliability",
         "interaction_control",
         "task_success",
+        "prompt_context",
     ]

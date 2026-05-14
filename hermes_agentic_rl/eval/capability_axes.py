@@ -52,6 +52,17 @@ DEFAULT_CAPABILITY_AXES: tuple[CapabilityAxis, ...] = (
             CapabilityMetric("mean_reward", 0.5),
         ),
     ),
+    CapabilityAxis(
+        name="prompt_context",
+        description="Long-context retention, constraint preservation, distractor avoidance, and concise synthesis.",
+        metrics=(
+            CapabilityMetric("metadata/context_required_fact_recall", 0.30),
+            CapabilityMetric("metadata/context_constraint_satisfaction", 0.25),
+            CapabilityMetric("metadata/context_tool_summary_retention", 0.20),
+            CapabilityMetric("metadata/context_distractor_avoidance", 0.15),
+            CapabilityMetric("metadata/context_compression_ok", 0.10),
+        ),
+    ),
 )
 
 OBJECTIVE_AXIS_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (

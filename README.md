@@ -130,7 +130,7 @@ flowchart LR
 The next gains should stay benchmark-first:
 
 - strengthen held-out benchmarks for tool-call validity, command correctness,
-  task success, and paired A/B checkpoint comparisons;
+  task success, prompt-context retention, and paired A/B checkpoint comparisons;
 - move from tiny validation runs to LoRA or HF-backed trainable policies so RL can
   affect a model with enough capacity to learn valid Hermes actions;
 - improve reward shaping for executable tool calls, especially JSON validity,
@@ -153,6 +153,7 @@ stable entry points.
 | Local RL validation run | `train-rl` | CPU-friendly Tiny backend with GRPO/PPO and W&B/TensorBoard metrics. |
 | Real dataset RL | `configs/hermes_reasoning_traces_grpo.yaml` | Uses `lambda/hermes-agent-reasoning-traces`; the smoke config is only for quick validation. |
 | Held-out RL benchmark | `eval-rl` | Baseline vs checkpoint on grouped held-out traces with structured metrics. |
+| Prompt/context benchmark | `configs/context_benchmark_eval_rl.yaml` | Measures long-context fact recall, constraint preservation, tool-summary retention, distractor avoidance, and concise synthesis. |
 | Online Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export. |
 | Directional self-evolution | `self-evolution-batch` | Batch replay, worker training, validation splits, and per-direction summaries. |
 | Self-evolution export | `session-eval-export` | Writes `task_input` / `expected_behavior` JSONL splits. |
@@ -426,6 +427,7 @@ behavior, feedback, reward, and capability axes.
 | `configs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2.yaml` | Stage-2 terminal command action-space training on MPS. |
 | `configs/hermes_reasoning_traces_eval_rl.yaml` | Held-out benchmark comparing baseline vs RL checkpoint on grouped traces. |
 | `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | Held-out benchmark for stage-2 command-action checkpoints. |
+| `configs/context_benchmark_eval_rl.yaml` | Prompt-context benchmark for fact recall, constraint retention, and distractor avoidance. |
 | `configs/self_evolution_batch.yaml` | Batch directional self-evolution replay, worker training, and export. |
 | `configs/skill_export.yaml` | Export replay-mined Skill candidates and validation examples. |
 | `configs/hermes_online_cycle.yaml` | Real Hermes online rollout plus replay worker and self-evolution export. |
