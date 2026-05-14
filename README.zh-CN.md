@@ -44,7 +44,7 @@ model，并通过 held-out benchmark 验证改进。
 | 维度 | 本项目提供什么 |
 |---|---|
 | Agent 目标 | 工具调用、终端命令动作、多轮恢复、协议遵守 |
-| 训练路径 | `train-rl` 负责 GRPO/PPO on-policy 训练，`online-cycle` 负责 Hermes replay + worker 训练 |
+| 训练路径 | `train-rl` 负责 GRPO/PPO on-policy 训练，`online-cycle` 负责 Hermes replay + worker 训练，`online-self-evolve` 负责完整闭环 |
 | 可训练对象 | Tiny/HF policy backend、PPO value head、LoRA adapter、reward-model head、BC/DPO worker |
 | 数据来源 | Hugging Face traces、本地 parquet shard、真实 Hermes session log、replay JSONL |
 | 评估方式 | held-out grouped trace benchmark、checkpoint ranking、paired A/B 对比 |
@@ -121,7 +121,8 @@ flowchart LR
 
 后续增益仍然应该以 benchmark 为中心：
 
-- 强化 held-out benchmark，覆盖工具调用合法性、命令正确率、任务完成率和 paired A/B
+- 强化 held-out benchmark，覆盖工具调用合法性、命令正确率、任务完成率、prompt-context
+  保留能力和 paired A/B
   checkpoint 对比；
 - 从 tiny 快速验证逐步切到 LoRA 或 HF-backed 可训练策略，让 RL 作用到容量足够的
   agent policy 上；
@@ -142,7 +143,9 @@ flowchart LR
 | 本地 RL 快速验证 | `train-rl` | CPU 友好的 Tiny backend，支持 GRPO/PPO 与 W&B/TensorBoard 指标。 |
 | 真实数据 RL | `configs/hermes_reasoning_traces_grpo.yaml` | 使用 `lambda/hermes-agent-reasoning-traces`；smoke 配置只用于快速验证。 |
 | Held-out RL benchmark | `eval-rl` | 在分组 held-out traces 上对比 baseline 与 checkpoint。 |
+| Prompt/context benchmark | `configs/context_benchmark_eval_rl.yaml` | 测量长上下文事实召回、约束保留、工具摘要保留、干扰规避和简洁回答。 |
 | 在线 Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export。 |
+| 在线 self-evolution 闭环 | `configs/online_self_evolve.yaml` | Online cycle -> Skill 候选 -> 可选 eval gate 报告。 |
 | 定向 self-evolution | `self-evolution-batch` | 批量 replay、worker 训练、验证集导出和方向级 summary。 |
 | Self-evolution 导出 | `session-eval-export` | 写出 `task_input` / `expected_behavior` JSONL split。 |
 | 可观测性 | `metrics:` | JSONL、stdout、TensorBoard、W&B、可选 live dashboard。 |
@@ -376,6 +379,42 @@ python -m hermes_agentic_rl.cli.main self-evolution-batch \
 batch summary 也会输出 `mined_replay_axes` 和 `skill_candidates`，帮助判断下一轮
 应该继续训练权重、采集更多 session，还是导出候选 Skills。
 
+### Skill Candidate 导出
+
+Replay mining 现在可以进一步沉淀为具体的 agent 能力资产。`skill-export` 会读取
+replay JSONL，筛选 `metadata.replay_mining.skill_candidate` 标记的样本，并导出
+可人工 review 的 Skill 候选和验证样本。
+
+```bash
+python -m hermes_agentic_rl.cli.main skill-export \
+  --config configs/skill_export.yaml
+```
+
+每个候选目录包含 `SKILL.md`、`manifest.json` 和 `validation.jsonl`。新的 replay
+记录还会保留紧凑的 `metadata.source_turn` 证据，让生成的 Skill 草案能够引用用户任务、
+assistant 行为、反馈、reward 和 capability axes。
+导出器还会写出 `quality_report.json`，并在每个 `manifest.json` 和生成的
+`SKILL.md` 中嵌入 `quality` 区块。候选 Skill 会被标记为
+`ready_for_review`、`draft` 或 `blocked`，依据是可解释检查项：样本数、平均
+reward、replay usefulness、主导 capability axis 一致性、验证样本数，以及负反馈比例。
+
+### Online Self-Evolution
+
+当你希望用一个命令跑完整闭环时，可以使用 `online-self-evolve`：真实 Hermes session
+采集、replay mining、本地 worker 训练、self-evolution 导出、Skill 候选导出，以及可选
+`eval-gate`。
+
+```bash
+python -m hermes_agentic_rl.cli.main online-self-evolve \
+  --config configs/online_self_evolve.yaml \
+  --once \
+  --limit 1
+```
+
+编排器会写出 `online_self_evolve_summary.json` 和 `online_self_evolve_report.md`，
+汇总 stage 状态、replay 数量、Skill 候选数量、Skill 质量状态分布以及可选
+promotion-gate 结论。
+
 ## 关键配置
 
 | 配置 | 用途 |
@@ -388,7 +427,10 @@ batch summary 也会输出 `mined_replay_axes` 和 `skill_candidates`，帮助�
 | `configs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2.yaml` | stage-2 terminal command action-space 训练。 |
 | `configs/hermes_reasoning_traces_eval_rl.yaml` | held-out benchmark，对比 baseline 与 RL checkpoint。 |
 | `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | stage-2 command-action checkpoint 的 held-out benchmark。 |
+| `configs/context_benchmark_eval_rl.yaml` | prompt-context benchmark，覆盖事实召回、约束保留和干扰规避。 |
 | `configs/self_evolution_batch.yaml` | 按方向批量运行 self-evolution replay、worker 训练和导出。 |
+| `configs/skill_export.yaml` | 导出 replay mining 得到的 Skill 候选和验证样本。 |
+| `configs/online_self_evolve.yaml` | 完整 online self-evolution 闭环：online-cycle、Skill export 和可选 eval gate。 |
 | `configs/hermes_online_cycle.yaml` | 真实 Hermes online rollout、replay worker 和 self-evolution export。 |
 | `configs/hermes_runtime_sidecar.yaml` | runtime sidecar 示例，用于 session / replay capture。 |
 | `configs/session_train_worker.yaml` | 基于 replay JSONL 的 BC worker。 |
@@ -405,9 +447,11 @@ python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
+python -m hermes_agentic_rl.cli.main online-self-evolve --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
 python -m hermes_agentic_rl.cli.main session-train-worker --config <config> --once
 python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
+python -m hermes_agentic_rl.cli.main skill-export --config <config>
 ```
 
 ## 架构
@@ -416,14 +460,14 @@ python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
 hermes_agentic_rl/
   runtime/       Hermes 和 fake runtime adapters
   framework/     EnvTrainingPipeline 和 SessionTrainingPipeline
-  collectors/    Session sidecar、replay export、quality filters、replay mining
+  collectors/    Session sidecar、replay export、quality filters、replay mining、Skill export
   envs/          Echo、simulated tool、curriculum、Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
   eval/          Held-out eval、leaderboard、paired A/B comparison
   offline/       BC、DPO、reward-model training
   rewards/       Outcome、tool-call、filesystem、feedback、RM components
   monitor/       JSONL、TensorBoard、W&B、dashboard writers
-  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、replay workers
+  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、online-self-evolve、replay workers、skill-export
 ```
 
 数据流：

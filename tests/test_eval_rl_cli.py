@@ -10,7 +10,11 @@ torch = pytest.importorskip("torch")
 
 from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 from hermes_agentic_rl.cli.main import main
-from hermes_agentic_rl.eval.rl_eval import _success_metric_score, select_items_by_group
+from hermes_agentic_rl.eval.rl_eval import (
+    _promotion_readout,
+    _success_metric_score,
+    select_items_by_group,
+)
 
 
 def _trace_row(idx: int) -> dict:
@@ -86,6 +90,91 @@ def test_success_metric_score_can_use_structured_metadata() -> None:
 
     assert found is True
     assert score == 0.42
+
+
+def test_promotion_readout_can_gate_on_capability_axis_delta() -> None:
+    readout = _promotion_readout(
+        policy_reports=[
+            {
+                "name": "baseline",
+                "metrics": {"mean_reward": 0.50, "success_rate": 0.50},
+            },
+            {
+                "name": "candidate",
+                "metrics": {"mean_reward": 0.55, "success_rate": 0.55},
+            },
+        ],
+        comparisons=[
+            {
+                "baseline": "baseline",
+                "candidate": "candidate",
+                "metric_delta": {"mean_reward": 0.05, "success_rate": 0.05},
+                "reward_ab": {"winner": "candidate"},
+            }
+        ],
+        rank_metric="mean_reward",
+        eval_cfg={
+            "promotion_gate": {
+                "required_capability_axes": ["tool_use_reliability"],
+                "min_capability_delta": 0.02,
+                "max_capability_regression": 0.01,
+            }
+        },
+        capability_report={
+            "deltas": {
+                "tool_use_reliability": {"baseline": 0.4, "candidate": 0.43, "delta": 0.03},
+                "task_success": {"baseline": 0.5, "candidate": 0.5, "delta": 0.0},
+            }
+        },
+    )
+
+    assert readout is not None
+    assert readout["recommendation"] == "promote"
+    assert readout["capability_deltas"]["tool_use_reliability"] == 0.03
+    assert readout["checks"]["capability_axis/tool_use_reliability/min_delta"]["passed"] is True
+    assert readout["checks"]["capability_axis/task_success/max_regression"]["passed"] is True
+
+
+def test_promotion_readout_holds_when_required_capability_axis_regresses() -> None:
+    readout = _promotion_readout(
+        policy_reports=[
+            {
+                "name": "baseline",
+                "metrics": {"mean_reward": 0.50, "success_rate": 0.50},
+            },
+            {
+                "name": "candidate",
+                "metrics": {"mean_reward": 0.55, "success_rate": 0.55},
+            },
+        ],
+        comparisons=[
+            {
+                "baseline": "baseline",
+                "candidate": "candidate",
+                "metric_delta": {"mean_reward": 0.05, "success_rate": 0.05},
+                "reward_ab": {"winner": "candidate"},
+            }
+        ],
+        rank_metric="mean_reward",
+        eval_cfg={
+            "promotion_gate": {
+                "required_capability_axes": ["tool_use_reliability"],
+                "min_capability_delta": 0.01,
+                "max_capability_regression": 0.02,
+            }
+        },
+        capability_report={
+            "deltas": {
+                "tool_use_reliability": {"baseline": 0.4, "candidate": 0.38, "delta": -0.02},
+                "task_success": {"baseline": 0.5, "candidate": 0.47, "delta": -0.03},
+            }
+        },
+    )
+
+    assert readout is not None
+    assert readout["recommendation"] == "hold"
+    assert "capability_axis/tool_use_reliability/min_delta" in readout["failed_checks"]
+    assert "capability_axis/task_success/max_regression" in readout["failed_checks"]
 
 
 def test_eval_rl_cli_writes_summary_rollouts_and_leaderboard(

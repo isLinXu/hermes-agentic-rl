@@ -11,6 +11,13 @@ the modules that most often change during RL work.
 ```
 
 ```{eval-rst}
+.. automodule:: hermes_agentic_rl.envs.context_benchmark
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+```{eval-rst}
 .. automodule:: hermes_agentic_rl.eval.rl_eval
    :members:
    :undoc-members:

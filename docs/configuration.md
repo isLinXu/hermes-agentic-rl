@@ -257,6 +257,11 @@ eval_rl:
     min_rank_metric_delta: 0.01
     require_paired_winner: true
     max_p_value: 0.10
+    required_capability_axes: [tool_use_reliability]
+    min_capability_delta: 0.02
+    capability_thresholds:
+      task_success: 0.00
+    max_capability_regression: 0.01
   capability_axes:                   # false disables; omitted uses defaults
     tool_use_reliability:
       description: Hermes tool-call structure and argument fidelity
@@ -295,6 +300,94 @@ the report.
 `eval-gate` runs the same evaluation but forces `promotion_gate.fail_on_hold`
 to `true`, so CI or release scripts can stop automatically when held-out
 evidence does not justify promotion.
+If `required_capability_axes`, `capability_thresholds`, or
+`max_capability_regression` are set, the promotion gate also checks
+`capability_report.deltas`, so a candidate cannot pass merely by improving the
+aggregate reward while regressing an important agent capability.
+
+## Skill Candidate Export
+
+`skill-export` converts replay records tagged by `metadata.replay_mining` into
+reviewable Skill candidates:
+
+```yaml
+skill_export:
+  input_path: outputs/hermes_self_evolution_batch/tool_use_reliability/replay.jsonl
+  output_dir: outputs/hermes_skill_candidates
+  require_skill_candidate: true
+  min_reward: 0.25
+  group_by: primary_axis             # primary_axis | recommended_use | single
+  max_examples_per_skill: 8
+  quality_min_examples: 2
+  quality_min_mean_reward: 0.25
+  quality_min_mean_usefulness: 0.5
+  quality_min_axis_consistency: 0.6
+  quality_min_validation_examples: 1
+  quality_max_negative_signal_ratio: 0.25
+  quality_ready_min_score: 0.75
+  quality_blocked_max_score: 0.35
+```
+
+```bash
+python -m hermes_agentic_rl.cli.main skill-export \
+  --config configs/skill_export.yaml
+```
+
+Each exported candidate directory contains `SKILL.md`, `manifest.json`, and
+`validation.jsonl`. New `session-replay` outputs include compact
+`metadata.source_turn` evidence so the generated `SKILL.md` can cite the user
+task, observed assistant behavior, feedback, reward, and capability axes.
+The exporter also writes `quality_report.json` beside `summary.json`, and each
+candidate `manifest.json` includes a `quality` block. Statuses are deliberately
+review-oriented: `ready_for_review` means all configured checks passed,
+`draft` means the candidate has promise but needs more evidence, and `blocked`
+means the candidate failed enough checks that it should not be promoted without
+new traces.
+
+The quality gate is heuristic and explainable. It checks sample count, mean
+reward, mean replay-usefulness score, dominant capability-axis consistency,
+validation examples, and the ratio of negative feedback signals. For Hermes
+traces, axis consistency treats capability labels as multi-label: repeated
+tool-use traces can still pass even when they also carry `skill_learning` or
+`self_evolution_signal`.
+
+## Online Self-Evolution
+
+`online-self-evolve` is the higher-level closed-loop orchestrator. It reuses
+the existing `online-cycle` stages, then optionally exports Skill candidates
+and runs `eval-gate`:
+
+```yaml
+online_self_evolve:
+  output_dir: outputs/hermes_online_self_evolve
+  stages:
+    online_cycle: true
+    skill_export: true
+    eval_gate: false
+  skill_export:
+    input_path: outputs/hermes_online_self_evolve/replay.jsonl
+    output_dir: outputs/hermes_online_self_evolve/skill_candidates
+    require_skill_candidate: true
+    min_reward: 0.25
+    quality_min_examples: 2
+    quality_ready_min_score: 0.75
+  eval_gate:
+    enabled: false
+    config_path: configs/context_benchmark_eval_rl.yaml
+    output_dir: outputs/hermes_online_self_evolve/eval_gate
+```
+
+```bash
+python -m hermes_agentic_rl.cli.main online-self-evolve \
+  --config configs/online_self_evolve.yaml \
+  --once \
+  --limit 1
+```
+
+Outputs include `online_self_evolve_summary.json` and
+`online_self_evolve_report.md`, which summarize sessions, replay records, Skill
+candidates, Skill quality status counts, optional promotion-gate results, and
+stage artifact paths.
 
 ## Hermes Reasoning Traces
 
@@ -313,6 +406,36 @@ evidence does not justify promotion.
   `success_metric: metadata/argument_value_similarity` with an explicit
   threshold. This keeps command-content success separate from the fixed wrapper
   structure that the adapter already guarantees.
+
+## Context Benchmark
+
+`environment.type: context_benchmark` creates a lightweight benchmark for the
+`prompt_context` capability axis. It stresses long-context fact retention,
+user-constraint preservation, tool-result summarization, distractor avoidance,
+and concise synthesis:
+
+```yaml
+environment:
+  type: context_benchmark
+  dataset_size: 12
+  dataset_seed: 0
+  noise_blocks: 10
+  max_response_chars: 360
+eval_rl:
+  success_metric: metadata/context_required_fact_recall
+  rank_metric: metadata/context_required_fact_recall
+  promotion_gate:
+    required_capability_axes: [prompt_context]
+    min_capability_delta: 0.01
+    max_capability_regression: 0.02
+```
+
+The reward component writes metadata including
+`context_required_fact_recall`, `context_constraint_satisfaction`,
+`context_tool_summary_retention`, `context_distractor_avoidance`,
+`context_precision`, and `context_compression_ok`. These feed the default
+`prompt_context` capability axis and can be used directly as `success_metric`
+or `rank_metric`.
 - This works best with `bootstrap_sft_rounds` or `interleave_sft_every` to warm
   start on the real traces before continuing RL updates.
 - See `configs/hermes_reasoning_traces_grpo_smoke.yaml` for a conservative

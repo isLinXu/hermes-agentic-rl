@@ -7,6 +7,9 @@ __all__ = [
     "AtroposLetterCountingEnv",
     "AtroposLetterCountingReward",
     "BaseEnv",
+    "ContextBenchmarkConfig",
+    "ContextBenchmarkEnv",
+    "ContextBenchmarkReward",
     "CurriculumEnv",
     "CurriculumState",
     "EchoRewardComponent",
@@ -20,6 +23,7 @@ __all__ = [
     "SimToolEnv",
     "SimToolRewardComponent",
     "TerminalTaskEnv",
+    "build_context_benchmark_dataset",
     "build_sim_tool_dataset",
     "calc_tool",
     "load_hermes_reasoning_trace_turns",
@@ -42,6 +46,25 @@ def __getattr__(name: str) -> Any:
         from hermes_agentic_rl.envs.base_env import BaseEnv
 
         return BaseEnv
+    if name in {
+        "ContextBenchmarkConfig",
+        "ContextBenchmarkEnv",
+        "ContextBenchmarkReward",
+        "build_context_benchmark_dataset",
+    }:
+        from hermes_agentic_rl.envs.context_benchmark import (
+            ContextBenchmarkConfig,
+            ContextBenchmarkEnv,
+            ContextBenchmarkReward,
+            build_context_benchmark_dataset,
+        )
+
+        return {
+            "ContextBenchmarkConfig": ContextBenchmarkConfig,
+            "ContextBenchmarkEnv": ContextBenchmarkEnv,
+            "ContextBenchmarkReward": ContextBenchmarkReward,
+            "build_context_benchmark_dataset": build_context_benchmark_dataset,
+        }[name]
     if name in {"CurriculumEnv", "CurriculumState"}:
         from hermes_agentic_rl.envs.curriculum import CurriculumEnv, CurriculumState
 
