@@ -55,6 +55,17 @@ STRUCTURED_METADATA_KEYS = (
     "target_tool_call_count",
     "prediction_chars",
     "target_chars",
+    "context_required_fact_recall",
+    "context_constraint_satisfaction",
+    "context_tool_summary_retention",
+    "context_distractor_avoidance",
+    "context_precision",
+    "context_compression_ok",
+    "context_response_chars",
+    "context_prompt_chars",
+    "context_noise_blocks",
+    "context_required_facts",
+    "context_forbidden_hits",
 )
 
 

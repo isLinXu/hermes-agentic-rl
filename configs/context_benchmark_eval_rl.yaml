@@ -1,0 +1,45 @@
+environment:
+  type: context_benchmark
+  dataset_size: 12
+  dataset_seed: 0
+  noise_blocks: 10
+  max_response_chars: 360
+agent_loop:
+  type: policy
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  max_len: 1024
+  device: cpu
+  seed: 0
+eval_rl:
+  output_dir: outputs/context_benchmark_eval
+  split: all
+  n_rollouts: 12
+  temperature: 0.0
+  max_new_tokens: 96
+  success_metric: metadata/context_required_fact_recall
+  success_threshold: 0.75
+  rank_metric: metadata/context_required_fact_recall
+  promotion_gate:
+    min_rank_metric_delta: 0.01
+    required_capability_axes: [prompt_context]
+    min_capability_delta: 0.01
+    max_capability_regression: 0.02
+  capability_axes:
+    prompt_context:
+      description: Long-context fact recall, constraint preservation, tool-result retention, distractor avoidance, and concise synthesis.
+      metrics:
+        - { name: metadata/context_required_fact_recall, weight: 0.30 }
+        - { name: metadata/context_constraint_satisfaction, weight: 0.25 }
+        - { name: metadata/context_tool_summary_retention, weight: 0.20 }
+        - { name: metadata/context_distractor_avoidance, weight: 0.15 }
+        - { name: metadata/context_compression_ok, weight: 0.10 }
+  policies:
+    - name: baseline
+metrics:
+  jsonl: true
+  wandb:
+    enabled: false
