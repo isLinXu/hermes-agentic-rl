@@ -194,3 +194,29 @@ def whitened_advantage(
         return [0.0] * n
     advs = [(r - mean) / (std + eps) for r in rewards]
     return [max(-3.0, min(3.0, a)) for a in advs]
+
+
+def expand_per_token_advantage(
+    records_with_adv: list[tuple[Any, list[float]]],
+    *,
+    answer_start_token_id: int | None = None,
+    gamma: float = 0.95,
+    eps: float = 1e-6,
+) -> list[tuple[Any, list[float]]]:
+    """Expand scalar advantages into per-token advantages via REINFORCE++."""
+    expanded: list[tuple[Any, list[float]]] = []
+    for rec, adv_list in records_with_adv:
+        if len(rec.response_ids) == 0 or len(adv_list) == 0:
+            expanded.append((rec, adv_list))
+            continue
+        reward = adv_list[0]
+        per_tok = reinforce_plusplus_advantage(
+            response_ids=rec.response_ids,
+            old_logprobs=rec.old_logprobs,
+            reward=reward,
+            answer_start_id=answer_start_token_id,
+            gamma=gamma,
+            eps=eps,
+        )
+        expanded.append((rec, per_tok))
+    return expanded

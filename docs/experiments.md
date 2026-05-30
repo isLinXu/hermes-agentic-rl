@@ -37,9 +37,6 @@ datasets evolve.
   `checkpoints_best/iter_00021`: `mean_reward=0.4437`,
   `similarity=0.1602`, `success_rate=0.3438`,
   `mean_reward` delta `+0.0624` over baseline.
-- Promotion gate snapshot for the held-out stage-2 config:
-  recommendation=`promote`, paired winner=`candidate`,
-  `approx_p=1.2849863395558714e-09`.
 - Interpretation: the adapter now guarantees executable Hermes terminal
   structure, and the command-content success metric
   (`metadata/argument_value_similarity >= 0.2`) shows a real lift over baseline.

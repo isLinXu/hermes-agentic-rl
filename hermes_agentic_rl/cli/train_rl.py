@@ -24,6 +24,7 @@ from hermes_agentic_rl.backends.base import LLMBackend
 from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 from hermes_agentic_rl.core.reward_manager import RewardManager
 from hermes_agentic_rl.envs.base_env import BaseEnv
+from hermes_agentic_rl.envs.context_benchmark import ContextBenchmarkEnv
 from hermes_agentic_rl.envs.curriculum import CurriculumEnv
 from hermes_agentic_rl.envs.echo_task_env import (
     EchoRewardComponent,
@@ -166,8 +167,11 @@ def _build_single_env(env_cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]:
             RewardManager([LetterCountingReward(weight=1.0)]),
         )
     if env_type == "hermes_reasoning_traces":
-        env = HermesReasoningTraceEnv.from_hf_dataset(env_cfg)
-        return env, RewardManager([env.reward_component])
+        hermes_env = HermesReasoningTraceEnv.from_hf_dataset(env_cfg)
+        return hermes_env, RewardManager([hermes_env.reward_component])
+    if env_type == "context_benchmark":
+        context_env = ContextBenchmarkEnv.from_config(env_cfg)
+        return context_env, RewardManager([context_env.reward_component])
     raise RuntimeError(f"env type '{env_type}' not supported")
 
 

@@ -166,6 +166,139 @@ def test_session_replay_cli_supports_judge_component_config(tmp_path: Path, monk
     assert components[0]["name"] == "session_toolcall_reward"
 
 
+def test_session_replay_cli_adds_direction_aware_replay_mining(
+    tmp_path: Path,
+    monkeypatch,
+):
+    session_path = tmp_path / "mining_sessions.jsonl"
+    report_path = tmp_path / "mining_report.json"
+    session_path.write_text(
+        json.dumps(
+            {
+                "session_id": "sess-mining",
+                "task_id": "task-mining",
+                "messages": [
+                    {"role": "user", "content": "Create a report file"},
+                    {
+                        "role": "assistant",
+                        "content": "I created the report file.",
+                        "tool_calls": [
+                            {
+                                "name": "write_file",
+                                "arguments": {"path": "report.md"},
+                            }
+                        ],
+                    },
+                    {"role": "tool", "content": "success: file written"},
+                    {"role": "user", "content": "great, thanks"},
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    output_path = tmp_path / "mining_replay.jsonl"
+    config_path = tmp_path / "mining_replay.yaml"
+    config_path.write_text(
+        (
+            f"input_path: {session_path}\n"
+            f"output_path: {output_path}\n"
+            f"quality_report_path: {report_path}\n"
+            "backend:\n"
+            "  name: tiny\n"
+            "replay_mining:\n"
+            "  min_skill_reward: 0.0\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hermes-agentic-rl",
+            "session-replay",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert main() == 0
+    buffer = ReplayBuffer.load_jsonl(output_path)
+    mining = buffer.samples[0].metadata["replay_mining"]
+    source_turn = buffer.samples[0].metadata["source_turn"]
+    assert mining["skill_candidate"] is True
+    assert "tool_use_reliability" in mining["axes"]
+    assert "skill_learning" in mining["axes"]
+    assert "tool_reliability_replay" in mining["recommended_uses"]
+    assert "skill_candidate" in mining["recommended_uses"]
+    assert buffer.samples[0].metadata["capability_axes"] == mining["axes"]
+    assert source_turn["prompt_messages"][0]["content"] == "Create a report file"
+    assert source_turn["assistant_message"]["content"] == "I created the report file."
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["replay_mining"]["samples_scored"] == 1
+    assert report["replay_mining"]["skill_candidates"] == 1
+    assert report["replay_mining"]["by_axis"]["tool_use_reliability"] == 1
+    assert report["replay_mining"]["by_recommended_use"]["skill_candidate"] == 1
+
+
+def test_session_replay_cli_can_disable_replay_mining(
+    tmp_path: Path,
+    monkeypatch,
+):
+    session_path = tmp_path / "no_mining_sessions.jsonl"
+    report_path = tmp_path / "no_mining_report.json"
+    session_path.write_text(
+        json.dumps(
+            {
+                "session_id": "sess-no-mining",
+                "task_id": "task-no-mining",
+                "messages": [
+                    {"role": "user", "content": "Create a file"},
+                    {"role": "assistant", "content": "Created the file."},
+                    {"role": "user", "content": "great"},
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    output_path = tmp_path / "no_mining_replay.jsonl"
+    config_path = tmp_path / "no_mining_replay.yaml"
+    config_path.write_text(
+        (
+            f"input_path: {session_path}\n"
+            f"output_path: {output_path}\n"
+            f"quality_report_path: {report_path}\n"
+            "backend:\n"
+            "  name: tiny\n"
+            "replay_mining: false\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hermes-agentic-rl",
+            "session-replay",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert main() == 0
+    sample = ReplayBuffer.load_jsonl(output_path).samples[0]
+    assert "replay_mining" not in sample.metadata
+    assert "capability_axes" not in sample.metadata
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["replay_mining"]["enabled"] is False
+    assert report["replay_mining"]["samples_scored"] == 0
+
+
 def test_session_replay_cli_applies_quality_filters_and_writes_report(
     tmp_path: Path, monkeypatch, capsys
 ):
@@ -309,6 +442,8 @@ def test_session_replay_cli_applies_quality_filters_and_writes_report(
     }
     assert report["quarantined"]["count"] == 5
     assert report["reward_distribution"]["positive"] == 2
+    assert report["replay_mining"]["enabled"] is True
+    assert report["replay_mining"]["samples_scored"] == 2
     assert report["data_quality"] == {
         "min_response_tokens": 5,
         "dedupe_within_scan": True,

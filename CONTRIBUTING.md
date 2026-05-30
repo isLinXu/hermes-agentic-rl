@@ -37,5 +37,5 @@ sphinx-build -W --keep-going -b html docs/sphinx docs/sphinx/_build/html
 
 - Keep secrets in environment variables, not in configs.
 - Prefer held-out `eval-rl` checks over training reward when judging progress.
-- Avoid changing `subprojects/hermes-agent` unless the change is explicitly
-  about the subproject itself.
+- Avoid changing external subprojects under `subprojects/` unless the change is
+  explicitly about that upstream checkout.

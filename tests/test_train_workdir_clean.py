@@ -104,4 +104,3 @@ def test_workdir_clean_refuses_to_delete_outside_outputs(tmp_path: Path, monkeyp
 
     assert main() != 0
     assert (workdir_base / "old-task").exists()
-

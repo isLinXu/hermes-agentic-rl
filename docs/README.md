@@ -12,4 +12,9 @@
 | [adr/](adr/) | Architecture Decision Records (one file per high-impact decision) |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Dev setup, coding conventions, PR flow |
 
+External repositories live under `subprojects/` as git submodules. Run
+`git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos`
+after cloning, then use
+`hermes-preflight` and `atropos-preflight` to validate local wiring.
+
 For usage examples, see the top-level [README.md](../README.md) and `configs/`.

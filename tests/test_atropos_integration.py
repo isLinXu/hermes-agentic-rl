@@ -2,7 +2,7 @@
 
 We keep these opt-in: if atroposlib / transformers aren't importable the
 whole file is skipped. On Box's shipped env (with torch + transformers + the
-atropos/ sibling directory) they run as part of the normal pytest pass.
+Atropos subproject) they run as part of the normal pytest pass.
 
 Three tiers covered:
 
@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-# 1) Make the sibling ./atropos source directory importable without pip install -e.
-ATROPOS_SRC = Path(__file__).resolve().parents[1] / "atropos"
+# 1) Make the ./subprojects/atropos source directory importable without pip install -e.
+ATROPOS_SRC = Path(__file__).resolve().parents[1] / "subprojects" / "atropos"
 if ATROPOS_SRC.exists() and str(ATROPOS_SRC) not in sys.path:
     sys.path.insert(0, str(ATROPOS_SRC))
 

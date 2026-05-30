@@ -58,6 +58,8 @@ wandb/
 data/
 .thumbs/
 docs/sphinx/_build/
+*.parquet
+*.arrow
 *.pt
 *.pth
 *.ckpt

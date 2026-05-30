@@ -26,3 +26,25 @@ def group_normalize_advantage(
         # fine: GRPO just won't update on this group this step).
         return [0.0 for _ in rewards]
     return [(r - mean) / (std + eps) for r in rewards]
+
+
+def dapo_group_advantage(
+    rewards: Sequence[float],
+    eps: float = 1e-6,
+) -> list[float] | None:
+    """DAPO-style group advantage: z-score when informative, else discard group.
+
+    Returns ``None`` when all rewards in the group are identical (zero variance),
+    signalling that the group should be filtered from the update.
+    """
+    n = len(rewards)
+    if n == 0:
+        return []
+    if n == 1:
+        return [0.0]
+    mean = sum(rewards) / n
+    var = sum((r - mean) ** 2 for r in rewards) / n
+    std = var ** 0.5
+    if std < eps:
+        return None
+    return [(r - mean) / (std + eps) for r in rewards]

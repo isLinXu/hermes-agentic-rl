@@ -154,8 +154,12 @@ def test_self_evolution_batch_cli_runs_directional_training_pipeline(
     assert first["capability_plan"]["axes"] == ["tool_use_reliability"]
     assert "tool_use_reliability" in summary["capability_axes"]
     assert "task_success" in summary["capability_axes"]
+    assert summary["skill_candidates"] >= 1
+    assert "tool_use_reliability" in summary["mined_replay_axes"]
     assert first["replay"]["samples_written"] == 3
+    assert first["replay"]["mining"]["samples_scored"] == 3
     assert first["worker"]["updates"] == 1
+    assert first["worker"]["trained_samples"] == 2
 
     direction_dir = output_dir / "tool_use_reliability"
     assert (direction_dir / "replay.jsonl").exists()
@@ -166,3 +170,77 @@ def test_self_evolution_batch_cli_runs_directional_training_pipeline(
         (direction_dir / "direction_summary.json").read_text(encoding="utf-8")
     )
     assert direction_summary["self_evolution_dataset"]["samples"]["total"] == 3
+
+
+def test_self_evolution_batch_skips_auto_replay_filter_when_mining_disabled(
+    tmp_path: Path,
+    monkeypatch,
+):
+    session_path = tmp_path / "sessions_no_mining.jsonl"
+    _write_session(
+        session_path,
+        [
+            {
+                "session_id": "sess-doc-1",
+                "task_id": "task-doc-1",
+                "messages": [
+                    {"role": "user", "content": "Update the docs"},
+                    {"role": "assistant", "content": "Updated the README."},
+                    {"role": "user", "content": "great"},
+                ],
+            },
+        ],
+    )
+
+    output_dir = tmp_path / "batch_no_mining"
+    config_path = tmp_path / "self_evolution_batch_no_mining.yaml"
+    config_path.write_text(
+        (
+            "backend:\n"
+            "  name: tiny\n"
+            "  dim: 16\n"
+            "  n_heads: 2\n"
+            "  n_layers: 2\n"
+            "self_evolution_batch:\n"
+            f"  input_path: {session_path}\n"
+            f"  output_dir: {output_dir}\n"
+            "  directions:\n"
+            "    - name: no_mining_tool_axis\n"
+            "      objective:\n"
+            "        target_metrics: [tool_call_parse_ok]\n"
+            "      session_replay:\n"
+            "        replay_mining:\n"
+            "          enabled: false\n"
+            "        data_quality:\n"
+            "          min_prompt_tokens: 1\n"
+            "          min_response_tokens: 1\n"
+            "      session_train_worker:\n"
+            "        algo: bc\n"
+            "        train:\n"
+            "          n_epochs: 1\n"
+            "          batch_size: 1\n"
+            "          lr: 0.001\n"
+            "          min_reward: 0.0\n"
+            "      session_eval_export:\n"
+            "        train_ratio: 1.0\n"
+            "        val_ratio: 0.0\n"
+            "        seed: 0\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hermes-agentic-rl",
+            "self-evolution-batch",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    assert main() == 0
+    summary = json.loads((output_dir / "batch_summary.json").read_text(encoding="utf-8"))
+    direction = summary["directions"][0]
+    assert direction["replay"]["mining"]["enabled"] is False
+    assert direction["worker"]["trained_samples"] == 1

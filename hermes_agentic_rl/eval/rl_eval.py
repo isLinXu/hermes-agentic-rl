@@ -55,6 +55,17 @@ STRUCTURED_METADATA_KEYS = (
     "target_tool_call_count",
     "prediction_chars",
     "target_chars",
+    "context_required_fact_recall",
+    "context_constraint_satisfaction",
+    "context_tool_summary_retention",
+    "context_distractor_avoidance",
+    "context_precision",
+    "context_compression_ok",
+    "context_response_chars",
+    "context_prompt_chars",
+    "context_noise_blocks",
+    "context_required_facts",
+    "context_forbidden_hits",
 )
 
 
@@ -357,6 +368,19 @@ def _normalize_promotion_gate(
     max_p_value = None
     if max_p_value_raw is not None and max_p_value_raw != "":
         max_p_value = float(max_p_value_raw)
+    max_capability_regression_raw = raw_dict.get("max_capability_regression")
+    max_capability_regression = None
+    if max_capability_regression_raw is not None and max_capability_regression_raw != "":
+        max_capability_regression = float(max_capability_regression_raw)
+    raw_capability_thresholds = raw_dict.get("capability_thresholds")
+    capability_thresholds = (
+        {
+            str(axis): float(threshold)
+            for axis, threshold in raw_capability_thresholds.items()
+        }
+        if isinstance(raw_capability_thresholds, dict)
+        else {}
+    )
     return {
         "enabled": bool(raw_dict.get("enabled", True)),
         "candidate": str(raw_dict.get("candidate", "best_non_baseline")),
@@ -368,7 +392,91 @@ def _normalize_promotion_gate(
         "require_any_improvement": bool(raw_dict.get("require_any_improvement", True)),
         "require_paired_winner": bool(raw_dict.get("require_paired_winner", False)),
         "max_p_value": max_p_value,
+        "required_capability_axes": _string_list(raw_dict.get("required_capability_axes")),
+        "min_capability_delta": float(
+            raw_dict.get("min_capability_delta", raw_dict.get("min_axis_delta", 0.0))
+        ),
+        "capability_thresholds": capability_thresholds,
+        "max_capability_regression": max_capability_regression,
     }
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None or value is False:
+        return []
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    return []
+
+
+def _capability_delta_map(capability_report: dict[str, Any] | None) -> dict[str, float]:
+    if not isinstance(capability_report, dict):
+        return {}
+    raw_deltas = capability_report.get("deltas")
+    if not isinstance(raw_deltas, dict):
+        return {}
+    deltas: dict[str, float] = {}
+    for axis, payload in raw_deltas.items():
+        if not isinstance(payload, dict):
+            continue
+        delta = _as_float(payload.get("delta"))
+        if delta is not None:
+            deltas[str(axis)] = delta
+    return deltas
+
+
+def _capability_gate_checks(
+    *,
+    gate: dict[str, Any],
+    capability_report: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    checks: dict[str, dict[str, Any]] = {}
+    required_axes = _string_list(gate.get("required_capability_axes"))
+    thresholds = (
+        dict(gate.get("capability_thresholds", {}))
+        if isinstance(gate.get("capability_thresholds"), dict)
+        else {}
+    )
+    max_regression = gate.get("max_capability_regression")
+    if not required_axes and not thresholds and max_regression is None:
+        return checks
+
+    deltas = _capability_delta_map(capability_report)
+    if (required_axes or thresholds) and not deltas:
+        checks["capability_report_present"] = {
+            "required": True,
+            "actual": False,
+            "passed": False,
+        }
+
+    axes_to_check = list(dict.fromkeys(required_axes + [str(axis) for axis in thresholds]))
+    default_delta = float(gate.get("min_capability_delta", 0.0))
+    for axis in axes_to_check:
+        required = float(thresholds.get(axis, default_delta))
+        actual = deltas.get(axis)
+        checks[f"capability_axis/{axis}/min_delta"] = {
+            "required": required,
+            "actual": actual,
+            "passed": actual is not None and actual >= required,
+        }
+
+    if max_regression is not None:
+        allowed_regression = float(max_regression)
+        if not deltas:
+            checks["capability_axis/max_regression"] = {
+                "required": f">= {-allowed_regression}",
+                "actual": None,
+                "passed": False,
+            }
+        for axis, delta in sorted(deltas.items()):
+            checks[f"capability_axis/{axis}/max_regression"] = {
+                "required": f">= {-allowed_regression}",
+                "actual": delta,
+                "passed": delta >= -allowed_regression,
+            }
+    return checks
 
 
 def _promotion_readout(
@@ -377,6 +485,7 @@ def _promotion_readout(
     comparisons: list[dict[str, Any]],
     rank_metric: str,
     eval_cfg: dict[str, Any],
+    capability_report: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     gate = _normalize_promotion_gate(eval_cfg, rank_metric=rank_metric)
     if not gate["enabled"]:
@@ -391,7 +500,6 @@ def _promotion_readout(
         return None
 
     baseline = policy_reports[0]
-    best_non_baseline = None
     candidate_mode = str(gate.get("candidate", "best_non_baseline"))
     if candidate_mode != "best_non_baseline":
         raise RuntimeError(
@@ -399,11 +507,10 @@ def _promotion_readout(
             "`best_non_baseline`"
         )
 
-    for report in _rank_policy_reports(policy_reports[1:], metric=rank_metric):
-        if best_non_baseline is None:
-            best_non_baseline = report
-            break
-
+    best_non_baseline = next(
+        iter(_rank_policy_reports(policy_reports[1:], metric=rank_metric)),
+        None,
+    )
     if best_non_baseline is None:
         return {
             "enabled": True,
@@ -427,11 +534,13 @@ def _promotion_readout(
     best_score = float(best_non_baseline["metrics"].get(rank_metric, 0.0))
     baseline_score = float(baseline["metrics"].get(rank_metric, 0.0))
     rank_metric_delta = best_score - baseline_score
+    capability_deltas = _capability_delta_map(capability_report)
     any_improvement = (
         reward_delta > 0.0
         or success_rate_delta > 0.0
         or rank_metric_delta > 0.0
         or reward_ab.get("winner") == "candidate"
+        or any(delta > 0.0 for delta in capability_deltas.values())
     )
     checks: dict[str, dict[str, Any]] = {
         "min_reward_delta": {
@@ -470,6 +579,12 @@ def _promotion_readout(
             "actual": approx_p,
             "passed": approx_p is not None and approx_p <= float(max_p_value),
         }
+    checks.update(
+        _capability_gate_checks(
+            gate=gate,
+            capability_report=capability_report,
+        )
+    )
 
     failed_checks = [name for name, payload in checks.items() if not payload["passed"]]
     passed = best_non_baseline["name"] != baseline["name"] and not failed_checks
@@ -485,6 +600,7 @@ def _promotion_readout(
         "rank_metric_delta": rank_metric_delta,
         "reward_delta": reward_delta,
         "success_rate_delta": success_rate_delta,
+        "capability_deltas": capability_deltas,
         "reward_ab": reward_ab,
         "metric_delta": metric_delta,
         "checks": checks,
@@ -957,16 +1073,17 @@ def run_eval_rl(
         rank_metric = str(eval_cfg.get("rank_metric", "mean_reward"))
         ranking = _rank_policy_reports(policy_reports, metric=rank_metric)
         best_policy = ranking[0] if ranking else None
+        capability_axes = normalize_capability_axes(eval_cfg.get("capability_axes"))
+        capability_report = build_capability_report(
+            policy_reports,
+            axes=capability_axes,
+        )
         promotion_readout = _promotion_readout(
             policy_reports=policy_reports,
             comparisons=comparisons,
             rank_metric=rank_metric,
             eval_cfg=eval_cfg,
-        )
-        capability_axes = normalize_capability_axes(eval_cfg.get("capability_axes"))
-        capability_report = build_capability_report(
-            policy_reports,
-            axes=capability_axes,
+            capability_report=capability_report,
         )
         ranking_summary = [
             {

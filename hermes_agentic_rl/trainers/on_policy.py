@@ -44,10 +44,11 @@ from hermes_agentic_rl.backends.base import LLMBackend
 from hermes_agentic_rl.backends.batch_generate import BatchRolloutGenerator
 from hermes_agentic_rl.core.reward_manager import RewardManager
 from hermes_agentic_rl.core.rollout_manager import RolloutManager
-from hermes_agentic_rl.core.types import Trajectory
+from hermes_agentic_rl.core.types import RolloutStep, Trajectory
 from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
 from hermes_agentic_rl.mdp.state_encoder import PromptStateEncoder
 from hermes_agentic_rl.trainers.multi_turn_credit import assign_multi_turn_rewards
+from hermes_agentic_rl.trainers.on_policy_config import OnPolicyTrainerConfig
 
 
 class AgentLoopFactory(Protocol):
@@ -177,6 +178,19 @@ class OnPolicyTrainerConfig:
     # FlashAttention. When True, HF backends use attn_implementation="flash_attention_2".
     # Tiny backend uses torch.nn.functional.scaled_dot_product_attention.
     flash_attention: bool = False
+    async_checkpoint: bool = False
+    stability_preset: str = "none"
+    token_budget: dict[str, Any] | None = None
+    entropy_schedule: dict[str, Any] | None = None
+    use_ema_rollout: bool = False
+    ema_tau: float = 0.005
+    ema_tau_start: float | None = None
+    ema_tau_warmup_steps: int = 0
+    lr_schedule: str = "constant"
+    lr_warmup_steps: int = 0
+    lr_warmup_start_lr: float = 0.0
+    lr_total_steps: int = 0
+    lr_end_lr: float = 0.0
 
 
 @dataclass(slots=True)
@@ -325,6 +339,40 @@ class OnPolicyTrainer:
                 min_coef=float(self.cfg.adaptive_kl_min),
                 max_coef=float(self.cfg.adaptive_kl_max),
             )
+        # Entropy-coefficient scheduler (opt-in via cfg.entropy_schedule).
+        # The dict mirrors the stability-preset shape, e.g.
+        #   {"mode": "linear", "start": 0.01, "end": 0.001}
+        #   {"mode": "pid", "target_entropy": 1.5}
+        # Previously this config field (and the values injected by the
+        # "standard"/"aggressive" stability presets) was silently dropped.
+        self._entropy_sched: Any = None
+        if self.cfg.entropy_schedule:
+            from hermes_agentic_rl.algos.entropy_schedule import (
+                make_entropy_scheduler,
+            )
+
+            sched_kwargs = dict(self.cfg.entropy_schedule)
+            kind = str(
+                sched_kwargs.pop("mode", sched_kwargs.pop("kind", "linear"))
+            )
+            # Default total_steps to the full run length for step schedules
+            # so users do not have to restate it in YAML.
+            if (
+                kind in ("linear", "cosine")
+                and "total_steps" not in sched_kwargs
+            ):
+                sched_kwargs["total_steps"] = max(1, int(self.cfg.n_iters))
+            try:
+                self._entropy_sched = make_entropy_scheduler(kind, **sched_kwargs)
+            except (TypeError, ValueError) as exc:
+                import warnings as _warnings
+
+                _warnings.warn(
+                    f"Ignoring invalid entropy_schedule {self.cfg.entropy_schedule!r}: {exc}",
+                    stacklevel=2,
+                )
+                self._entropy_sched = None
+
         # Iteration to start from — updated by _maybe_resume().
         self._start_iter = 0
         self._best_reward = 0.0
@@ -335,6 +383,7 @@ class OnPolicyTrainer:
         # Initialize checkpoint manager lazily (only when output_dir + checkpoint_every).
         self._ckpt_manager = None
         self._best_ckpt_manager = None
+        self._async_ckpt_saver = None
         if self.cfg.output_dir is not None and (
             self.cfg.checkpoint_every > 0
             or self.cfg.auto_resume
@@ -346,6 +395,10 @@ class OnPolicyTrainer:
                 Path(self.cfg.output_dir) / "checkpoints",
                 keep_last=self.cfg.keep_last_checkpoints,
             )
+            if self.cfg.async_checkpoint:
+                from hermes_agentic_rl.trainers.checkpoint import AsyncCheckpointSaver
+
+                self._async_ckpt_saver = AsyncCheckpointSaver()
             if self.cfg.save_best_checkpoint:
                 # keep_last=0 ⇒ never prune the best bundle
                 self._best_ckpt_manager = CheckpointManager(
@@ -576,29 +629,15 @@ class OnPolicyTrainer:
         records: list[RolloutRecord] = []
         for gen in outputs:
             response_text = self.policy.tokenizer.decode(gen.response_ids)
-            trajectory = Trajectory(
-                task_id=item["task_id"],
-                prompt=instruction,
-                steps=[],
-                final_output=response_text,
-                finished_naturally=gen.finished,
-                turns_used=1,
-                metadata={
-                    "messages": [
-                        {"role": "user", "content": instruction},
-                        {"role": "assistant", "content": response_text},
-                    ],
-                    "runtime": {
-                        "runtime": "policy_agent_loop",
-                        "prompt": instruction,
-                    "rl": {
-                        "prompt_ids": list(prompt_ids),
-                        "response_ids": list(gen.response_ids),
-                        "old_logprobs": list(gen.logprobs),
-                        "temperature": self.cfg.temperature,
-                        },
-                    },
-                },
+            trajectory = _batch_single_turn_trajectory(
+                item=item,
+                instruction=instruction,
+                response_text=response_text,
+                prompt_ids=prompt_ids,
+                response_ids=list(gen.response_ids),
+                old_logprobs=list(gen.logprobs),
+                temperature=self.cfg.temperature,
+                finished=gen.finished,
             )
             summary = await self.reward_manager.evaluate(item, trajectory, tool_context=None)
             if callable(observe):
@@ -626,8 +665,8 @@ class OnPolicyTrainer:
                         ],
                         "finished_naturally": bool(trajectory.finished_naturally),
                         "turns_used": trajectory.turns_used,
-                        "tool_calls_count": 0,
-                        "tool_results_count": 0,
+                        "tool_calls_count": sum(len(step.tool_calls) for step in trajectory.steps),
+                        "tool_results_count": sum(len(step.tool_results) for step in trajectory.steps),
                     "final_output_chars": len(trajectory.final_output or ""),
                     "prompt_tokens": len(prompt_ids),
                     "response_tokens": len(gen.response_ids),
@@ -722,6 +761,26 @@ class OnPolicyTrainer:
             if algo_cfg is not None and hasattr(algo_cfg, "kl_coef"):
                 algo_cfg.kl_coef = float(self._kl_ctrl.value)
 
+        # Entropy coefficient schedule — sync entropy_coef into algo.cfg
+        # BEFORE computing loss. For step schedules (linear/exp/cosine) the
+        # coefficient is a function of the iteration. For the PID controller
+        # the coefficient is whatever the previous iter's entropy drove it to
+        # (updated at the end of this method).
+        entropy_coef_applied: float | None = None
+        if self._entropy_sched is not None:
+            algo_cfg = getattr(self.algo, "cfg", None)
+            if algo_cfg is not None and hasattr(algo_cfg, "entropy_coef"):
+                from hermes_agentic_rl.algos.entropy_schedule import (
+                    TargetEntropyPID,
+                )
+
+                if isinstance(self._entropy_sched, TargetEntropyPID):
+                    coef = float(self._entropy_sched.coef)
+                else:
+                    coef = float(self._entropy_sched.step(iter_idx))
+                algo_cfg.entropy_coef = coef
+                entropy_coef_applied = coef
+
         update_batches = self._build_update_batches(batch, iter_idx=iter_idx)
         per_step_stats: list[AlgoUpdateStats] = []
         early_stopped = False
@@ -807,6 +866,16 @@ class OnPolicyTrainer:
             step_stats=per_step_stats,
             n_update_batches=len(update_batches),
         )
+        # Entropy schedule bookkeeping: record the coef used this iter and
+        # (for PID) feed the measured entropy back to drive the next iter.
+        if self._entropy_sched is not None:
+            from hermes_agentic_rl.algos.entropy_schedule import TargetEntropyPID
+
+            if entropy_coef_applied is not None:
+                agg.extra["entropy_coef"] = float(entropy_coef_applied)
+            if isinstance(self._entropy_sched, TargetEntropyPID):
+                next_coef = float(self._entropy_sched.update(float(agg.entropy)))
+                agg.extra["entropy_coef_next"] = next_coef
         if early_stopped:
             agg.extra["early_stopped_by_kl"] = 1.0
             agg.extra["last_minibatch_approx_kl"] = last_approx_kl
@@ -895,7 +964,7 @@ class OnPolicyTrainer:
                 and it > 0
                 and it % self.cfg.checkpoint_every == 0
             ):
-                self._save_full_checkpoint(it)
+                self._save_full_checkpoint(it, background=True)
 
             # Early-stop check (after all per-iter side effects).
             if (
@@ -913,18 +982,33 @@ class OnPolicyTrainer:
         # Always emit a final checkpoint if ckpt manager is active.
         if self._ckpt_manager is not None and self.cfg.n_iters > start:
             self._save_full_checkpoint(last_iter)
+        if self._async_ckpt_saver is not None:
+            try:
+                self._async_ckpt_saver.flush()
+            finally:
+                self._async_ckpt_saver.close()
         return self.stats
 
     # ------------------------------------------------------------------
     # checkpoint helpers
     # ------------------------------------------------------------------
 
-    def _save_full_checkpoint(self, it: int, manager: Any | None = None) -> None:
+    def _save_full_checkpoint(
+        self,
+        it: int,
+        manager: Any | None = None,
+        *,
+        background: bool = False,
+    ) -> None:
         """Save a {model, optimizer, rng, stats} bundle via CheckpointManager.
 
         If ``manager`` is None, uses the default checkpoint manager. Passing an
         alternate manager (e.g. ``self._best_ckpt_manager``) writes to a
         separate directory with its own retention policy.
+
+        When ``background=True`` and ``async_checkpoint`` is enabled, the CPU
+        snapshot is taken synchronously but disk I/O runs on a worker thread.
+        Best and final checkpoints always call with ``background=False``.
         """
         target_mgr = manager or self._ckpt_manager
         if target_mgr is None or not hasattr(self.policy, "model"):
@@ -932,6 +1016,7 @@ class OnPolicyTrainer:
         from hermes_agentic_rl.trainers.checkpoint import (
             CheckpointState,
             capture_rng_state,
+            snapshot_state_to_cpu,
         )
 
         state = CheckpointState(
@@ -944,7 +1029,16 @@ class OnPolicyTrainer:
             best_reward=self._best_reward,
             best_iteration=self._best_iter,
         )
-        target_mgr.save(state)
+        use_async = (
+            background
+            and self.cfg.async_checkpoint
+            and self._async_ckpt_saver is not None
+            and manager is None
+        )
+        if use_async:
+            self._async_ckpt_saver.submit(target_mgr, snapshot_state_to_cpu(state))
+        else:
+            target_mgr.save(state)
 
     def _maybe_resume(self) -> None:
         if self._ckpt_manager is None:
@@ -1645,6 +1739,55 @@ def _summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
         if rollout_reward_stats:
             summary["rollout_final_reward"] = rollout_reward_stats
     return summary
+
+
+def _batch_single_turn_trajectory(
+    *,
+    item: dict[str, Any],
+    instruction: str,
+    response_text: str,
+    prompt_ids: list[int],
+    response_ids: list[int],
+    old_logprobs: list[float],
+    temperature: float,
+    finished: bool,
+) -> Trajectory:
+    """Build a single-turn trajectory for batched rollout collection.
+
+    Batched generation bypasses RolloutManager, so we must populate at least
+    one :class:`RolloutStep` so trajectory-level rewards (tool-call fidelity,
+    turn discount, conditional gating on ``traj.steps``) behave like the
+    agent-loop path.
+    """
+    return Trajectory(
+        task_id=item["task_id"],
+        prompt=instruction,
+        steps=[
+            RolloutStep(
+                turn_index=0,
+                assistant_message=response_text,
+            )
+        ],
+        final_output=response_text,
+        finished_naturally=finished,
+        turns_used=1,
+        metadata={
+            "messages": [
+                {"role": "user", "content": instruction},
+                {"role": "assistant", "content": response_text},
+            ],
+            "runtime": {
+                "runtime": "policy_agent_loop",
+                "prompt": instruction,
+                "rl": {
+                    "prompt_ids": list(prompt_ids),
+                    "response_ids": list(response_ids),
+                    "old_logprobs": list(old_logprobs),
+                    "temperature": temperature,
+                },
+            },
+        },
+    )
 
 
 def _extract_rl(trajectory: Trajectory) -> dict[str, Any] | None:

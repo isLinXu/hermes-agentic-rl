@@ -43,28 +43,35 @@ capability improved?" rather than only "did reward go up?".
    capability axes.
 
 2. Direction-aware replay mining.
-   Extend session replay reports so each replay sample records why it is useful:
-   tool reliability, recovery, context preservation, or Skill-worthy procedure.
-   This makes self-evolution datasets easier to filter and compare.
+   Implemented in this batch. Session replay records now include
+   `metadata.replay_mining` and `metadata.capability_axes`, while quality
+   reports summarize axes, reasons, recommended uses, and Skill-candidate
+   counts. This makes self-evolution datasets easier to filter and compare.
 
 3. Skill export loop.
-   Add an exporter that converts repeated high-quality sessions into
-   Skill-style Markdown candidates with metadata, validation samples, and
-   failure cases. The goal is external agent improvement before or alongside
-   RL weight updates.
+   Implemented in this batch. `skill-export` converts high-quality replay
+   records tagged as `skill_candidate` into reviewable Skill directories with
+   `SKILL.md`, `manifest.json`, and `validation.jsonl`. The goal is external
+   agent improvement before or alongside RL weight updates. A Skill Quality
+   Gate now writes `quality_report.json` and marks each candidate as
+   `ready_for_review`, `draft`, or `blocked` from explainable replay evidence.
 
 4. Context and prompt harness benchmarks.
-   Add held-out scenarios that stress long context, compression, memory recall,
-   and tool-result summarization. These should produce metrics that can feed the
-   `prompt_context` capability axis.
+   Implemented in this batch. `context_benchmark` adds held-out scenarios that
+   stress long context, compression, memory recall, distractor avoidance, and
+   tool-result summarization. Its reward metadata now feeds the `prompt_context`
+   capability axis.
 
 5. RL promotion with capability thresholds.
-   Extend `promotion_gate` so a run can require improvements on selected
-   capability axes, not only reward/success-rate deltas.
+   Implemented in this batch. `promotion_gate` can require improvements on
+   selected capability axes and enforce a maximum allowed regression across the
+   capability report, not only reward/success-rate deltas.
 
 6. Online self-evolution cycle.
-   Combine real Hermes sessions, replay mining, Skill candidate export,
-   train/eval, W&B reports, and `eval-gate` into one repeatable loop.
+   Implemented in this batch. `online-self-evolve` combines real Hermes
+   sessions, replay mining, local worker training, self-evolution export, Skill
+   candidate export, W&B-ready metrics, and optional `eval-gate` into one
+   repeatable loop with a unified summary and Markdown report.
 
 ## Immediate Result
 
@@ -83,3 +90,12 @@ Review:
 - `capability_report.md`
 - W&B summary -> `capability_report`
 - `outputs/hermes_self_evolution_batch/batch_summary.json` -> `capability_axes`
+- `replay.jsonl` -> `metadata.replay_mining`
+- `replay_quality_report.json` -> `replay_mining`
+- `skill-export` -> `SKILL.md`, `manifest.json`, `validation.jsonl`
+- `skill-export` -> `quality_report.json`, `quality.status_counts`
+- `promotion_readout.checks` -> `capability_axis/<axis>/min_delta`
+- `context_benchmark` -> `metadata/context_required_fact_recall`,
+  `metadata/context_constraint_satisfaction`, `metadata/context_compression_ok`
+- `online-self-evolve` -> `online_self_evolve_summary.json`,
+  `online_self_evolve_report.md`

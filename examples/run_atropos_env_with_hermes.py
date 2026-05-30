@@ -6,8 +6,8 @@ delegating generation to any ``LLMBackend`` (here: ``TinyCausalLM``).
 
 Usage:
 
-    # Make the sibling atropos/ directory importable (no pip install needed)
-    PYTHONPATH=./atropos python examples/run_atropos_env_with_hermes.py
+    # Make the Atropos subproject importable (no pip install needed)
+    PYTHONPATH=./subprojects/atropos python examples/run_atropos_env_with_hermes.py
 
 Swap ``LettersEnv`` for ``atroposlib/environments/gsm8k_server.py::GSM8kEnv``
 to train on real GSM8K (requires the extra deps: datasets/math-verify).
@@ -18,10 +18,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Auto-inject the sibling atropos/ path so this script is zero-install.
+# Auto-inject the Atropos subproject path so this script is zero-install.
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
-_ATROPOS_SRC = _ROOT / "atropos"
+_ATROPOS_SRC = _ROOT / "subprojects" / "atropos"
 if _ATROPOS_SRC.exists() and str(_ATROPOS_SRC) not in sys.path:
     sys.path.insert(0, str(_ATROPOS_SRC))
 
@@ -104,7 +104,7 @@ def main() -> None:
     )
     stats = trainer.train()
 
-    print("\n== atropos env × hermes GRPO — training summary ==")
+    print("\n== atropos env x hermes GRPO - training summary ==")
     for r in stats.iters:
         print(
             f"  iter={r['iter']}  "

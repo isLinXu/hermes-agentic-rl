@@ -11,6 +11,7 @@ def clipped_surrogate_loss_batched(
     advantage: torch.Tensor,  # [B, T] or [B, 1] or [B]
     mask: torch.Tensor,  # [B, T] bool
     clip_eps: float = 0.2,
+    clip_eps_high: float | None = None,
     loss_agg: Literal["mean_token", "sum_token", "dr_grpo"] = "mean_token",
     max_len_for_dr_grpo: int = 256,
 ) -> tuple[torch.Tensor, dict[str, float]]:
@@ -23,7 +24,8 @@ def clipped_surrogate_loss_batched(
         advantage: broadcastable to [B, T]. Scalar GRPO advantage should
             be passed as [B, 1]; per-token GAE advantage as [B, T].
         mask: [B, T] bool — True at valid response tokens.
-        clip_eps: clipping epsilon.
+        clip_eps: lower clipping epsilon (ratio lower bound ``1 - clip_eps``).
+        clip_eps_high: optional asymmetric upper clip (defaults to ``clip_eps``).
         loss_agg: aggregation across tokens and rollouts:
             - ``mean_token``: for each rollout, mean over its valid tokens;
               then mean over rollouts (GRPO/DeepSeek standard).
@@ -55,9 +57,10 @@ def clipped_surrogate_loss_batched(
     mf = mask.to(dtype=new_logprobs.dtype)
     tokens_per_row = mf.sum(dim=-1).clamp(min=1)
 
+    eps_high = clip_eps if clip_eps_high is None else clip_eps_high
     ratio = torch.exp(new_logprobs - old_logprobs)
     surr1 = ratio * adv
-    surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * adv
+    surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + eps_high) * adv
     loss_per_tok = -torch.minimum(surr1, surr2) * mf
 
     if loss_agg == "mean_token":
@@ -74,7 +77,8 @@ def clipped_surrogate_loss_batched(
 
     with torch.no_grad():
         # clip_frac: fraction of valid tokens where |ratio - 1| > eps.
-        clipped_mask = (torch.abs(ratio - 1.0) > clip_eps) & mask
+        clip_threshold = max(clip_eps, eps_high)
+        clipped_mask = (torch.abs(ratio - 1.0) > clip_threshold) & mask
         n_tok = mask.sum().clamp(min=1)
         clip_frac = clipped_mask.to(ratio.dtype).sum() / n_tok
         ratio_mean = (ratio * mf).sum() / n_tok
@@ -211,4 +215,3 @@ def clipped_value_loss(
         clipped_frac = ((values_new - values_old).abs() > clip_eps).float().mean().item()
         v_mean = values_new.mean().item()
     return loss, {"value_clip_frac": float(clipped_frac), "value_mean": float(v_mean)}
-

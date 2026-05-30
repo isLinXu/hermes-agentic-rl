@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from hermes_agentic_rl.integrations.atropos_repo import (
-    ExternalRepoResolution,
-    prepare_atropos_imports,
-    prepare_tinker_atropos_imports,
+_ATROPOS_RELATIVE_PATHS = (
+    Path("subprojects/atropos"),
+    Path("atropos"),
+)
+_TINKER_ATROPOS_RELATIVE_PATHS = (
+    Path("subprojects/tinker-atropos"),
+    Path("tinker-atropos"),
 )
 
 
@@ -17,40 +21,38 @@ class AtroposPreflightResult:
     """Preflight result for local Atropos/Tinker-Atropos integration."""
 
     base_dir: Path
-    atropos: ExternalRepoResolution
-    tinker_atropos: ExternalRepoResolution
+    atropos_dir: Path | None
+    tinker_atropos_dir: Path | None
     python_ok: dict[str, bool]
     missing: list[str]
-
-    @property
-    def atropos_dir(self) -> Path | None:
-        return self.atropos.repo_path if self.atropos.has_marker else None
-
-    @property
-    def tinker_atropos_dir(self) -> Path | None:
-        return self.tinker_atropos.repo_path if self.tinker_atropos.has_marker else None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "base_dir": str(self.base_dir),
             "atropos_dir": str(self.atropos_dir) if self.atropos_dir else None,
             "tinker_atropos_dir": str(self.tinker_atropos_dir) if self.tinker_atropos_dir else None,
-            "atropos_source": self.atropos.source,
-            "tinker_atropos_source": self.tinker_atropos.source,
-            "checked_paths": {
-                "atropos": [str(path) for path in self.atropos.checked_paths],
-                "tinker_atropos": [
-                    str(path) for path in self.tinker_atropos.checked_paths
-                ],
-            },
             "python_ok": dict(self.python_ok),
             "missing": list(self.missing),
         }
 
 
 def _module_exists(name: str) -> bool:
-    importlib.invalidate_caches()
     return importlib.util.find_spec(name) is not None
+
+
+def _maybe_add_sys_path(path: Path) -> None:
+    # Ensure local subprojects can be imported without pip install.
+    p = str(path.resolve())
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+
+def _first_existing(base_dir: Path, candidates: tuple[Path, ...]) -> Path | None:
+    for relative in candidates:
+        candidate = (base_dir / relative).resolve()
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
@@ -63,8 +65,13 @@ def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
     """
 
     base_dir = base_dir.resolve()
-    atropos = prepare_atropos_imports(base_dir=base_dir)
-    tinker_atropos = prepare_tinker_atropos_imports(base_dir=base_dir)
+    atropos_dir = _first_existing(base_dir, _ATROPOS_RELATIVE_PATHS)
+    tinker_atropos_dir = _first_existing(base_dir, _TINKER_ATROPOS_RELATIVE_PATHS)
+
+    if atropos_dir is not None:
+        _maybe_add_sys_path(atropos_dir)
+    if tinker_atropos_dir is not None:
+        _maybe_add_sys_path(tinker_atropos_dir)
 
     python_ok = {
         "atroposlib": _module_exists("atroposlib"),
@@ -78,10 +85,10 @@ def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
     }
 
     missing: list[str] = []
-    if not atropos.has_marker:
-        missing.append("local_dir:atropos")
-    if not tinker_atropos.has_marker:
-        missing.append("local_dir:tinker-atropos")
+    if atropos_dir is None:
+        missing.append("local_dir:subprojects/atropos")
+    if tinker_atropos_dir is None:
+        missing.append("local_dir:subprojects/tinker-atropos")
     if not python_ok["atroposlib"]:
         missing.append("python:atroposlib")
     if not python_ok["tinker_atropos.config"]:
@@ -91,8 +98,8 @@ def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
 
     return AtroposPreflightResult(
         base_dir=base_dir,
-        atropos=atropos,
-        tinker_atropos=tinker_atropos,
+        atropos_dir=atropos_dir,
+        tinker_atropos_dir=tinker_atropos_dir,
         python_ok=python_ok,
         missing=missing,
     )

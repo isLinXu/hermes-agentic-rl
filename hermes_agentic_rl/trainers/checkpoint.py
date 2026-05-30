@@ -238,6 +238,83 @@ class CheckpointManager:
 
 
 # ---------------------------------------------------------------------------
+# Async checkpoint saver (non-blocking I/O during training)
+# ---------------------------------------------------------------------------
+
+
+def snapshot_state_to_cpu(state: CheckpointState) -> CheckpointState:
+    """Clone model tensors to CPU so the training thread can keep stepping."""
+    model_state = {
+        k: (v.detach().cpu().clone() if isinstance(v, torch.Tensor) else v)
+        for k, v in state.model_state.items()
+    }
+    return CheckpointState(
+        iteration=state.iteration,
+        model_state=model_state,
+        optimizer_state=state.optimizer_state,
+        rng_state=state.rng_state,
+        stats=list(state.stats),
+        config=dict(state.config),
+        best_reward=state.best_reward,
+        best_iteration=state.best_iteration,
+    )
+
+
+class AsyncCheckpointSaver:
+    """Background worker that drains checkpoint saves in submission order.
+
+    ``submit`` enqueues a ``(manager, state)`` pair; ``flush`` blocks until
+    the queue is empty and re-raises the first worker error so callers can
+    fail the training step instead of silently losing checkpoints.
+    """
+
+    def __init__(self) -> None:
+        import queue
+        import threading
+
+        self._queue: queue.Queue[tuple[Any, CheckpointState] | None] = queue.Queue()
+        self._error: BaseException | None = None
+        self._closed = False
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    def _worker(self) -> None:
+        while True:
+            item = self._queue.get()
+            try:
+                if item is None:
+                    return
+                mgr, state = item
+                mgr.save(state)
+            except BaseException as exc:
+                if self._error is None:
+                    self._error = exc
+            finally:
+                self._queue.task_done()
+
+    def submit(self, mgr: Any, state: CheckpointState) -> None:
+        if self._closed:
+            raise RuntimeError("AsyncCheckpointSaver is closed")
+        if self._error is not None:
+            raise self._error
+        self._queue.put((mgr, state))
+
+    def flush(self) -> None:
+        self._queue.join()
+        if self._error is not None:
+            err = self._error
+            self._error = None
+            raise err
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._queue.put(None)
+        self._thread.join()
+
+
+# ---------------------------------------------------------------------------
 # Trainer integration helpers
 # ---------------------------------------------------------------------------
 

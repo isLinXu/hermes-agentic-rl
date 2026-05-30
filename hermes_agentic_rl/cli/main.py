@@ -109,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
             "train-rl",
             "eval-rl",
             "eval-gate",
+            "benchmark-suite",
             "online-cycle",
             "atropos-preflight",
             "hermes-preflight",
@@ -117,6 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
             "session-train-worker",
             "session-eval-export",
             "self-evolution-batch",
+            "online-self-evolve",
+            "skill-export",
         ],
     )
     return parser
@@ -497,6 +500,12 @@ def main() -> int:
             from hermes_agentic_rl.eval.rl_eval import run_eval_gate
 
             return run_eval_gate(args.config_path, output_dir=args.output_path)
+        if args.command == "benchmark-suite":
+            if not args.config_path:
+                raise RuntimeError("--config is required for benchmark-suite")
+            from hermes_agentic_rl.eval.benchmark_suite import run_benchmark_suite
+
+            return run_benchmark_suite(args.config_path, output_dir=args.output_path)
         if args.command == "online-cycle":
             if not args.config_path:
                 raise RuntimeError("--config is required for online-cycle")
@@ -555,6 +564,29 @@ def main() -> int:
             )
 
             return run_self_evolution_batch(args.config_path)
+        if args.command == "online-self-evolve":
+            if not args.config_path:
+                raise RuntimeError("--config is required for online-self-evolve")
+            from hermes_agentic_rl.cli.online_self_evolve_cli import (
+                run_online_self_evolve,
+            )
+
+            return run_online_self_evolve(
+                args.config_path,
+                limit=args.limit,
+                seed=args.seed,
+                once=bool(args.once),
+            )
+        if args.command == "skill-export":
+            if not args.config_path:
+                raise RuntimeError("--config is required for skill-export")
+            from hermes_agentic_rl.cli.skill_export_cli import run_skill_export
+
+            return run_skill_export(
+                args.config_path,
+                input_path=args.input,
+                output_path=args.output_path,
+            )
         if args.command == "atropos-preflight":
             from hermes_agentic_rl.integrations.atropos_preflight import run_atropos_preflight
 

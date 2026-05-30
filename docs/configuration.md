@@ -79,7 +79,7 @@ train_rl:
   # --- reference policy / KL ---
   use_reference: false
   kl_coef: 0.0
-  kl_estimator: k1 | k2 | k3          # default k1; k3 recommended for new runs
+  kl_estimator: k1 | k2 | k3          # default k3 (low-variance, non-negative)
 
   # --- loss aggregation ---
   loss_agg: mean_token | sum_token | dr_grpo
@@ -186,6 +186,51 @@ See `configs/echo_grpo_v06.yaml` for a config that exercises:
 - Final run summary metrics such as `last_mean_reward`, `best_mean_reward`,
   and `reward_delta` are written into the W&B run summary at the end.
 
+## Session Replay Mining
+
+`session-replay`, `online-cycle`, and `self-evolution-batch` can annotate replay
+records with direction-aware mining metadata:
+
+```yaml
+replay_mining:
+  enabled: true
+  min_skill_reward: 0.5
+  long_context_messages: 8
+  long_context_chars: 3000
+```
+
+When enabled, each replay sample gets `metadata.replay_mining` plus a flat
+`metadata.capability_axes` list. The annotation includes capability axes,
+reasons, recommended uses, a usefulness score, and whether the turn looks like
+a Skill candidate. Quality reports include aggregate counts under
+`replay_mining`, and `self-evolution-batch` rolls these up into
+`mined_replay_axes` and `skill_candidates`.
+
+Use these fields to filter the same session trace pool into different
+optimization queues: tool reliability replay, failure recovery replay, context
+benchmark seeds, or candidate Skill exports.
+
+`session-train-worker` can consume the same annotations:
+
+```yaml
+session_train_worker:
+  train:
+    replay_filter:
+      require_any_capability_axes: [tool_use_reliability]
+      require_any_recommended_uses: [tool_reliability_replay]
+      require_skill_candidate: false
+```
+
+Supported filter keys are `require_any_capability_axes`,
+`require_all_capability_axes`, `require_any_recommended_uses`,
+`require_all_recommended_uses`, and `require_skill_candidate`.
+`self-evolution-batch` automatically injects a `require_any_capability_axes`
+filter from each direction's `objective.target_metrics` when a direction maps
+to known capability axes.
+Set `replay_mining: false` or `replay_mining.enabled: false` to keep replay
+records unannotated; in that mode `self-evolution-batch` also skips automatic
+directional replay filters.
+
 ## `eval-rl` Held-Out Evaluation
 
 `eval-rl` reuses the same `backend`, `environment`, `agent_loop`, and
@@ -212,6 +257,11 @@ eval_rl:
     min_rank_metric_delta: 0.01
     require_paired_winner: true
     max_p_value: 0.10
+    required_capability_axes: [tool_use_reliability]
+    min_capability_delta: 0.02
+    capability_thresholds:
+      task_success: 0.00
+    max_capability_regression: 0.01
   capability_axes:                   # false disables; omitted uses defaults
     tool_use_reliability:
       description: Hermes tool-call structure and argument fidelity
@@ -235,10 +285,10 @@ eval_rl:
 
 Outputs are `eval_summary.json`, `eval_rollouts.jsonl`, `leaderboard.md`,
 `ranking.md`, `promotion.md`, and `capability_report.md`. The summary also
-includes `best_policy`, `ranking`, `success_metric`, `success_threshold`, and
-`capability_report` so you can pick the strongest checkpoint directly and see
-which agent capability moved. W&B/TensorBoard/JSONL logging is controlled by
-the same `metrics:` block used for training.
+includes `best_policy`, `ranking`, `success_metric`, `success_threshold`,
+`promotion_readout`, and `capability_report` so you can pick the strongest
+checkpoint directly and see which agent capability moved. W&B/TensorBoard/JSONL
+logging is controlled by the same `metrics:` block used for training.
 
 `capability_axes` groups raw eval metrics into agent-level improvement axes.
 This is where Hermes-style self-evolution becomes measurable beyond a single
@@ -247,25 +297,141 @@ signals useful for deciding whether an experience should become replay data or
 a Skill. Omit the block to use the default axes, or set it to `false` to skip
 the report.
 
-`eval_summary.json` also includes `promotion_readout`, a compact checkpoint
-triage block for the strongest non-baseline candidate versus the baseline. It
-records reward delta, success-rate delta, paired A/B output, explicit gate
-checks, and a simple `promote` / `hold` recommendation so you can make faster
-decisions from one summary file. The same result is also written to
-`promotion.md` for quick review.
+`eval-gate` runs the same evaluation but forces `promotion_gate.fail_on_hold`
+to `true`, so CI or release scripts can stop automatically when held-out
+evidence does not justify promotion.
+If `required_capability_axes`, `capability_thresholds`, or
+`max_capability_regression` are set, the promotion gate also checks
+`capability_report.deltas`, so a candidate cannot pass merely by improving the
+aggregate reward while regressing an important agent capability.
 
-If `promotion_gate.fail_on_hold: true` is set, `eval-rl` exits with code `3`
-whenever the gate result is not `promote`. This is useful for CI, checkpoint
-promotion scripts, or sweep automation.
+## Benchmark Suite Scorecards
 
-If you want that behavior without editing the config, run
-`python -m hermes_agentic_rl.cli.main eval-gate --config <config>`. It reuses
-the same evaluation pipeline but forces `fail_on_hold: true`.
+`benchmark-suite` runs multiple `eval-rl` configs and aggregates them into a
+single release-style scorecard:
 
-For a repository-local hold-path smoke check, run
-`python scripts/ci_eval_gate_smoke.py`. It generates a tiny trace file and
-checkpoint, calls `eval-gate`, expects exit code `3`, and verifies the emitted
-`eval_summary.json` and `promotion.md` artifacts.
+```yaml
+benchmark_suite:
+  name: hermes-agentic-scorecard
+  output_dir: outputs/hermes_benchmark_suite
+  fail_on_required_failure: true
+  benchmarks:
+    - name: hermes-tool-call-heldout
+      config_path: configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
+      required: true
+      weight: 1.0
+      score_metric: mean_reward
+      thresholds:
+        min_score: 0.0
+        min_success_rate: 0.0
+    - name: prompt-context-retention
+      config_path: configs/context_benchmark_eval_rl.yaml
+      required: true
+      weight: 1.0
+      score_metric: metadata/context_required_fact_recall
+      thresholds:
+        min_score: 0.0
+```
+
+```bash
+python -m hermes_agentic_rl.cli.main benchmark-suite \
+  --config configs/benchmark_suite.yaml
+```
+
+Each benchmark writes its normal `eval_summary.json`, `promotion.md`, and
+`capability_report.md` under the suite output directory. The suite then writes
+`scorecard.json` and `scorecard.md` with per-benchmark status, best policy,
+promotion recommendation, threshold checks, required pass rate, and weighted
+score. Use `require_promotion: true` on a benchmark when the suite should fail
+unless that benchmark's promotion gate recommends `promote`. If an individual
+benchmark crashes or fails to write a valid summary, the suite still records the
+error in the scorecard so CI can report the broken benchmark directly.
+`config_path` entries may be absolute, relative to the suite file, or relative
+to the command's current working directory.
+
+## Skill Candidate Export
+
+`skill-export` converts replay records tagged by `metadata.replay_mining` into
+reviewable Skill candidates:
+
+```yaml
+skill_export:
+  input_path: outputs/hermes_self_evolution_batch/tool_use_reliability/replay.jsonl
+  output_dir: outputs/hermes_skill_candidates
+  require_skill_candidate: true
+  min_reward: 0.25
+  group_by: primary_axis             # primary_axis | recommended_use | single
+  max_examples_per_skill: 8
+  quality_min_examples: 2
+  quality_min_mean_reward: 0.25
+  quality_min_mean_usefulness: 0.5
+  quality_min_axis_consistency: 0.6
+  quality_min_validation_examples: 1
+  quality_max_negative_signal_ratio: 0.25
+  quality_ready_min_score: 0.75
+  quality_blocked_max_score: 0.35
+```
+
+```bash
+python -m hermes_agentic_rl.cli.main skill-export \
+  --config configs/skill_export.yaml
+```
+
+Each exported candidate directory contains `SKILL.md`, `manifest.json`, and
+`validation.jsonl`. New `session-replay` outputs include compact
+`metadata.source_turn` evidence so the generated `SKILL.md` can cite the user
+task, observed assistant behavior, feedback, reward, and capability axes.
+The exporter also writes `quality_report.json` beside `summary.json`, and each
+candidate `manifest.json` includes a `quality` block. Statuses are deliberately
+review-oriented: `ready_for_review` means all configured checks passed,
+`draft` means the candidate has promise but needs more evidence, and `blocked`
+means the candidate failed enough checks that it should not be promoted without
+new traces.
+
+The quality gate is heuristic and explainable. It checks sample count, mean
+reward, mean replay-usefulness score, dominant capability-axis consistency,
+validation examples, and the ratio of negative feedback signals. For Hermes
+traces, axis consistency treats capability labels as multi-label: repeated
+tool-use traces can still pass even when they also carry `skill_learning` or
+`self_evolution_signal`.
+
+## Online Self-Evolution
+
+`online-self-evolve` is the higher-level closed-loop orchestrator. It reuses
+the existing `online-cycle` stages, then optionally exports Skill candidates
+and runs `eval-gate`:
+
+```yaml
+online_self_evolve:
+  output_dir: outputs/hermes_online_self_evolve
+  stages:
+    online_cycle: true
+    skill_export: true
+    eval_gate: false
+  skill_export:
+    input_path: outputs/hermes_online_self_evolve/replay.jsonl
+    output_dir: outputs/hermes_online_self_evolve/skill_candidates
+    require_skill_candidate: true
+    min_reward: 0.25
+    quality_min_examples: 2
+    quality_ready_min_score: 0.75
+  eval_gate:
+    enabled: false
+    config_path: configs/context_benchmark_eval_rl.yaml
+    output_dir: outputs/hermes_online_self_evolve/eval_gate
+```
+
+```bash
+python -m hermes_agentic_rl.cli.main online-self-evolve \
+  --config configs/online_self_evolve.yaml \
+  --once \
+  --limit 1
+```
+
+Outputs include `online_self_evolve_summary.json` and
+`online_self_evolve_report.md`, which summarize sessions, replay records, Skill
+candidates, Skill quality status counts, optional promotion-gate results, and
+stage artifact paths.
 
 ## Hermes Reasoning Traces
 
@@ -284,6 +450,36 @@ checkpoint, calls `eval-gate`, expects exit code `3`, and verifies the emitted
   `success_metric: metadata/argument_value_similarity` with an explicit
   threshold. This keeps command-content success separate from the fixed wrapper
   structure that the adapter already guarantees.
+
+## Context Benchmark
+
+`environment.type: context_benchmark` creates a lightweight benchmark for the
+`prompt_context` capability axis. It stresses long-context fact retention,
+user-constraint preservation, tool-result summarization, distractor avoidance,
+and concise synthesis:
+
+```yaml
+environment:
+  type: context_benchmark
+  dataset_size: 12
+  dataset_seed: 0
+  noise_blocks: 10
+  max_response_chars: 360
+eval_rl:
+  success_metric: metadata/context_required_fact_recall
+  rank_metric: metadata/context_required_fact_recall
+  promotion_gate:
+    required_capability_axes: [prompt_context]
+    min_capability_delta: 0.01
+    max_capability_regression: 0.02
+```
+
+The reward component writes metadata including
+`context_required_fact_recall`, `context_constraint_satisfaction`,
+`context_tool_summary_retention`, `context_distractor_avoidance`,
+`context_precision`, and `context_compression_ok`. These feed the default
+`prompt_context` capability axis and can be used directly as `success_metric`
+or `rank_metric`.
 - This works best with `bootstrap_sft_rounds` or `interleave_sft_every` to warm
   start on the real traces before continuing RL updates.
 - See `configs/hermes_reasoning_traces_grpo_smoke.yaml` for a conservative

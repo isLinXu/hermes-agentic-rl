@@ -11,6 +11,7 @@ import yaml  # type: ignore[import-untyped]
 from hermes_agentic_rl.cli.session_eval_export_cli import run_session_eval_export_config
 from hermes_agentic_rl.cli.session_replay_cli import run_session_replay_config
 from hermes_agentic_rl.cli.session_train_worker_cli import run_session_train_worker_config
+from hermes_agentic_rl.collectors.replay_mining import normalize_replay_mining_config
 from hermes_agentic_rl.eval.capability_axes import infer_objective_axes
 
 
@@ -94,6 +95,10 @@ def _compose_stage_config(
     return _deep_merge(defaults, cfg)
 
 
+def _replay_mining_enabled(raw: Any) -> bool:
+    return bool(normalize_replay_mining_config(raw).get("enabled", True))
+
+
 def _direction_config(direction: Any, index: int) -> dict[str, Any]:
     if isinstance(direction, str):
         return {"name": direction}
@@ -160,6 +165,13 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
         worker_summary: dict[str, Any] = {}
         export_summary: dict[str, Any] = {}
         worker_algo = str(direction_cfg.get("algo") or "bc")
+        objective_cfg = (
+            direction_cfg.get("objective", {})
+            if isinstance(direction_cfg.get("objective"), dict)
+            else {}
+        )
+        objective_target_metrics = objective_cfg.get("target_metrics", [])
+        objective_axes = infer_objective_axes(objective_target_metrics)
 
         if _stage_enabled(batch_cfg, direction_cfg, "session_replay", default=True):
             replay_defaults = {
@@ -186,6 +198,15 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
                 worker_stage = direction_cfg.get("worker", {})
             if not isinstance(worker_stage, dict):
                 worker_stage = {}
+            replay_stage_for_filter = (
+                direction_cfg.get("session_replay", {})
+                if isinstance(direction_cfg.get("session_replay"), dict)
+                else {}
+            )
+            replay_mining_raw = replay_stage_for_filter.get(
+                "replay_mining",
+                base_replay_cfg.get("replay_mining"),
+            )
             worker_defaults = {
                 "algo": str(direction_cfg.get("algo") or worker_stage.get("algo") or "bc"),
                 "input_path": str(replay_path),
@@ -194,6 +215,12 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
                 "quarantine_path": str(worker_quarantine_path),
                 "metrics": {"jsonl": str(worker_metrics_path)},
             }
+            if objective_axes and _replay_mining_enabled(replay_mining_raw):
+                worker_defaults["train"] = {
+                    "replay_filter": {
+                        "require_any_capability_axes": objective_axes,
+                    }
+                }
             worker_cfg = _compose_stage_config(
                 root_cfg,
                 base_worker_cfg,
@@ -226,22 +253,14 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             exit_code = exit_code or code
             export_summary = _json_load(dataset_dir / "manifest.json")
 
-        direction_summary = {
+        direction_summary: dict[str, Any] = {
             "name": name,
             "slug": slug,
             "description": direction_cfg.get("description", ""),
             "objective": direction_cfg.get("objective", {}),
             "capability_plan": {
-                "target_metrics": (
-                    direction_cfg.get("objective", {}).get("target_metrics", [])
-                    if isinstance(direction_cfg.get("objective"), dict)
-                    else []
-                ),
-                "axes": infer_objective_axes(
-                    direction_cfg.get("objective", {}).get("target_metrics", [])
-                    if isinstance(direction_cfg.get("objective"), dict)
-                    else []
-                ),
+                "target_metrics": objective_target_metrics if isinstance(objective_target_metrics, list) else [],
+                "axes": objective_axes,
             },
             "paths": {
                 "directory": str(direction_dir),
@@ -257,6 +276,7 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
                 "reward_distribution": replay_summary.get("reward_distribution", {}),
                 "quality_filtered": replay_summary.get("quality_filtered", {}),
                 "quarantined": replay_summary.get("quarantined", {}),
+                "mining": replay_summary.get("replay_mining", {}),
             },
             "worker": {
                 "algo": worker_algo,
@@ -283,6 +303,12 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             f"holdout={samples.get('holdout', 0)}"
         )
 
+    replay_samples_total = sum(
+        int(item["replay"]["samples_written"]) for item in direction_summaries
+    )
+    worker_updates_total = sum(
+        int(item["worker"]["updates"]) for item in direction_summaries
+    )
     batch_summary: dict[str, Any] = {
         "command": "self-evolution-batch",
         "input_path": str(input_path),
@@ -290,8 +316,8 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
         "directions": direction_summaries,
         "totals": {
             "directions": len(direction_summaries),
-            "replay_samples": sum(item["replay"]["samples_written"] for item in direction_summaries),
-            "worker_updates": sum(item["worker"]["updates"] for item in direction_summaries),
+            "replay_samples": replay_samples_total,
+            "worker_updates": worker_updates_total,
         },
         "capability_axes": sorted(
             {
@@ -300,13 +326,33 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
                 for axis in direction.get("capability_plan", {}).get("axes", [])
             }
         ),
+        "mined_replay_axes": sorted(
+            {
+                axis
+                for direction in direction_summaries
+                for axis in (
+                    direction.get("replay", {})
+                    .get("mining", {})
+                    .get("by_axis", {})
+                )
+            }
+        ),
+        "skill_candidates": sum(
+            int(
+                direction.get("replay", {})
+                .get("mining", {})
+                .get("skill_candidates", 0)
+                or 0
+            )
+            for direction in direction_summaries
+        ),
     }
     _json_dump(output_dir / "batch_summary.json", batch_summary)
     print(
         "[self-evolution-batch] "
         f"summary={output_dir / 'batch_summary.json'} "
         f"directions={len(direction_summaries)} "
-        f"updates={batch_summary['totals']['worker_updates']}"
+        f"updates={worker_updates_total}"
     )
     return int(exit_code)
 

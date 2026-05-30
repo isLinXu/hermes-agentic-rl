@@ -56,3 +56,47 @@ def kl_from_logprobs(
         r_clamped = r.clamp(min=-20.0, max=20.0)
         return (torch.exp(-r_clamped) - 1.0 + r_clamped).mean()
     raise ValueError(f"unknown KL estimator: {estimator}")
+
+
+def kl_from_logprobs_batched(
+    new_logprobs: torch.Tensor,
+    ref_logprobs: torch.Tensor,
+    mask: torch.Tensor,
+    estimator: KLEstimator = "k3",
+) -> torch.Tensor:
+    """Masked batched KL divergence — scalar.
+
+    Computes per-row KL (averaged over valid tokens), then averages over
+    rows.  This is the canonical implementation shared by GRPO, PPO, and
+    RLOO; previously each duplicated the same 8-line block.
+
+    Args:
+        new_logprobs: [B, T] current policy log-probs.
+        ref_logprobs: [B, T] reference policy log-probs (detached expected).
+        mask: [B, T] bool — True at valid (non-padding) positions.
+        estimator: "k1" | "k2" | "k3".
+
+    Returns:
+        Scalar KL estimate (grad flows through new_logprobs).
+    """
+    if new_logprobs.numel() == 0:
+        return new_logprobs.new_zeros(())
+    dtype = new_logprobs.dtype
+    mf = mask.to(dtype=dtype, device=new_logprobs.device)
+    tokens_per_row = mf.sum(dim=-1).clamp(min=1)
+    common_T = min(new_logprobs.shape[1], ref_logprobs.shape[1])
+    r = (
+        new_logprobs[:, :common_T]
+        - ref_logprobs[:, :common_T].to(dtype=dtype, device=new_logprobs.device)
+    ) * mf[:, :common_T]
+    if estimator == "k1":
+        kl_per_tok = r
+    elif estimator == "k2":
+        kl_per_tok = 0.5 * r.pow(2)
+    elif estimator == "k3":
+        r_c = r.clamp(min=-20.0, max=20.0)
+        kl_per_tok = torch.exp(-r_c) - 1.0 + r_c
+    else:
+        raise ValueError(f"unknown KL estimator: {estimator}")
+    kl_per_row = (kl_per_tok * mf[:, :common_T]).sum(dim=-1) / tokens_per_row
+    return kl_per_row.mean()

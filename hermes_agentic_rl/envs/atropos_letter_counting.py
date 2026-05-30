@@ -9,7 +9,7 @@ Usage::
         AtroposLetterCountingEnv,
         AtroposLetterCountingReward,
     )
-    env = AtroposLetterCountingEnv(tokenizer)
+    env = AtroposLetterCountingEnv(tokenizer, base_dir="subprojects/atropos")
     rm  = RewardManager([AtroposLetterCountingReward(env, weight=1.0)])
 
 Key mapping:
@@ -21,12 +21,12 @@ Key mapping:
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
 from hermes_agentic_rl.envs.base_env import BaseEnv
-from hermes_agentic_rl.integrations.atropos_repo import prepare_atropos_imports
 from hermes_agentic_rl.rewards.base import BaseReward
 
 # ---------------------------------------------------------------------------
@@ -41,17 +41,12 @@ class AtroposLetterCountingEnv(BaseEnv):
         self,
         tokenizer: Any,
         *,
-        base_dir: str | Path | None = None,
+        base_dir: str | Path = "subprojects/atropos",
         config_path: str | None = None,
     ) -> None:
-        resolution = prepare_atropos_imports(repo_path=base_dir)
-        if resolution.repo_path is None or not resolution.has_marker:
-            checked = ", ".join(str(path) for path in resolution.checked_paths)
-            raise FileNotFoundError(
-                "Atropos repo not found. Set ATROPOS_REPO or place it under "
-                f"subprojects/atropos. Checked: {checked}"
-            )
-        base = resolution.repo_path
+        base = Path(base_dir).resolve()
+        if str(base) not in sys.path:
+            sys.path.insert(0, str(base))
 
         from environments.letter_counting_environment.letter_counting_environment import (  # type: ignore[import-untyped]
             LetterCountingConfig,

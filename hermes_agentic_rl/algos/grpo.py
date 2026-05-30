@@ -53,6 +53,7 @@ from hermes_agentic_rl.backends.base import LLMBackend
 @dataclass(slots=True)
 class GRPOConfig:
     clip_eps: float = 0.2
+    clip_eps_high: float = 0.28
     kl_coef: float = 0.02
     entropy_coef: float = 0.0
     advantage_eps: float = 1e-6
@@ -62,7 +63,11 @@ class GRPOConfig:
     per_token_advantage: bool = False
     answer_start_token_id: int | None = None
     reinforce_gamma: float = 0.95
-    kl_estimator: Literal["k1", "k2", "k3"] = "k1"
+    # k3 is the low-variance, always-nonnegative PPO/GRPO community standard
+    # (TRL/DeepSeek/verl). Kept consistent with RLOO/OPD/GSPO so that the KL
+    # signal is comparable across branches in HybridAlgo and feeds a single,
+    # coherent AdaptiveKLController.
+    kl_estimator: Literal["k1", "k2", "k3"] = "k3"
 
 
 class GRPO(BaseAlgo):
@@ -79,6 +84,7 @@ class GRPO(BaseAlgo):
 
         # 1) Build scalar or per-token advantage for each record.
         all_records = batch.records
+        group_norm_batch_fallback = 0.0
         if not all_records:
             zero = torch.zeros((), dtype=torch.float32)
             return zero, AlgoUpdateStats(
@@ -89,11 +95,45 @@ class GRPO(BaseAlgo):
 
         if cfg.advantage_norm == "group":
             records_with_adv: list[tuple[RolloutRecord, list[float]]] = []
-            for _gid, recs in batch.by_group().items():
-                rewards_g = [r.reward for r in recs]
-                scalar_advs = group_normalize_advantage(rewards_g, eps=cfg.advantage_eps)
-                for rec, adv in zip(recs, scalar_advs, strict=False):
-                    records_with_adv.append((rec, [adv]))
+            grouped = batch.by_group()
+            all_singleton_groups = grouped and all(
+                len(recs) == 1 for recs in grouped.values()
+            )
+            if all_singleton_groups and len(all_records) > 1:
+                # Every prompt produced a single rollout — group-relative
+                # advantage is identically zero. Fall back to batch norm so
+                # cross-prompt variance still yields a usable signal.
+                rewards_all = [r.reward for r in all_records]
+                scalar_advs = batch_normalize_advantage(
+                    rewards_all, eps=cfg.advantage_eps
+                )
+                records_with_adv = [
+                    (rec, [a])
+                    for rec, a in zip(all_records, scalar_advs, strict=False)
+                ]
+                group_norm_batch_fallback = 1.0
+            else:
+                for _gid, recs in grouped.items():
+                    rewards_g = [r.reward for r in recs]
+                    scalar_advs = group_normalize_advantage(
+                        rewards_g, eps=cfg.advantage_eps
+                    )
+                    for rec, adv in zip(recs, scalar_advs, strict=False):
+                        records_with_adv.append((rec, [adv]))
+                # Degenerate config guard: every group has a single rollout, so the
+                # group-relative advantage is identically zero and no gradient
+                # signal flows. This silently produces a no-op update; warn loudly
+                # so users bump ``group_size`` instead of staring at a flat reward.
+                if all_singleton_groups:
+                    import warnings as _warnings
+
+                    _warnings.warn(
+                        "GRPO group-norm advantage is zero for every record: each "
+                        f"prompt produced a single rollout (n_groups={len(grouped)}, "
+                        "group_size=1). Increase group_size (>= 2) or switch "
+                        "advantage_norm to 'batch'/'whiten' to get a usable signal.",
+                        stacklevel=2,
+                    )
             # Preserve original order
             order = {id(r): i for i, r in enumerate(all_records)}
             records_with_adv.sort(key=lambda p: order[id(p[0])])
@@ -174,6 +214,7 @@ class GRPO(BaseAlgo):
         pol_loss, loss_stats = clipped_surrogate_loss_batched(
             new_logp, old_logp, adv_tensor, mask,
             clip_eps=cfg.clip_eps,
+            clip_eps_high=cfg.clip_eps_high,
             loss_agg=cfg.loss_agg,
             max_len_for_dr_grpo=cfg.max_len_for_dr_grpo,
         )
@@ -236,6 +277,7 @@ class GRPO(BaseAlgo):
                 "ratio_mean": loss_stats["ratio_mean"],
                 "n_tokens": loss_stats["n_tokens"],
                 "score_temperature": float(score_temperature),
+                "group_norm_batch_fallback": float(group_norm_batch_fallback),
             },
         )
         return total, stats

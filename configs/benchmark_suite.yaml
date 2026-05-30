@@ -1,0 +1,23 @@
+benchmark_suite:
+  name: hermes-agentic-scorecard
+  output_dir: outputs/hermes_benchmark_suite
+  fail_on_required_failure: true
+  benchmarks:
+    - name: hermes-tool-call-heldout
+      config_path: configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
+      tags: [hermes, tool-use, terminal-command]
+      required: true
+      weight: 1.0
+      score_metric: mean_reward
+      thresholds:
+        min_score: 0.0
+        min_success_rate: 0.0
+    - name: prompt-context-retention
+      config_path: configs/context_benchmark_eval_rl.yaml
+      tags: [prompt-context, long-context]
+      required: true
+      weight: 1.0
+      score_metric: metadata/context_required_fact_recall
+      thresholds:
+        min_score: 0.0
+        min_success_rate: 0.0

@@ -2,10 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, "release/**"]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, develop]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_PROGRESS_BAR: "off"
+  PYTHONUNBUFFERED: "1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,95 +22,261 @@ concurrency:
 
 jobs:
   lint:
-    name: Lint (ruff + mypy)
+    name: Lint and type check
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Install lint tooling
+      - name: Install lint dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            torch
           python -m pip install -e '.[dev]'
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
 
-      - name: ruff
-        run: >
-          python -m ruff check
-          hermes_agentic_rl
-          tests
-          scripts/check_real_hermes.py
-          scripts/ci_eval_gate_smoke.py
+      - name: Ruff
+        run: python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py scripts/ci_eval_gate_smoke.py
 
-      - name: mypy
+      - name: Mypy
         run: python -m mypy --follow-imports=skip hermes_agentic_rl
 
-  eval-gate-smoke:
-    name: Eval Gate Smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Compile importable Python files
+        run: python -m compileall -q hermes_agentic_rl scripts tests
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install runtime + test extras
-        run: |
-          python -m pip install --upgrade pip
-          pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install -e '.[rl,data,metrics,test]'
-
-      - name: Run eval-gate smoke
-        env:
-          SMOKE_WORKDIR: ${{ runner.temp }}/eval-gate-smoke
-        run: python scripts/ci_eval_gate_smoke.py --workdir "$SMOKE_WORKDIR"
-
-      - name: Upload eval-gate smoke artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: eval-gate-smoke
-          path: ${{ runner.temp }}/eval-gate-smoke
+      - name: Validate installed dependency graph
+        run: python -m pip check
 
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Install runtime + test extras
+      - name: Install runtime and test dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install -e '.[rl,data,metrics,test]'
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            torch
+          python -m pip install -e '.[rl,data,metrics,test]'
+          python -m pip check
 
-      - name: Run test suite with coverage
+      - name: Run tests with coverage
         run: >
-          python -m pytest tests -q --maxfail=1 --disable-warnings
+          python -m pytest tests -q --maxfail=1
           --cov=hermes_agentic_rl
           --cov-report=term-missing
           --cov-report=xml
 
-      - name: Upload coverage
+      - name: Run eval-gate smoke
+        run: python scripts/ci_eval_gate_smoke.py
+
+      - name: Upload coverage XML
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ matrix.python-version }}
           path: coverage.xml
+          if-no-files-found: error
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install docs dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e '.[docs]'
+          python -m pip check
+
+      - name: Check README links
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          for file in ["README.md", "README.zh-CN.md", "docs/README.md"]:
+              text = Path(file).read_text(encoding="utf-8")
+              base = Path(file).parent
+              for _, target in re.findall(r"\[([^\]]+)\]\(([^)#]+)(?:#[^)]+)?\)", text):
+                  if target.startswith(("http://", "https://", "mailto:", "#")):
+                      continue
+                  path = (base / target).resolve()
+                  if not path.exists():
+                      raise SystemExit(f"{file}: broken link {target}")
+              print(f"{file}: links ok")
+          PY
+
+      - name: Build Sphinx docs
+        run: >
+          sphinx-build
+          -W --keep-going
+          -b html
+          docs/sphinx
+          docs/sphinx/_build/html
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sphinx-html
+          path: docs/sphinx/_build/html
+          if-no-files-found: error
+
+  security:
+    name: Security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-lock.txt
+
+      - name: Install audit tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-audit
+
+      - name: Scan first-party files for secret-shaped tokens
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+          import sys
+
+          roots = [
+              "README.md",
+              "README.zh-CN.md",
+              "CONTRIBUTING.md",
+              "docs",
+              "configs",
+              "hermes_agentic_rl",
+              "scripts",
+              "tests",
+              "examples",
+              ".github",
+              "pyproject.toml",
+              "data",
+          ]
+          pattern = re.compile(
+              r"wandb_v1_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]{20,}|WANDB_API_KEY=[A-Za-z0-9_-]+"
+          )
+          tracked = subprocess.check_output(["git", "ls-files", "--", *roots], text=True)
+          matches: list[str] = []
+          for relative in tracked.splitlines():
+              path = Path(relative)
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except UnicodeDecodeError:
+                  continue
+              for lineno, line in enumerate(text.splitlines(), start=1):
+                  if pattern.search(line):
+                      matches.append(f"{relative}:{lineno}:{line}")
+
+          if matches:
+              print("Secret-shaped tokens found in first-party files:")
+              print("\n".join(matches))
+              sys.exit(1)
+
+          print("No secret-shaped tokens found in first-party files.")
+          PY
+
+      - name: Run pip-audit
+        run: >
+          pip-audit
+          -r requirements-lock.txt
+          -f json
+          -o pip-audit.json
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit.json
+          if-no-files-found: ignore
+
+  package:
+    name: Build package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Build source and wheel distributions
+        run: python -m build
+
+      - name: Validate distribution metadata
+        run: python -m twine check dist/*
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error

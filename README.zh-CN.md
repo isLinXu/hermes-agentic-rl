@@ -30,7 +30,7 @@ model，并通过 held-out benchmark 验证改进。
 - [下一步优化](#下一步优化)
 - [能力矩阵](#能力矩阵)
 - [快速开始](#快速开始)
-- [外部项目路径](#外部项目路径)
+- [外部子项目](#外部子项目)
 - [密钥与环境变量](#密钥与环境变量)
 - [训练模式](#训练模式)
 - [关键配置](#关键配置)
@@ -44,10 +44,10 @@ model，并通过 held-out benchmark 验证改进。
 | 维度 | 本项目提供什么 |
 |---|---|
 | Agent 目标 | 工具调用、终端命令动作、多轮恢复、协议遵守 |
-| 训练路径 | `train-rl` 负责 GRPO/PPO on-policy 训练，`online-cycle` 负责 Hermes replay + worker 训练 |
+| 训练路径 | `train-rl` 负责 GRPO/PPO on-policy 训练，`online-cycle` 负责 Hermes replay + worker 训练，`online-self-evolve` 负责完整闭环 |
 | 可训练对象 | Tiny/HF policy backend、PPO value head、LoRA adapter、reward-model head、BC/DPO worker |
 | 数据来源 | Hugging Face traces、本地 parquet shard、真实 Hermes session log、replay JSONL |
-| 评估方式 | held-out grouped trace benchmark、checkpoint ranking、paired A/B 对比 |
+| 评估方式 | held-out grouped trace benchmark、benchmark-suite scorecard、checkpoint ranking、paired A/B 对比 |
 | 可观测性 | W&B、TensorBoard、JSONL metrics、live dashboard、结构化 reward components |
 
 ## 推荐入口
@@ -55,9 +55,11 @@ model，并通过 held-out benchmark 验证改进。
 | 如果你想... | 从这里开始 |
 |---|---|
 | 先检查仓库和 Hermes 子项目是否接好 | `python -m hermes_agentic_rl.cli.main hermes-preflight` |
+| 检查 Atropos 与 Tinker-Atropos 是否接好 | `python -m hermes_agentic_rl.cli.main atropos-preflight` |
 | 快速做一个小型 on-policy 训练 | `configs/hermes_reasoning_traces_grpo_smoke.yaml` |
 | 在本地 parquet shard 上用 MPS 训练 | `configs/hermes_reasoning_traces_parquet_mps_filtered.yaml` |
 | 验证 RL 是否真的带来提升 | `configs/hermes_reasoning_traces_eval_rl.yaml` |
+| 运行统一 benchmark scorecard | `configs/benchmark_suite.yaml` |
 | 按优化方向批量验证 agent 自进化 | `configs/self_evolution_batch.yaml` |
 | 跑真实 Hermes、replay、worker 训练和导出闭环 | `configs/hermes_online_cycle.yaml` |
 
@@ -75,6 +77,10 @@ replay buffer、偏好对、reward model 数据、checkpoint 和 held-out benchm
 - 多轮任务里是否能利用工具结果继续推进，而不是中途漂移；
 - 高 reward、可完成任务的轨迹概率是否上升；
 - 是否能通过 W&B、JSONL、TensorBoard、checkpoint 和 held-out eval 证明改进真实存在。
+
+从 agent 自进化角度看，每次运行都应该是一场受控优化实验：先定义优化方向，再采集
+可比较轨迹，训练对应的可学习组件，最后只在 held-out 指标支持时才推进 checkpoint
+或 worker。
 
 换言之：Hermes-agent 是执行体，`hermes-agentic-rl` 是让执行体持续被训练、校准、
 评估和审计的 RL / 数据 / 指标闭环。
@@ -116,7 +122,8 @@ flowchart LR
 
 后续增益仍然应该以 benchmark 为中心：
 
-- 强化 held-out benchmark，覆盖工具调用合法性、命令正确率、任务完成率和 paired A/B
+- 强化 held-out benchmark，覆盖工具调用合法性、命令正确率、任务完成率、prompt-context
+  保留能力和 paired A/B
   checkpoint 对比；
 - 从 tiny 快速验证逐步切到 LoRA 或 HF-backed 可训练策略，让 RL 作用到容量足够的
   agent policy 上；
@@ -134,23 +141,24 @@ flowchart LR
 | 领域 | 入口 | 状态 |
 |---|---|---|
 | 真实 Hermes runtime | `runtime.integration: hermes` | 可从 `runtime.repo_path`、`HERMES_AGENT_REPO` 或 `subprojects/hermes-agent` 加载。 |
-| Atropos/Tinker bridge | `atropos-preflight` | 可从 `ATROPOS_REPO`、`TINKER_ATROPOS_REPO`、`subprojects/` 或本地回退路径加载。 |
 | 本地 RL 快速验证 | `train-rl` | CPU 友好的 Tiny backend，支持 GRPO/PPO 与 W&B/TensorBoard 指标。 |
-| 真实数据 RL | `configs/hermes_reasoning_traces_grpo_smoke.yaml` | 使用 `lambda/hermes-agent-reasoning-traces`。 |
+| 真实数据 RL | `configs/hermes_reasoning_traces_grpo.yaml` | 使用 `lambda/hermes-agent-reasoning-traces`；smoke 配置只用于快速验证。 |
 | Held-out RL benchmark | `eval-rl` | 在分组 held-out traces 上对比 baseline 与 checkpoint。 |
-| 晋级门槛 | `eval-gate` | 运行 held-out eval，并在 checkpoint 不应晋级时返回退出码 `3`。 |
+| Benchmark suite scorecard | `benchmark-suite` | 运行多个 held-out benchmark，并写出统一 pass/fail scorecard。 |
+| Prompt/context benchmark | `configs/context_benchmark_eval_rl.yaml` | 测量长上下文事实召回、约束保留、工具摘要保留、干扰规避和简洁回答。 |
 | 在线 Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export。 |
+| 在线 self-evolution 闭环 | `configs/online_self_evolve.yaml` | Online cycle -> Skill 候选 -> 可选 eval gate 报告。 |
 | 定向 self-evolution | `self-evolution-batch` | 批量 replay、worker 训练、验证集导出和方向级 summary。 |
 | Self-evolution 导出 | `session-eval-export` | 写出 `task_input` / `expected_behavior` JSONL split。 |
 | 可观测性 | `metrics:` | JSONL、stdout、TensorBoard、W&B、可选 live dashboard。 |
+| 外部子项目 | `subprojects/*` | Hermes-agent、Atropos 与 Tinker-Atropos 的上游 checkout。 |
 
 ## 快速开始
 
 ```bash
 python -m pip install -e '.[rl,data,metrics]'
-git submodule update --init
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
 python -m hermes_agentic_rl.cli.main hermes-preflight
-python -m hermes_agentic_rl.cli.main atropos-preflight
 ```
 
 预期预检结果形态：
@@ -168,19 +176,27 @@ python -m hermes_agentic_rl.cli.main atropos-preflight
 export HERMES_AGENT_REPO=/path/to/hermes-agent
 ```
 
-## 外部项目路径
+## 外部子项目
 
-外部仓库会先走显式配置，再回退到本地默认路径。这样无论是本地开发、CI 还是子项目布局，
-都不会依赖当前 shell 的工作目录。
+外部仓库统一以 git submodule 形式放在 `subprojects/` 下，不再作为根目录的一等源代码
+vendored 进本仓库。
 
-| 项目 | 环境变量覆盖 | 默认查找顺序 |
+| 路径 | 上游 | 用途 |
 |---|---|---|
-| `hermes-agent` | `HERMES_AGENT_REPO` | `subprojects/hermes-agent`、`hermes-agent`、`vendor/hermes-agent` |
-| Atropos | `ATROPOS_REPO` | `subprojects/atropos`、`subprojects/hermes-agent/atropos`、`atropos`、`vendor/atropos` |
-| Tinker-Atropos | `TINKER_ATROPOS_REPO` | `subprojects/tinker-atropos`、`subprojects/hermes-agent/tinker-atropos`、`tinker-atropos`、`vendor/tinker-atropos` |
+| `subprojects/hermes-agent` | `NousResearch/hermes-agent` | 真实 Hermes runtime 与 session replay 集成。 |
+| `subprojects/atropos` | `NousResearch/atropos` | 可选 Atropos environment adapter 与兼容性测试。 |
+| `subprojects/tinker-atropos` | `NousResearch/tinker-atropos` | 可选 Tinker-Atropos 预检与 trainer 集成检查。 |
 
-切换这些路径后，建议重新跑 `hermes-preflight` 或 `atropos-preflight`。它们的 JSON 输出会带上
-最终命中的来源和所有检查过的路径，排查子模块缺失或环境变量错误会轻松很多。
+clone 或切换分支后执行：
+
+```bash
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
+python -m hermes_agentic_rl.cli.main hermes-preflight
+python -m hermes_agentic_rl.cli.main atropos-preflight
+```
+
+框架代码会把这些目录视为外部项目。CI 只初始化顶层 submodule，lint、typing、
+package 和 docs gate 聚焦本仓库自己的 adapter、trainer、reward、config 和测试。
 
 ## 密钥与环境变量
 
@@ -277,17 +293,12 @@ python -m hermes_agentic_rl.cli.main eval-rl \
 
 建议在宣称 checkpoint 提升 agentic behavior 之前，同时查看 held-out reward delta、
 paired A/B、`tool_call_parse_ok`、`tool_name_match` 和 argument-overlap 等指标。
-`eval_summary.json` 现在还会直接给出 `promotion_readout`，总结当前最佳非 baseline
-候选与 baseline 的 reward delta、success rate delta、paired A/B 结果，以及一个
-`promote` / `hold` 建议。如果希望门槛更严格，可以在评估配置里设置
-`eval_rl.promotion_gate`，并直接查看生成的 `promotion.md`。如果要接自动化流程，
-可以把 `eval_rl.promotion_gate.fail_on_hold` 设为 `true`，这样 gate 未通过时
-`eval-rl` 会返回退出码 `3`。
 
-`eval-rl` 也会写出 `capability_report.md`。它把底层指标聚合成更贴近 Hermes
-Agent 的能力维度，例如任务成功、工具调用可靠性、交互控制和 self-evolution
-信号。这样我们下一轮优化时，不只看单个 reward，而是能判断到底是哪类 agent
-能力在提升。
+`eval-rl` 会写出 `promotion.md` 和 `capability_report.md`。后者会把底层指标聚合成
+更贴近 Hermes Agent 的能力维度，例如任务成功、工具调用可靠性、交互控制和
+self-evolution 信号。这样我们下一轮优化时，不只看单个 reward，而是能判断到底
+是哪类 agent 能力在提升。自动化流程可以使用 `eval-gate`；当 promotion gate
+建议 `hold` 时，它会返回退出码 `3`。
 
 命令动作阶段的评估：
 
@@ -296,32 +307,12 @@ python -m hermes_agentic_rl.cli.main eval-rl \
   --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
 ```
 
-如果希望直接得到机器可执行的晋级判定：
-
-```bash
-python -m hermes_agentic_rl.cli.main eval-gate \
-  --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
-```
-
-这个命令会强制打开 `promotion_gate.fail_on_hold: true`，当最佳 candidate
-不应晋级时返回退出码 `3`。
-
-如果想在仓库本地或 CI 里快速验证 hold 路径：
-
-```bash
-python scripts/ci_eval_gate_smoke.py
-```
-
-这个辅助脚本会自动生成最小 traces、Tiny backend checkpoint，运行
-`eval-gate`，断言退出码为 `3`，并校验 `eval_summary.json` 与
-`promotion.md` 是否按预期写出。
-
 ### 在线 Hermes 循环
 
 `online-cycle` 是端到端在线路径：
 
 1. 在任务 prompt 上运行真实 Hermes。
-2. 使用 session sidecar 写出原始 session trace 和 replay samples。
+2. 使用 session sidecar 写出原始 session trace 和带方向标注的 replay samples。
 3. 从 replay 训练本地 worker，可选 `bc`、`dpo` 或 `rm` worker 配置。
 4. 把同一批 trace 导出为 self-evolution dataset。
 5. 将 worker metrics 记录到 JSONL 和 W&B。
@@ -343,6 +334,10 @@ python -m hermes_agentic_rl.cli.main online-cycle \
 - `outputs/hermes_online_cycle/worker_state.json`
 - `outputs/hermes_online_cycle/worker_metrics.jsonl`
 - `outputs/hermes_online_cycle/self_evolution_dataset/`
+
+Replay 记录会包含 `metadata.replay_mining`，用于标注 capability axes、挖掘原因、
+推荐用途以及 Skill-candidate 信号。对应的 quality report 会聚合这些标签，让我们
+可以按优化方向筛选 replay，而不是把所有 session turn 当成同一种训练信号。
 
 ### Self-Evolution 导出
 
@@ -383,6 +378,44 @@ python -m hermes_agentic_rl.cli.main self-evolution-batch \
 - `outputs/hermes_self_evolution_batch/<direction>/self_evolution_dataset/`
 
 适合用来同时比较多个优化方向，例如工具调用稳定性、失败恢复能力和任务完成质量。
+batch summary 也会输出 `mined_replay_axes` 和 `skill_candidates`，帮助判断下一轮
+应该继续训练权重、采集更多 session，还是导出候选 Skills。
+
+### Skill Candidate 导出
+
+Replay mining 现在可以进一步沉淀为具体的 agent 能力资产。`skill-export` 会读取
+replay JSONL，筛选 `metadata.replay_mining.skill_candidate` 标记的样本，并导出
+可人工 review 的 Skill 候选和验证样本。
+
+```bash
+python -m hermes_agentic_rl.cli.main skill-export \
+  --config configs/skill_export.yaml
+```
+
+每个候选目录包含 `SKILL.md`、`manifest.json` 和 `validation.jsonl`。新的 replay
+记录还会保留紧凑的 `metadata.source_turn` 证据，让生成的 Skill 草案能够引用用户任务、
+assistant 行为、反馈、reward 和 capability axes。
+导出器还会写出 `quality_report.json`，并在每个 `manifest.json` 和生成的
+`SKILL.md` 中嵌入 `quality` 区块。候选 Skill 会被标记为
+`ready_for_review`、`draft` 或 `blocked`，依据是可解释检查项：样本数、平均
+reward、replay usefulness、主导 capability axis 一致性、验证样本数，以及负反馈比例。
+
+### Online Self-Evolution
+
+当你希望用一个命令跑完整闭环时，可以使用 `online-self-evolve`：真实 Hermes session
+采集、replay mining、本地 worker 训练、self-evolution 导出、Skill 候选导出，以及可选
+`eval-gate`。
+
+```bash
+python -m hermes_agentic_rl.cli.main online-self-evolve \
+  --config configs/online_self_evolve.yaml \
+  --once \
+  --limit 1
+```
+
+编排器会写出 `online_self_evolve_summary.json` 和 `online_self_evolve_report.md`，
+汇总 stage 状态、replay 数量、Skill 候选数量、Skill 质量状态分布以及可选
+promotion-gate 结论。
 
 ## 关键配置
 
@@ -396,7 +429,11 @@ python -m hermes_agentic_rl.cli.main self-evolution-batch \
 | `configs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2.yaml` | stage-2 terminal command action-space 训练。 |
 | `configs/hermes_reasoning_traces_eval_rl.yaml` | held-out benchmark，对比 baseline 与 RL checkpoint。 |
 | `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | stage-2 command-action checkpoint 的 held-out benchmark。 |
+| `configs/context_benchmark_eval_rl.yaml` | prompt-context benchmark，覆盖事实召回、约束保留和干扰规避。 |
+| `configs/benchmark_suite.yaml` | 统一 benchmark suite，写出 `scorecard.json` 和 `scorecard.md`。 |
 | `configs/self_evolution_batch.yaml` | 按方向批量运行 self-evolution replay、worker 训练和导出。 |
+| `configs/skill_export.yaml` | 导出 replay mining 得到的 Skill 候选和验证样本。 |
+| `configs/online_self_evolve.yaml` | 完整 online self-evolution 闭环：online-cycle、Skill export 和可选 eval gate。 |
 | `configs/hermes_online_cycle.yaml` | 真实 Hermes online rollout、replay worker 和 self-evolution export。 |
 | `configs/hermes_runtime_sidecar.yaml` | runtime sidecar 示例，用于 session / replay capture。 |
 | `configs/session_train_worker.yaml` | 基于 replay JSONL 的 BC worker。 |
@@ -411,12 +448,14 @@ python -m hermes_agentic_rl.cli.main rollout --config <config> --output outputs/
 python -m hermes_agentic_rl.cli.main train --config <config>
 python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
-python -m hermes_agentic_rl.cli.main eval-gate --config <config>
+python -m hermes_agentic_rl.cli.main benchmark-suite --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
+python -m hermes_agentic_rl.cli.main online-self-evolve --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
 python -m hermes_agentic_rl.cli.main session-train-worker --config <config> --once
 python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
+python -m hermes_agentic_rl.cli.main skill-export --config <config>
 ```
 
 ## 架构
@@ -425,14 +464,14 @@ python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
 hermes_agentic_rl/
   runtime/       Hermes 和 fake runtime adapters
   framework/     EnvTrainingPipeline 和 SessionTrainingPipeline
-  collectors/    Session sidecar、replay export、quality filters
+  collectors/    Session sidecar、replay export、quality filters、replay mining、Skill export
   envs/          Echo、simulated tool、curriculum、Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
-  eval/          Held-out eval、leaderboard、paired A/B comparison
+  eval/          Held-out eval、benchmark suites、leaderboard、paired A/B comparison
   offline/       BC、DPO、reward-model training
   rewards/       Outcome、tool-call、filesystem、feedback、RM components
   monitor/       JSONL、TensorBoard、W&B、dashboard writers
-  cli/           Rollout、train、train-rl、eval-rl、eval-gate、self-evolution-batch、online-cycle、replay workers
+  cli/           Rollout、train、train-rl、eval-rl、eval-gate、benchmark-suite、self-evolution-batch、online-cycle、online-self-evolve、replay workers、skill-export
 ```
 
 数据流：
@@ -452,16 +491,15 @@ Hermes rollout
 仓库把 lint、类型检查、coverage、docs 和 dependency audit 都视为交付的一部分：
 
 ```bash
-python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py scripts/ci_eval_gate_smoke.py
+python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py
 python -m mypy --follow-imports=skip hermes_agentic_rl
 python -m pytest tests -q --cov=hermes_agentic_rl --cov-report=term-missing --cov-report=xml
-python scripts/ci_eval_gate_smoke.py
 sphinx-build -W --keep-going -b html docs/sphinx docs/sphinx/_build/html
 uv pip compile --universal pyproject.toml --extra dev --extra docs --output-file requirements-lock.txt
 pip-audit -r requirements-lock.txt
 ```
 
-GitHub Actions 会运行 lint、coverage tests、`eval-gate` smoke、docs build 和
+GitHub Actions 会在 Python 3.11 和 3.12 上运行 lint、coverage tests、docs build 和
 dependency audit。实时训练 / eval 验证快照记录在 [实验记录](docs/experiments.md)。
 
 ## 文档

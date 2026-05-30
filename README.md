@@ -32,7 +32,7 @@ benchmarks.
 - [Where We Improve Next](#where-we-improve-next)
 - [Capabilities](#capabilities)
 - [Quick Start](#quick-start)
-- [External Project Paths](#external-project-paths)
+- [External Subprojects](#external-subprojects)
 - [Secrets and Environment](#secrets-and-environment)
 - [Training Modes](#training-modes)
 - [Key Configurations](#key-configurations)
@@ -46,10 +46,10 @@ benchmarks.
 | Dimension | What this project provides |
 |---|---|
 | Agent focus | Tool use, terminal-command actions, multi-turn recovery, protocol adherence |
-| Training paths | `train-rl` for GRPO/PPO, `online-cycle` for Hermes replay plus worker training |
+| Training paths | `train-rl` for GRPO/PPO, `online-cycle` for Hermes replay plus worker training, `online-self-evolve` for the full closed loop |
 | Trainable surfaces | Tiny/HF policy backends, PPO value heads, LoRA adapters, reward-model heads, BC/DPO workers |
 | Data sources | Hugging Face traces, local parquet shards, real Hermes session logs, replay JSONL |
-| Evaluation | Held-out grouped trace benchmarks, checkpoint ranking, paired A/B comparisons |
+| Evaluation | Held-out grouped trace benchmarks, benchmark-suite scorecards, checkpoint ranking, paired A/B comparisons |
 | Observability | W&B, TensorBoard, JSONL metrics, live dashboard, structured reward components |
 
 ## Recommended Paths
@@ -57,9 +57,11 @@ benchmarks.
 | If you want to... | Start here |
 |---|---|
 | Check repo and Hermes subproject wiring | `python -m hermes_agentic_rl.cli.main hermes-preflight` |
+| Check Atropos and Tinker-Atropos wiring | `python -m hermes_agentic_rl.cli.main atropos-preflight` |
 | Train a small on-policy policy quickly | `configs/hermes_reasoning_traces_grpo_smoke.yaml` |
 | Train on a local parquet shard with MPS | `configs/hermes_reasoning_traces_parquet_mps_filtered.yaml` |
 | Verify whether RL improved behavior | `configs/hermes_reasoning_traces_eval_rl.yaml` |
+| Run a unified benchmark scorecard | `configs/benchmark_suite.yaml` |
 | Batch self-evolution validation by direction | `configs/self_evolution_batch.yaml` |
 | Run Hermes, replay, worker training, and export in one loop | `configs/hermes_online_cycle.yaml` |
 
@@ -80,6 +82,11 @@ improve the agent's behavior distribution on concrete Hermes-style tasks:
 - preferring trajectories that complete the task under a measurable reward;
 - preserving evidence through W&B, JSONL metrics, TensorBoard, checkpoints,
   and held-out eval instead of trusting training reward alone.
+
+For agent self-evolution, each run is treated as a controlled improvement
+experiment: choose an optimization direction, collect comparable trajectories,
+train the relevant surface, and promote changes only when held-out metrics
+support the move.
 
 Hermes-agent is the actor. `hermes-agentic-rl` is the feedback loop that makes
 that actor more reliable, controllable, and auditable. When the backend is
@@ -124,7 +131,7 @@ flowchart LR
 The next gains should stay benchmark-first:
 
 - strengthen held-out benchmarks for tool-call validity, command correctness,
-  task success, and paired A/B checkpoint comparisons;
+  task success, prompt-context retention, and paired A/B checkpoint comparisons;
 - move from tiny validation runs to LoRA or HF-backed trainable policies so RL can
   affect a model with enough capacity to learn valid Hermes actions;
 - improve reward shaping for executable tool calls, especially JSON validity,
@@ -144,23 +151,24 @@ stable entry points.
 | Area | Entry point | Status |
 |---|---|---|
 | Real Hermes runtime | `runtime.integration: hermes` | Loads from `runtime.repo_path`, `HERMES_AGENT_REPO`, or `subprojects/hermes-agent`. |
-| Atropos/Tinker bridge | `atropos-preflight` | Loads from `ATROPOS_REPO`, `TINKER_ATROPOS_REPO`, `subprojects/`, or local fallback paths. |
 | Local RL validation run | `train-rl` | CPU-friendly Tiny backend with GRPO/PPO and W&B/TensorBoard metrics. |
-| Real dataset RL | `configs/hermes_reasoning_traces_grpo_smoke.yaml` | Uses `lambda/hermes-agent-reasoning-traces`. |
+| Real dataset RL | `configs/hermes_reasoning_traces_grpo.yaml` | Uses `lambda/hermes-agent-reasoning-traces`; the smoke config is only for quick validation. |
 | Held-out RL benchmark | `eval-rl` | Baseline vs checkpoint on grouped held-out traces with structured metrics. |
-| Promotion gate | `eval-gate` | Runs held-out eval and fails with exit code `3` when a checkpoint should not be promoted. |
+| Benchmark suite scorecard | `benchmark-suite` | Runs multiple held-out benchmarks and writes unified pass/fail scorecards. |
+| Prompt/context benchmark | `configs/context_benchmark_eval_rl.yaml` | Measures long-context fact recall, constraint preservation, tool-summary retention, distractor avoidance, and concise synthesis. |
 | Online Hermes RL cycle | `configs/hermes_online_cycle.yaml` | Rollout -> sidecar replay -> BC worker -> self-evolution export. |
+| Online self-evolution loop | `configs/online_self_evolve.yaml` | Online cycle -> Skill candidates -> optional eval gate report. |
 | Directional self-evolution | `self-evolution-batch` | Batch replay, worker training, validation splits, and per-direction summaries. |
 | Self-evolution export | `session-eval-export` | Writes `task_input` / `expected_behavior` JSONL splits. |
 | Observability | `metrics:` | JSONL, stdout, TensorBoard, W&B, and optional live dashboard. |
+| External subprojects | `subprojects/*` | Upstream checkouts for Hermes-agent, Atropos, and Tinker-Atropos. |
 
 ## Quick Start
 
 ```bash
 python -m pip install -e '.[rl,data,metrics]'
-git submodule update --init
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
 python -m hermes_agentic_rl.cli.main hermes-preflight
-python -m hermes_agentic_rl.cli.main atropos-preflight
 ```
 
 Expected preflight shape:
@@ -179,21 +187,28 @@ that path when needed:
 export HERMES_AGENT_REPO=/path/to/hermes-agent
 ```
 
-## External Project Paths
+## External Subprojects
 
-External repos are resolved explicitly before falling back to local defaults.
-This keeps local development, CI, and cloned subprojects from depending on the
-current shell directory.
+External repositories are managed as git submodules under `subprojects/`, not
+vendored as first-party source at the repository root.
 
-| Project | Environment override | Default lookup order |
+| Path | Upstream | Used for |
 |---|---|---|
-| `hermes-agent` | `HERMES_AGENT_REPO` | `subprojects/hermes-agent`, `hermes-agent`, `vendor/hermes-agent` |
-| Atropos | `ATROPOS_REPO` | `subprojects/atropos`, `subprojects/hermes-agent/atropos`, `atropos`, `vendor/atropos` |
-| Tinker-Atropos | `TINKER_ATROPOS_REPO` | `subprojects/tinker-atropos`, `subprojects/hermes-agent/tinker-atropos`, `tinker-atropos`, `vendor/tinker-atropos` |
+| `subprojects/hermes-agent` | `NousResearch/hermes-agent` | Real Hermes runtime and session replay integration. |
+| `subprojects/atropos` | `NousResearch/atropos` | Optional Atropos environment adapters and compatibility tests. |
+| `subprojects/tinker-atropos` | `NousResearch/tinker-atropos` | Optional Tinker-Atropos preflight and trainer integration checks. |
 
-Use the preflight commands when changing these paths. Their JSON output includes
-the selected source plus every checked path, which makes missing submodules or
-misconfigured environment variables much easier to diagnose.
+After cloning or switching branches, run:
+
+```bash
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
+python -m hermes_agentic_rl.cli.main hermes-preflight
+python -m hermes_agentic_rl.cli.main atropos-preflight
+```
+
+The framework code treats these as external projects. CI initializes the
+top-level submodules, while linting, typing, packaging, and docs gates focus on this
+repository's adapters, trainers, rewards, configs, and tests.
 
 ## Secrets and Environment
 
@@ -295,18 +310,13 @@ python -m hermes_agentic_rl.cli.main eval-rl \
 The recommended gate before promoting a checkpoint is to compare held-out
 reward deltas, paired A/B results, `tool_call_parse_ok`, `tool_name_match`, and
 argument-overlap metrics.
-`eval_summary.json` now also includes a `promotion_readout` block that picks the
-best non-baseline candidate, summarizes reward/success-rate deltas, and emits a
-simple `promote` or `hold` recommendation for fast checkpoint triage. If you
-want this to be stricter, set `eval_rl.promotion_gate` thresholds in the eval
-config and review the generated `promotion.md`. For automation, set
-`eval_rl.promotion_gate.fail_on_hold: true` so `eval-rl` returns exit code `3`
-when the gate does not approve promotion.
 
-`eval-rl` also writes `capability_report.md`. It groups raw metrics into
-Hermes-agent capabilities such as task success, tool-use reliability,
-interaction control, and self-evolution signal, which is more useful than a
-single reward when you are deciding what to optimize next.
+`eval-rl` writes `promotion.md` and `capability_report.md`. The capability
+report groups raw metrics into Hermes-agent capabilities such as task success,
+tool-use reliability, interaction control, and self-evolution signal, which is
+more useful than a single reward when you decide what to optimize next. For
+automation, use `eval-gate`; it returns exit code `3` when the promotion gate
+recommends `hold`.
 
 For the command-action stage:
 
@@ -315,32 +325,12 @@ python -m hermes_agentic_rl.cli.main eval-rl \
   --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
 ```
 
-For a machine-enforced promotion decision:
-
-```bash
-python -m hermes_agentic_rl.cli.main eval-gate \
-  --config configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml
-```
-
-This command forces `promotion_gate.fail_on_hold: true` and returns exit code
-`3` when the best candidate should not be promoted.
-
-For a repository-local CLI/CI smoke check of the hold path:
-
-```bash
-python scripts/ci_eval_gate_smoke.py
-```
-
-This helper generates a tiny trace file, a Tiny-backend checkpoint, runs
-`eval-gate`, expects exit code `3`, and verifies that `eval_summary.json` and
-`promotion.md` are emitted correctly.
-
 ### Online Hermes Cycle
 
 `online-cycle` is the end-to-end online path:
 
 1. Run real Hermes on task prompts.
-2. Write raw session traces and replay samples with the session sidecar.
+2. Write raw session traces and direction-aware replay samples with the session sidecar.
 3. Train a local worker from replay, using `bc`, `dpo`, or `rm` worker configs.
 4. Export the same traces as a self-evolution dataset.
 5. Log worker metrics to JSONL and W&B.
@@ -362,6 +352,11 @@ Main outputs:
 - `outputs/hermes_online_cycle/worker_state.json`
 - `outputs/hermes_online_cycle/worker_metrics.jsonl`
 - `outputs/hermes_online_cycle/self_evolution_dataset/`
+
+Replay records include `metadata.replay_mining`, which tags capability axes,
+mining reasons, recommended uses, and Skill-candidate signals. The matching
+quality report aggregates these tags so we can filter replay data by direction
+instead of treating every session turn as the same kind of training signal.
 
 ### Self-Evolution Export
 
@@ -403,6 +398,48 @@ Main outputs:
 
 Use this when you want to compare optimization directions such as tool-call
 reliability, recovery behavior, or completion quality in one repeatable run.
+The batch summary also reports `mined_replay_axes` and `skill_candidates`,
+which are early signals for deciding whether the next loop should train
+weights, mine more sessions, or export candidate Skills.
+
+### Skill Candidate Export
+
+Replay mining can now become a concrete agent-improvement artifact. `skill-export`
+reads replay JSONL, selects records tagged as `metadata.replay_mining.skill_candidate`,
+and writes reviewable Skill candidates with validation examples.
+
+```bash
+python -m hermes_agentic_rl.cli.main skill-export \
+  --config configs/skill_export.yaml
+```
+
+Each candidate directory contains `SKILL.md`, `manifest.json`, and
+`validation.jsonl`. New replay records also keep compact `metadata.source_turn`
+evidence so the generated Skill draft can cite the user task, observed assistant
+behavior, feedback, reward, and capability axes.
+The exporter also writes `quality_report.json` and embeds a `quality` block in
+each manifest and generated `SKILL.md`. Candidates are labeled
+`ready_for_review`, `draft`, or `blocked` based on explainable checks for
+sample count, mean reward, replay usefulness, dominant capability-axis
+consistency, validation examples, and negative feedback ratio.
+
+### Online Self-Evolution
+
+Use `online-self-evolve` when you want the full loop in one command: real Hermes
+session collection, replay mining, worker training, self-evolution export,
+Skill candidate export, and optional `eval-gate`.
+
+```bash
+python -m hermes_agentic_rl.cli.main online-self-evolve \
+  --config configs/online_self_evolve.yaml \
+  --once \
+  --limit 1
+```
+
+The orchestrator writes `online_self_evolve_summary.json` and
+`online_self_evolve_report.md` with stage status, replay counts, Skill
+candidate counts, Skill quality status counts, and optional promotion-gate
+recommendation.
 
 ## Key Configurations
 
@@ -416,7 +453,11 @@ reliability, recovery behavior, or completion quality in one repeatable run.
 | `configs/hermes_reasoning_traces_parquet_mps_terminal_command_stage2.yaml` | Stage-2 terminal command action-space training on MPS. |
 | `configs/hermes_reasoning_traces_eval_rl.yaml` | Held-out benchmark comparing baseline vs RL checkpoint on grouped traces. |
 | `configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml` | Held-out benchmark for stage-2 command-action checkpoints. |
+| `configs/context_benchmark_eval_rl.yaml` | Prompt-context benchmark for fact recall, constraint retention, and distractor avoidance. |
+| `configs/benchmark_suite.yaml` | Unified benchmark suite that writes `scorecard.json` and `scorecard.md`. |
 | `configs/self_evolution_batch.yaml` | Batch directional self-evolution replay, worker training, and export. |
+| `configs/skill_export.yaml` | Export replay-mined Skill candidates and validation examples. |
+| `configs/online_self_evolve.yaml` | Full online self-evolution loop: online-cycle, Skill export, and optional eval gate. |
 | `configs/hermes_online_cycle.yaml` | Real Hermes online rollout plus replay worker and self-evolution export. |
 | `configs/hermes_runtime_sidecar.yaml` | Runtime sidecar example for session/replay capture. |
 | `configs/session_train_worker.yaml` | BC worker over replay JSONL. |
@@ -431,12 +472,14 @@ python -m hermes_agentic_rl.cli.main rollout --config <config> --output outputs/
 python -m hermes_agentic_rl.cli.main train --config <config>
 python -m hermes_agentic_rl.cli.main train-rl --config <config> --output <dir>
 python -m hermes_agentic_rl.cli.main eval-rl --config <config>
-python -m hermes_agentic_rl.cli.main eval-gate --config <config>
+python -m hermes_agentic_rl.cli.main benchmark-suite --config <config>
 python -m hermes_agentic_rl.cli.main self-evolution-batch --config <config>
 python -m hermes_agentic_rl.cli.main online-cycle --config <config> --once --limit 1
+python -m hermes_agentic_rl.cli.main online-self-evolve --config <config> --once --limit 1
 python -m hermes_agentic_rl.cli.main session-replay --config <config>
 python -m hermes_agentic_rl.cli.main session-train-worker --config <config> --once
 python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
+python -m hermes_agentic_rl.cli.main skill-export --config <config>
 ```
 
 ## Architecture
@@ -445,14 +488,14 @@ python -m hermes_agentic_rl.cli.main session-eval-export --config <config>
 hermes_agentic_rl/
   runtime/       Hermes and fake runtime adapters
   framework/     EnvTrainingPipeline and SessionTrainingPipeline
-  collectors/    Session sidecar, replay export, quality filters
+  collectors/    Session sidecar, replay export, quality filters, replay mining, Skill export
   envs/          Echo, simulated tool, curriculum, Hermes reasoning traces
   trainers/      GRPO/PPO on-policy trainers
-  eval/          Held-out eval, leaderboard, paired A/B comparison
+  eval/          Held-out eval, benchmark suites, leaderboard, paired A/B comparison
   offline/       BC, DPO, reward-model training
   rewards/       Outcome, tool-call, filesystem, feedback, RM components
   monitor/       JSONL, TensorBoard, W&B, dashboard writers
-  cli/           Rollout, train, train-rl, eval-rl, eval-gate, self-evolution-batch, online-cycle, replay workers
+  cli/           Rollout, train, train-rl, eval-rl, eval-gate, benchmark-suite, self-evolution-batch, online-cycle, online-self-evolve, replay workers, skill-export
 ```
 
 Data flow:
@@ -473,17 +516,16 @@ The repo treats linting, type checking, coverage, docs, and dependency audit as
 part of the deliverable:
 
 ```bash
-python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py scripts/ci_eval_gate_smoke.py
+python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py
 python -m mypy --follow-imports=skip hermes_agentic_rl
 python -m pytest tests -q --cov=hermes_agentic_rl --cov-report=term-missing --cov-report=xml
-python scripts/ci_eval_gate_smoke.py
 sphinx-build -W --keep-going -b html docs/sphinx docs/sphinx/_build/html
 uv pip compile --universal pyproject.toml --extra dev --extra docs --output-file requirements-lock.txt
 pip-audit -r requirements-lock.txt
 ```
 
-GitHub Actions runs lint, coverage tests, an `eval-gate` smoke path, docs
-build, and dependency audit. Live training/eval validation snapshots are in
+GitHub Actions runs lint, coverage tests, docs build, and dependency audit on
+Python 3.11 and 3.12. Live training/eval validation snapshots are in
 [Experiment Notes](docs/experiments.md).
 
 ## Docs
