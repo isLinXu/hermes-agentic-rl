@@ -57,6 +57,7 @@ outputs/
 wandb/
 data/
 .thumbs/
+.session_tmps/
 docs/sphinx/_build/
 *.parquet
 *.arrow
@@ -64,6 +65,7 @@ docs/sphinx/_build/
 *.pth
 *.ckpt
 *.safetensors
+atropos-main.zip
 events.out.tfevents.*
 
 # Translations

@@ -1,5 +1,0 @@
-algo: dpo
-data_path: .session_tmps/p6_smoke/dpo.jsonl
-save_path: .session_tmps/p6_smoke/dpo_policy.pt
-backend: {seed: 0, dim: 32, n_heads: 4, n_layers: 2}
-algo_config: {n_epochs: 3, batch_size: 2, lr: 0.005, beta: 0.5, seed: 0, log_every: 1}
