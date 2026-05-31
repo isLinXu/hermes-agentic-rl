@@ -23,6 +23,7 @@ from hermes_agentic_rl.agent_loop.multi_turn_loop import MultiTurnAgentLoop
 from hermes_agentic_rl.backends.base import LLMBackend
 from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 from hermes_agentic_rl.core.reward_manager import RewardManager
+from hermes_agentic_rl.rewards.base import BaseReward
 from hermes_agentic_rl.envs.base_env import BaseEnv
 from hermes_agentic_rl.envs.context_benchmark import ContextBenchmarkEnv
 from hermes_agentic_rl.envs.curriculum import CurriculumEnv
@@ -175,6 +176,40 @@ def _build_single_env(env_cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]:
     raise RuntimeError(f"env type '{env_type}' not supported")
 
 
+def _build_reward_component(spec: dict[str, Any]) -> BaseReward:
+    """Instantiate a reward component from a YAML component spec."""
+    typ = str(spec.get("type") or spec.get("name") or "").strip()
+    weight = float(spec.get("weight", 1.0))
+    if typ in {"LengthPenaltyReward", "length_penalty"}:
+        from hermes_agentic_rl.rewards.length_penalty import (
+            LengthPenaltyConfig,
+            LengthPenaltyReward,
+        )
+
+        cfg = LengthPenaltyConfig(
+            target_len=int(spec.get("target_len", 512)),
+            alpha=float(spec.get("alpha", 0.1)),
+            mode=str(spec.get("mode", "linear")),
+            apply_on=str(spec.get("apply_on", "response")),
+        )
+        return LengthPenaltyReward(cfg, weight=weight)
+    raise RuntimeError(f"reward component type '{typ}' not supported")
+
+
+def _build_reward_manager(
+    cfg: dict[str, Any],
+    *,
+    env_cfg: dict[str, Any],
+    default_manager: RewardManager,
+) -> RewardManager:
+    reward_cfg = cfg.get("reward") or {}
+    components = reward_cfg.get("components")
+    if not components:
+        return default_manager
+    built = [_build_reward_component(dict(spec)) for spec in components]
+    return RewardManager(built)
+
+
 def _build_reward_model_component(cfg: dict[str, Any]) -> Any | None:
     """Build a RewardModelComponent from the `reward_model:` YAML section.
 
@@ -258,6 +293,9 @@ def _build_env_and_rewards(cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]
     env_type = env_cfg.get("type", "echo")
     if env_type != "curriculum":
         env, rm_manager = _build_single_env(env_cfg)
+        rm_manager = _build_reward_manager(
+            cfg, env_cfg=env_cfg, default_manager=rm_manager
+        )
         extra = _build_reward_model_component(cfg)
         if extra is not None:
             rm_manager.rewards.append(extra)

@@ -47,6 +47,7 @@ from hermes_agentic_rl.core.rollout_manager import RolloutManager
 from hermes_agentic_rl.core.types import RolloutStep, Trajectory
 from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
 from hermes_agentic_rl.mdp.state_encoder import PromptStateEncoder
+from hermes_agentic_rl.trainers.batch_stats import _rl_dense_reward_metadata
 from hermes_agentic_rl.trainers.multi_turn_credit import assign_multi_turn_rewards
 from hermes_agentic_rl.trainers.on_policy_config import OnPolicyTrainerConfig
 
@@ -526,6 +527,7 @@ class OnPolicyTrainer:
                 raise RuntimeError(
                     "Agent loop must emit trajectory.metadata['runtime']['rl']"
                 )
+            dense_meta = _rl_dense_reward_metadata(rl_meta)
             rollout_temperature = _rollout_temperature_from_meta(
                 rl_meta,
                 fallback=self.cfg.temperature,
@@ -544,6 +546,7 @@ class OnPolicyTrainer:
                 "final_output_chars": len(trajectory.final_output or ""),
                 "reward_summary_metadata": dict(summary.metadata),
                 "rollout_temperature": rollout_temperature,
+                **dense_meta,
             }
 
             if self.cfg.multi_turn and rl_meta.get("turns"):
@@ -650,6 +653,8 @@ class OnPolicyTrainer:
                     self.lagrangian.measure(item, trajectory)
                 except Exception:
                     pass
+            rl_meta = _extract_rl(trajectory) or {}
+            dense_meta = _rl_dense_reward_metadata(rl_meta)
             records.append(
                 RolloutRecord(
                     prompt_ids=list(prompt_ids),
@@ -672,6 +677,7 @@ class OnPolicyTrainer:
                     "response_tokens": len(gen.response_ids),
                     "rollout_temperature": float(self.cfg.temperature),
                     "reward_summary_metadata": dict(summary.metadata),
+                    **dense_meta,
                 },
             )
             )

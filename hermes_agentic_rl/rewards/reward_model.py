@@ -44,6 +44,7 @@ class RewardModelConfig:
     lr: float = 1e-3
     n_epochs: int = 3
     batch_size: int = 4
+    score_batch_size: int = 0
     freeze_base: bool = True
     grad_clip: float = 1.0
     shuffle: bool = True
@@ -59,7 +60,13 @@ class RewardModelStats:
 class RewardModel(nn.Module):
     """Scalar-output reward head built on top of any LLMBackend."""
 
-    def __init__(self, backend: LLMBackend, *, freeze_base: bool = True) -> None:
+    def __init__(
+        self,
+        backend: LLMBackend,
+        *,
+        freeze_base: bool = True,
+        device: str | torch.device | None = None,
+    ) -> None:
         super().__init__()
         self.backend = backend
         self._is_tiny = isinstance(backend, TinyCausalLMBackend)
@@ -79,6 +86,14 @@ class RewardModel(nn.Module):
         if freeze_base and model is not None:
             for p in model.parameters():
                 p.requires_grad_(False)
+        if device is not None:
+            target = torch.device(device)
+            if model is not None:
+                model.to(target)
+            self.head.to(target)
+
+    def _backbone_device(self) -> torch.device:
+        return next(self.head.parameters()).device
 
     # Helper: get last hidden state at the terminal position of prompt+response.
     def _last_hidden(self, prompt_ids: list[int], response_ids: list[int]) -> torch.Tensor:
@@ -108,6 +123,40 @@ class RewardModel(nn.Module):
         """Return a scalar reward (differentiable)."""
         h = self._last_hidden(prompt_ids, response_ids)
         return self.head(h).squeeze(-1)
+
+    def score_batch(
+        self,
+        prompt_ids_list: list[list[int]],
+        response_ids_list: list[list[int]],
+    ) -> torch.Tensor:
+        """Batched scalar rewards for aligned prompt/response pairs."""
+        if len(prompt_ids_list) != len(response_ids_list):
+            raise ValueError("prompt_ids_list and response_ids_list length mismatch")
+        if not prompt_ids_list:
+            return torch.zeros(0, device=self._backbone_device())
+        if self._is_tiny:
+            model = self.backend.model  # type: ignore[attr-defined]
+            model.train(self.training)
+            device = self._backbone_device()
+            sequences = [
+                list(prompt_ids_list[i]) + list(response_ids_list[i])
+                for i in range(len(prompt_ids_list))
+            ]
+            max_len = max(len(seq) for seq in sequences)
+            ids = torch.zeros(len(sequences), max_len, dtype=torch.long, device=device)
+            last_indices = torch.zeros(len(sequences), dtype=torch.long, device=device)
+            for i, seq in enumerate(sequences):
+                ids[i, : len(seq)] = torch.tensor(seq, dtype=torch.long, device=device)
+                last_indices[i] = len(seq) - 1
+            h = model._trunk(ids)
+            last_h = h[torch.arange(len(sequences), device=device), last_indices]
+            return self.head(last_h).squeeze(-1)
+        return torch.stack(
+            [
+                self.score_pair(prompt_ids_list[i], response_ids_list[i])
+                for i in range(len(prompt_ids_list))
+            ]
+        )
 
     def trainable_parameters(self) -> Any:
         return [p for p in self.parameters() if p.requires_grad]
@@ -156,19 +205,33 @@ class RewardModelTrainer:
             self.rm.train()
             for batch in self._iter_batches(pairs):
                 self.optim.zero_grad()
-                logits: list[torch.Tensor] = []
-                correct = 0
-                for p in batch:
-                    r_w = self.rm.score_pair(p.prompt_ids, p.chosen_ids)
-                    r_l = self.rm.score_pair(p.prompt_ids, p.rejected_ids)
+                if self.cfg.score_batch_size > 0:
+                    prompts = [p.prompt_ids for p in batch]
+                    chosen = [p.chosen_ids for p in batch]
+                    rejected = [p.rejected_ids for p in batch]
+                    r_w = self.rm.score_batch(prompts, chosen)
+                    r_l = self.rm.score_batch(prompts, rejected)
                     diff = r_w - r_l
-                    logits.append(diff)
-                    if float(diff.detach().item()) > 0.0:
-                        correct += 1
-                if not logits:
+                    correct = int((diff.detach() > 0.0).sum().item())
+                    loss = F.softplus(-diff).mean()
+                    n_pairs = len(batch)
+                else:
+                    logits: list[torch.Tensor] = []
+                    correct = 0
+                    for p in batch:
+                        r_w = self.rm.score_pair(p.prompt_ids, p.chosen_ids)
+                        r_l = self.rm.score_pair(p.prompt_ids, p.rejected_ids)
+                        diff = r_w - r_l
+                        logits.append(diff)
+                        if float(diff.detach().item()) > 0.0:
+                            correct += 1
+                    if not logits:
+                        continue
+                    stacked = torch.stack(logits)
+                    loss = F.softplus(-stacked).mean()
+                    n_pairs = len(logits)
+                if n_pairs == 0:
                     continue
-                stacked = torch.stack(logits)
-                loss = F.softplus(-stacked).mean()
                 loss.backward()
                 if self.cfg.grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(
@@ -179,8 +242,8 @@ class RewardModelTrainer:
                     "step": step_idx,
                     "epoch": epoch,
                     "loss": float(loss.detach().item()),
-                    "acc": correct / max(1, len(logits)),
-                    "n": len(logits),
+                    "acc": correct / max(1, n_pairs),
+                    "n": n_pairs,
                 }
                 steps.append(rec)
                 if self.cfg.log_every and step_idx % self.cfg.log_every == 0:

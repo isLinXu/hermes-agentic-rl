@@ -1,0 +1,89 @@
+# Stable GRPO recipe for format-collapse-sensitive sparse-reward runs.
+#
+# Run:
+#   python -m hermes_agentic_rl.cli.main train-rl \
+#       --config configs/stable_grpo_recipe.yaml \
+#       --output outputs/stable_grpo_recipe
+
+algo: grpo
+
+backend:
+  name: hf
+  model_name_or_path: HuggingFaceTB/SmolLM2-135M-Instruct
+  device: mps
+  dtype: bfloat16
+  with_value_head: false
+
+environment:
+  type: letter_counting
+  dataset_seed: 42
+  max_level: 10
+
+agent_loop:
+  type: policy
+  stop_strings:
+    - "</answer>"
+
+train_rl:
+  n_iters: 100
+  group_size: 4
+  prompts_per_iter: 2
+  lr: 5.0e-5
+  max_new_tokens: 128
+  temperature: 0.8
+  update_epochs: 1
+  minibatch_size: 0
+  grad_clip: 1.0
+  seed: 42
+  log_every: 1
+  save_every: 50
+  output_dir: outputs/stable_grpo_recipe
+
+  # Trust region + stable advantage signal.
+  use_reference: true
+  kl_coef: 0.05
+  kl_estimator: k3
+  target_kl: 0.1
+  adaptive_kl: true
+  normalize_reward: true
+  reward_norm_clip: 10.0
+  advantage_norm: dapo
+  per_token_advantage: true
+  loss_agg: mean_token
+
+  # Keep format memory alive after SFT warmup.
+  bootstrap_sft_rounds: 3
+  bootstrap_sft_samples: 32
+  bootstrap_sft_lr: 1.0e-4
+  bootstrap_sft_epochs: 1
+  interleave_sft_every: 5
+  interleave_sft_samples: 16
+  interleave_sft_lr: 1.0e-4
+  interleave_sft_epochs: 1
+  interleave_sft_batch_size: 8
+
+  # Closed-loop exploration pressure.
+  entropy_coef: 0.01
+  entropy_schedule:
+    enabled: true
+    mode: pid
+    target_entropy: 0.5
+    init_coef: 0.01
+    pid_kp: 0.05
+    pid_ki: 0.01
+    pid_kd: 0.001
+    min_coef: 0.0
+    max_coef: 0.2
+
+  # Explicitly opt in; leave disabled for benchmark apples-to-apples runs.
+  token_budget:
+    enabled: false
+    max_tokens_per_batch: 8192
+    max_response_tokens: 512
+    head_keep: 64
+    tail_keep: 128
+    protect_tool_call_boundaries: true
+
+metrics:
+  jsonl: true
+  stdout: false

@@ -1,0 +1,52 @@
+# LetterCounting GRPO on an instruct-tuned small model.
+# This is the recommended replacement for GPT-2-style base-model runs that
+# tend to collapse the <answer>...</answer> format after a few RL iterations.
+
+algo: grpo
+
+backend:
+  name: hf
+  model_name_or_path: HuggingFaceTB/SmolLM2-135M-Instruct
+  device: mps
+  dtype: bfloat16
+  with_value_head: false
+
+environment:
+  type: letter_counting
+  dataset_seed: 42
+  max_level: 10
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 100
+  group_size: 4
+  prompts_per_iter: 2
+  lr: 5e-5
+  max_new_tokens: 128
+  temperature: 0.8
+  clip_eps: 0.2
+  kl_coef: 0.05
+  kl_estimator: k3
+  target_kl: 0.1
+  adaptive_kl: true
+  use_reference: true
+  entropy_coef: 0.01
+  log_every: 1
+  save_every: 50
+  seed: 42
+  loss_agg: mean_token
+  grad_clip: 1.0
+  per_token_advantage: true
+  advantage_norm: group
+  bootstrap_sft_rounds: 3
+  bootstrap_sft_samples: 32
+  bootstrap_sft_lr: 1e-4
+  bootstrap_sft_epochs: 1
+  interleave_sft_every: 5
+  interleave_sft_samples: 16
+  interleave_sft_lr: 1e-4
+  interleave_sft_epochs: 1
+  interleave_sft_batch_size: 8
+  batch_generate: true
