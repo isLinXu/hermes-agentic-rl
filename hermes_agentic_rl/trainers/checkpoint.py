@@ -33,6 +33,34 @@ import yaml  # type: ignore[import-untyped]
 # ---------------------------------------------------------------------------
 
 
+def _get_full_state_dict(
+    model: torch.nn.Module,
+    *,
+    fsdp_enabled: bool = False,
+) -> dict[str, Any]:
+    """Get the full state dict of a model, using FSDP context if enabled.
+
+    When ``fsdp_enabled`` is True, wraps the call in
+    ``torch.distributed.fsdp.state_dict_type(FULL_STATE_DICT)`` so that
+    rank-0 gets the full (unsharded) state dict with CPU offload.
+    """
+    if not fsdp_enabled:
+        return model.state_dict()
+
+    from torch.distributed.fsdp import (  # noqa: I001
+        FullStateDictConfig,
+        StateDictType,
+        FullyShardedDataParallel,
+    )
+
+    with FullyShardedDataParallel.state_dict_type(
+        model,
+        StateDictType.FULL_STATE_DICT,
+        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+    ):
+        return model.state_dict()
+
+
 def _atomic_save(obj: Any, path: Path, serializer: str = "torch") -> None:
     """Save to a temp file then atomically rename (crash-safe).
 
@@ -84,6 +112,8 @@ class CheckpointState:
     config: dict[str, Any]  # training config snapshot
     best_reward: float
     best_iteration: int
+    running_stats: dict[str, Any] | None = None
+    kl_ctrl_state: dict[str, Any] | None = None
 
 
 class CheckpointManager:

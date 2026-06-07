@@ -88,110 +88,29 @@ def default_policy_loop_factory(
     return _make
 
 
-@dataclass(slots=True)
-class OnPolicyTrainerConfig:
-    n_iters: int = 20
-    group_size: int = 4
-    prompts_per_iter: int = 2
-    lr: float = 1e-3
-    max_new_tokens: int = 16
-    temperature: float = 1.0
-    grad_clip: float = 1.0
-    use_reference: bool = False
-    multi_turn: bool = False            # if True, emit per-turn RolloutRecords
-    multi_turn_credit: dict[str, Any] | None = None
-    log_every: int = 1
-    save_every: int = 0
-    output_dir: Path | None = None
-    seed: int | None = 0
-    metrics_sink: Callable[[dict[str, Any]], None] | None = None  # optional live sink
-    batch_generate: bool = False
-    update_epochs: int = 1
-    minibatch_size: int = 0  # 0 = full batch
-    shuffle_minibatches: bool = True
-    interleave_sft_every: int = 0
-    interleave_sft_samples: int = 32
-    interleave_sft_lr: float = 1e-4
-    interleave_sft_epochs: int = 1
-    interleave_sft_batch_size: int = 8
-    bootstrap_sft_rounds: int = 0
-    bootstrap_sft_samples: int = 32
-    bootstrap_sft_lr: float = 1e-4
-    bootstrap_sft_epochs: int = 1
-    # --- checkpoint / resume (v0.6) ---
-    # 0 = never save a resumable checkpoint (legacy .pt-only save_every still
-    # controls the flat state_dict dump). When > 0, CheckpointManager saves a
-    # full {model, optimizer, rng, stats} bundle under `<output_dir>/checkpoints/`.
-    checkpoint_every: int = 0
-    keep_last_checkpoints: int = 3
-    # If set to a positive int, try to resume from `<output_dir>/checkpoints/iter_{N}`.
-    # "latest" = resume from the newest checkpoint found (None = no resume).
-    resume_from: int | str | None = None
-    # If True, resume from the latest checkpoint automatically (no-op if none exists).
-    auto_resume: bool = False
-    # --- v0.7: best-checkpoint + early stopping ---
-    # When True AND checkpoint_every > 0: additionally save the iter with the
-    # highest mean_reward under `<output_dir>/checkpoints_best/iter_{N}/`.
-    # Independent of keep_last_checkpoints — the best is NEVER pruned.
-    save_best_checkpoint: bool = False
-    # Early stop: halt training when no new best mean_reward appears for
-    # `early_stop_patience` consecutive iterations. 0 disables early-stop.
-    # A tiny positive delta is required to count as improvement.
-    early_stop_patience: int = 0
-    early_stop_min_delta: float = 1e-4
-    # --- v0.8: trust-region + reward stabilization (all opt-in) ---
-    # Per-minibatch ratio-based early stop. When the policy drifts too far
-    # inside one update-epoch, abort remaining epochs for this iter.
-    # `target_kl`: threshold on minibatch approx_kl (K2). 0 disables.
-    target_kl: float = 0.0
-    # Adaptive KL controller (InstructGPT A.2). Scales the algo's kl_coef
-    # between iters so KL stays near `target_kl`. Requires `target_kl > 0`
-    # AND `use_reference = True` (else there is no KL term to scale).
-    adaptive_kl: bool = False
-    adaptive_kl_horizon: float = 10000.0
-    adaptive_kl_min: float = 1e-4
-    adaptive_kl_max: float = 10.0
-    # Running reward normalization: whitens scalar rewards with running
-    # mean/std so the advantage scale is stable across iters. The raw
-    # reward is preserved in `mean_reward` for logging; records get
-    # `_normalized_reward` in metadata.
-    normalize_reward: bool = False
-    reward_norm_clip: float = 10.0
-    # --- v0.9: scale-up (Qwen-7B+ support) ---
-    # Mixed-precision training. "fp16", "bf16", "fp32", or "auto" (picks best).
-    amp_dtype: str = "fp32"
-    # Gradient accumulation steps. Loss is divided by this, grads are summed.
-    # optimizer.step() fires every `grad_accum_steps` micro-batches.
-    grad_accum_steps: int = 1
-    # vLLM rollout backend (generation-only). When set, the trainer creates a
-    # VLLMRolloutBackend and syncs weights every iter.
-    # String: model name/path for vLLM. None = no vLLM, use policy backend.
-    vllm_rollout_model: str | None = None
-    vllm_tensor_parallel_size: int = 1
-    vllm_max_model_len: int = 4096
-    vllm_gpu_memory_utilization: float = 0.90
-    vllm_enable_prefix_caching: bool = True
-    # Sync weights to vLLM every N iterations (1 = every iter, 0 = never).
-    vllm_sync_every: int = 1
-    # FSDP / DDP distributed strategy. "none" / "ddp" / "fsdp".
-    distributed_strategy: str = "none"
-    fsdp_cpu_offload: bool = False
-    # FlashAttention. When True, HF backends use attn_implementation="flash_attention_2".
-    # Tiny backend uses torch.nn.functional.scaled_dot_product_attention.
-    flash_attention: bool = False
-    async_checkpoint: bool = False
-    stability_preset: str = "none"
-    token_budget: dict[str, Any] | None = None
-    entropy_schedule: dict[str, Any] | None = None
-    use_ema_rollout: bool = False
-    ema_tau: float = 0.005
-    ema_tau_start: float | None = None
-    ema_tau_warmup_steps: int = 0
-    lr_schedule: str = "constant"
-    lr_warmup_steps: int = 0
-    lr_warmup_start_lr: float = 0.0
-    lr_total_steps: int = 0
-    lr_end_lr: float = 0.0
+def _observe_env_reward(env: Any, item: dict[str, Any] | None, reward: float) -> None:
+    """Feed a rollout reward to a curriculum / multi-stream env, if it wants it.
+
+    Duck-typed: a plain :class:`BaseEnv` has no ``observe`` and is skipped.
+    Curriculum / multi-stream envs expose ``observe(reward, level=None)`` — we
+    forward the stream/level tag that ``get_next_item`` stamped onto the item
+    (``_curriculum_level``) so per-stream adaptive reweighting can attribute the
+    reward to the right stream. Envs whose ``observe`` only takes ``reward``
+    (e.g. ``LetterCountingEnv``) still work via the fallback.
+    """
+    observe = getattr(env, "observe", None)
+    if not callable(observe):
+        return
+    level = item.get("_curriculum_level") if isinstance(item, dict) else None
+    try:
+        observe(float(reward), level=level)
+    except TypeError:
+        try:
+            observe(float(reward))
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 @dataclass(slots=True)
@@ -211,6 +130,40 @@ class TrainStats:
         if len(self.iters) < 2:
             return 0.0
         return self.iters[-1]["mean_reward"] - self.iters[0]["mean_reward"]
+
+    # -- v0.10 convenience accessors -------------------------------------
+
+    def reward_curve(self) -> list[float]:
+        """Return the per-iteration mean_reward series."""
+        return [float(r.get("mean_reward", 0.0)) for r in self.iters]
+
+    def mean_kl(self) -> float:
+        """Average KL divergence across all iterations."""
+        kls = [float(r.get("kl", 0.0)) for r in self.iters]
+        return sum(kls) / len(kls) if kls else 0.0
+
+    def loss_curve(self) -> list[float]:
+        """Return the per-iteration loss series."""
+        return [float(r.get("loss", 0.0)) for r in self.iters]
+
+    def get_column(self, key: str) -> list[Any]:
+        """Extract a single column from all iteration records."""
+        return [r.get(key) for r in self.iters]
+
+    def summary(self) -> dict[str, Any]:
+        """Return a summary dict with key training statistics."""
+        return {
+            "n_iters": len(self.iters),
+            "best_reward": self.best_reward(),
+            "last_reward": self.last_reward(),
+            "mean_kl": self.mean_kl(),
+        }
+
+    def to_dataframe(self):
+        """Convert to a pandas DataFrame (requires pandas)."""
+        import pandas as pd
+
+        return pd.DataFrame(self.iters)
 
 
 class OnPolicyTrainer:
@@ -275,6 +228,23 @@ class OnPolicyTrainer:
         self._trainable_params = params
         self.optim = torch.optim.AdamW(params, lr=self.cfg.lr)
 
+        # ── LR scheduler (step-based, grad-accum-aware) ──────────────────
+        from hermes_agentic_rl.trainers.lr_schedule import make_lr_scheduler
+
+        total_steps = int(self.cfg.lr_total_steps) or int(self.cfg.n_iters)
+        # When grad_accum > 1, each "iteration" may produce multiple optimizer
+        # steps. The scheduler counts *effective optimizer steps* so warm-up /
+        # decay align with actual parameter updates, not just iterations.
+        self._lr_sched = make_lr_scheduler(
+            kind=self.cfg.lr_schedule,
+            lr=self.cfg.lr,
+            total_steps=total_steps,
+            warmup_steps=int(self.cfg.lr_warmup_steps),
+            warmup_start_lr=float(self.cfg.lr_warmup_start_lr),
+            end_lr=float(self.cfg.lr_end_lr),
+        )
+        self._lr_optim_step_counter: int = 0  # tracks actual optimizer steps
+
         # ── v0.9: AMP context ──
         from hermes_agentic_rl.trainers.mixed_precision import AMPContext
 
@@ -287,6 +257,14 @@ class OnPolicyTrainer:
         from hermes_agentic_rl.trainers.mixed_precision import GradientAccumulator
 
         self._grad_accum = GradientAccumulator(steps=self.cfg.grad_accum_steps)
+
+        # ── EMA + vLLM conflict check (before any heavy init) ──
+        if self.cfg.use_ema_rollout and self.cfg.vllm_rollout_model:
+            from hermes_agentic_rl.runtime.errors import RuntimeConfigurationError
+            raise RuntimeConfigurationError(
+                "EMA rollout is incompatible with vLLM rollout. "
+                "Set use_ema_rollout=False or remove vllm_rollout_model."
+            )
 
         # ── v0.9: vLLM rollout backend (generation-only) ──
         self._vllm_rollout: Any = None
@@ -311,6 +289,17 @@ class OnPolicyTrainer:
         self.ref_policy: LLMBackend | None = None
         if self.cfg.use_reference and hasattr(policy, "clone_frozen"):
             self.ref_policy = policy.clone_frozen()  # type: ignore[attr-defined]
+
+        # ── EMA shadow for stable local rollouts ──
+        self._ema: Any = None
+        if self.cfg.use_ema_rollout:
+            from hermes_agentic_rl.trainers.ema import EMAModel
+            self._ema = EMAModel(
+                policy,
+                tau=self.cfg.ema_tau,
+                tau_start=self.cfg.ema_tau_start,
+                tau_warmup_steps=self.cfg.ema_tau_warmup_steps,
+            )
 
         self.agent_loop_factory = agent_loop_factory or default_policy_loop_factory(
             max_new_tokens=self.cfg.max_new_tokens,
@@ -424,6 +413,72 @@ class OnPolicyTrainer:
                 temperature=self.cfg.temperature,
             )
 
+        # Pipelined (double-buffered) rollout bookkeeping.
+        #   _pending_expected: count of in-flight rollout tasks dispatched for
+        #     the next iteration (None = nothing in flight).
+        #   _update_version: monotonically increasing count of completed
+        #     gradient updates — the learner's "policy version".
+        #   _pending_dispatch_version: the policy version captured when the
+        #     in-flight rollouts were dispatched; their staleness on drain is
+        #     ``_update_version - _pending_dispatch_version``.
+        #   _rollout_staleness: staleness of the rollouts consumed this iter,
+        #     surfaced as the ``rollout_staleness`` stat.
+        self._pending_expected: int | None = None
+        self._update_version: int = 0
+        self._pending_dispatch_version: int | None = None
+        self._rollout_staleness: int = 0
+
+        # ── OPD teacher-logprob filler (closes the OPD loop) ──────────────
+        self._teacher_filler: Any = None
+        if getattr(self.cfg, "opd_teacher_fill", False):
+            from hermes_agentic_rl.rewards.opd_teacher import (
+                TeacherFillConfig,
+                TeacherLogprobFiller,
+            )
+
+            self._teacher_filler = TeacherLogprobFiller(
+                self.policy,
+                TeacherFillConfig(
+                    enabled=True,
+                    hint_template=str(
+                        getattr(
+                            self.cfg,
+                            "opd_hint_template",
+                            "\n\n[HINT_START]{hint}[HINT_END]\n",
+                        )
+                    ),
+                    max_hint_tokens=int(
+                        getattr(self.cfg, "opd_teacher_max_hint_tokens", 128)
+                    ),
+                    capability_axis_weights=getattr(
+                        self.cfg, "opd_capability_axis_weights", None
+                    ),
+                ),
+            )
+
+        # ── OPD in-trainer hint extractor (recovers directive hints) ──────
+        # Runs BEFORE the teacher fill: any record that has a next-state signal
+        # but no ``opd_hint`` gets one from a configurable judge, so OPD fires
+        # even when the env / reward did not pre-populate a hint. Opt-in via the
+        # ``opd.hint_extractor`` YAML block; ``None`` keeps legacy behaviour.
+        self._hint_extractor: Any = None
+        hint_cfg = getattr(self.cfg, "opd_hint_extractor", None)
+        if hint_cfg:
+            from hermes_agentic_rl.rewards.opd_hint_extractor import (
+                build_opd_hint_extractor,
+            )
+
+            self._hint_extractor = build_opd_hint_extractor(hint_cfg)
+
+        # ── Replay buffer (off-policy mixing with TIS correction) ───────────
+        self._replay_buffer: Any = None
+        replay_cfg = getattr(self.cfg, "replay_buffer", None)
+        if replay_cfg:
+            from hermes_agentic_rl.trainers.replay_buffer import (
+                build_replay_buffer_from_config,
+            )
+            self._replay_buffer = build_replay_buffer_from_config(replay_cfg)
+
         self._maybe_resume()
 
     # ------------------------------------------------------------------
@@ -432,6 +487,16 @@ class OnPolicyTrainer:
 
     def _validate_backend(self, policy: LLMBackend) -> None:
         """Override to require a value head, etc."""
+
+    def _rollout_backend(self) -> LLMBackend:
+        """Return the backend used for rollout generation.
+
+        When EMA rollout is enabled, returns the EMA shadow; otherwise returns
+        the learner policy itself.
+        """
+        if self._ema is not None:
+            return self._ema.as_rollout_backend()
+        return self.policy
 
     def _sync_weights_to_vllm(self, policy: LLMBackend) -> None:
         """Push learner state_dict to vLLM rollout engine.
@@ -510,13 +575,9 @@ class OnPolicyTrainer:
             loop = self.agent_loop_factory(backend=self.policy, seed=self._next_seed())
             trajectory: Trajectory = await RolloutManager(loop).collect(item, instruction)
             summary = await self.reward_manager.evaluate(item, trajectory, tool_context=None)
-            # curriculum feedback — duck-typed; safe if env doesn't support it
-            observe = getattr(self.env, "observe", None)
-            if callable(observe):
-                try:
-                    observe(float(summary.final_score))
-                except Exception:
-                    pass
+            # curriculum / multi-stream feedback — duck-typed; forwards the
+            # stream/level tag so per-stream reweighting can attribute reward.
+            _observe_env_reward(self.env, item, float(summary.final_score))
             if self.lagrangian is not None:
                 try:
                     self.lagrangian.measure(item, trajectory)
@@ -548,6 +609,28 @@ class OnPolicyTrainer:
                 "rollout_temperature": rollout_temperature,
                 **dense_meta,
             }
+
+            # Propagate the OPD directive hint (written by NextStatePRM) so the
+            # teacher-logprob filler / OPD branch can consume it. Without this
+            # the hint stays buried in runtime metadata and OPD never fires.
+            opd_hint = rl_meta.get("opd_hint")
+            if isinstance(opd_hint, str) and opd_hint.strip():
+                base_meta["opd_hint"] = opd_hint
+
+            # Propagate the raw next-state signal so the in-trainer
+            # OPDHintExtractor can recover a hint when none was pre-populated.
+            next_state = _extract_next_state(trajectory)
+            if isinstance(next_state, str) and next_state.strip():
+                base_meta["next_state"] = next_state
+
+            # Multi-stream tag: stamp the sampled stream/level so
+            # _summarize_batch_metadata can break reward/count down per stream.
+            stream_level = item.get("_curriculum_level")
+            if stream_level is not None:
+                try:
+                    base_meta["stream_level"] = int(stream_level)
+                except (TypeError, ValueError):
+                    pass
 
             if self.cfg.multi_turn and rl_meta.get("turns"):
                 teacher_responses = _teacher_responses_from_env(
@@ -627,7 +710,6 @@ class OnPolicyTrainer:
             seed=self._next_seed(),
         )
 
-        observe = getattr(self.env, "observe", None)
         group_id = str(item.get("task_id", "group"))
         records: list[RolloutRecord] = []
         for gen in outputs:
@@ -643,11 +725,7 @@ class OnPolicyTrainer:
                 finished=gen.finished,
             )
             summary = await self.reward_manager.evaluate(item, trajectory, tool_context=None)
-            if callable(observe):
-                try:
-                    observe(float(summary.final_score))
-                except Exception:
-                    pass
+            _observe_env_reward(self.env, item, float(summary.final_score))
             if self.lagrangian is not None:
                 try:
                     self.lagrangian.measure(item, trajectory)
@@ -655,6 +733,21 @@ class OnPolicyTrainer:
                     pass
             rl_meta = _extract_rl(trajectory) or {}
             dense_meta = _rl_dense_reward_metadata(rl_meta)
+            opd_hint = rl_meta.get("opd_hint")
+            opd_meta = (
+                {"opd_hint": opd_hint}
+                if isinstance(opd_hint, str) and opd_hint.strip()
+                else {}
+            )
+            next_state = _extract_next_state(trajectory)
+            if isinstance(next_state, str) and next_state.strip():
+                opd_meta["next_state"] = next_state
+            stream_level = item.get("_curriculum_level")
+            if stream_level is not None:
+                try:
+                    opd_meta["stream_level"] = int(stream_level)
+                except (TypeError, ValueError):
+                    pass
             records.append(
                 RolloutRecord(
                     prompt_ids=list(prompt_ids),
@@ -663,6 +756,7 @@ class OnPolicyTrainer:
                     reward=float(summary.final_score),
                     group_id=group_id,
                     metadata={
+                        **opd_meta,
                         "final_output": trajectory.final_output,
                         "reward_components": [
                             _reward_component_payload(component)
@@ -683,11 +777,19 @@ class OnPolicyTrainer:
             )
         return records
 
-    async def _collect_distributed(self) -> list[RolloutRecord]:
-        """Fan out `prompts_per_iter * group_size` rollouts to the pool."""
+    async def _dispatch_distributed(self) -> int:
+        """Broadcast current learner weights + submit one iter of rollout tasks.
+
+        Returns the number of dispatched tasks (the ``expected`` count for the
+        matching :meth:`_drain_distributed`). The weight ``state_dict`` is
+        snapshotted synchronously here, so the learner may safely continue
+        mutating its parameters (e.g. an overlapping update step) while the
+        pool's workers roll out against the broadcast snapshot. This snapshot
+        boundary is what makes the pipelined (double-buffered) schedule safe.
+        """
         from hermes_agentic_rl.distributed.mp_pool import RolloutTask
 
-        # 1) broadcast current learner weights
+        # 1) broadcast current learner weights (synchronous snapshot)
         state = {k: v.detach().cpu() for k, v in self.policy.model.state_dict().items()}  # type: ignore[attr-defined]
         self.rollout_pool.broadcast_weights(state)
 
@@ -709,19 +811,19 @@ class OnPolicyTrainer:
                 )
                 seq += 1
 
-        # 3) submit and drain
+        # 3) submit (non-blocking: workers process asynchronously)
         self.rollout_pool.submit_tasks(tasks)
-        results = self.rollout_pool.drain(expected=len(tasks))
+        return len(tasks)
 
-        # 4) flatten to RolloutRecord, feed curriculum observer
-        observe = getattr(self.env, "observe", None)
+    def _drain_distributed(self, expected: int) -> list[RolloutRecord]:
+        """Block until ``expected`` rollout results return, then flatten."""
+        results = self.rollout_pool.drain(expected=expected)
+
         records: list[RolloutRecord] = []
         for r in results:
-            if callable(observe):
-                try:
-                    observe(float(r["final_score"]))
-                except Exception:
-                    pass
+            # Distributed results don't echo the item, so per-stream level
+            # attribution is unavailable here; observe globally (level=None).
+            _observe_env_reward(self.env, None, float(r["final_score"]))
             for rec_dict in r["records"]:
                 records.append(
                     RolloutRecord(
@@ -735,29 +837,126 @@ class OnPolicyTrainer:
                 )
         return records
 
+    async def _collect_distributed(self) -> list[RolloutRecord]:
+        """Synchronous (BSP) fan-out: dispatch one iter, wait, flatten."""
+        expected = await self._dispatch_distributed()
+        return self._drain_distributed(expected)
+
     # ------------------------------------------------------------------
     # train loop
     # ------------------------------------------------------------------
 
-    async def _one_iter(self, iter_idx: int) -> AlgoUpdateStats:
+    def _pipeline_enabled(self) -> bool:
+        return (
+            bool(getattr(self.cfg, "pipeline_rollouts", False))
+            and self.rollout_pool is not None
+        )
+
+    async def _collect_for_iter(self, iter_idx: int) -> list[RolloutRecord]:
+        """Collect this iteration's rollouts.
+
+        Three modes:
+          * **pipelined** (``pipeline_rollouts`` + a rollout pool): drain the
+            rollouts dispatched during the *previous* iteration, then
+            immediately dispatch the *next* iteration's rollouts so they
+            overlap with this iteration's gradient update. Tolerates 1 step of
+            policy staleness — the broadcast snapshot is taken before the
+            update, so workers roll out against ``W_{t-1}`` while the learner
+            advances to ``W_t``. PPO/GRPO ratio clipping absorbs the lag.
+          * **distributed BSP** (pool, no pipeline): dispatch + wait inline.
+          * **local**: in-process group collection.
+        """
         if iter_idx == 0:
             await self.env.setup()
 
+        if self._pipeline_enabled():
+            if self._pending_expected is None:
+                self._pending_expected = await self._dispatch_distributed()
+                self._pending_dispatch_version = self._update_version
+            # The rollouts about to be drained were dispatched at this version;
+            # their staleness is how many updates have landed since.
+            dispatch_version = self._pending_dispatch_version or 0
+            records = self._drain_distributed(self._pending_expected)
+            self._rollout_staleness = self._update_version - dispatch_version
+            # Prefetch the next iter's rollouts BEFORE the update runs, so the
+            # broadcast captures pre-update weights (1-step staleness) and the
+            # rollout overlaps with this iter's gradient step.
+            if iter_idx + 1 < self.cfg.n_iters:
+                self._pending_expected = await self._dispatch_distributed()
+                self._pending_dispatch_version = self._update_version
+            else:
+                self._pending_expected = None
+                self._pending_dispatch_version = None
+            return records
+
+        # Synchronous paths consume freshly-generated rollouts: zero staleness.
+        self._rollout_staleness = 0
+        if self.rollout_pool is not None:
+            return await self._collect_distributed()
+
+        batch_records: list[RolloutRecord] = []
+        for _ in range(self.cfg.prompts_per_iter):
+            item = await self.env.get_next_item()
+            batch_records.extend(await self._collect_group(item))
+        return batch_records
+
+    async def _one_iter(self, iter_idx: int) -> AlgoUpdateStats:
         if self.lagrangian is not None:
             self.lagrangian.begin_iter()
 
-        if self.rollout_pool is not None:
-            batch_records = await self._collect_distributed()
-        else:
-            batch_records = []
-            for _ in range(self.cfg.prompts_per_iter):
-                item = await self.env.get_next_item()
-                batch_records.extend(await self._collect_group(item))
+        batch_records = await self._collect_for_iter(iter_idx)
+        return self._update_on_records(batch_records, iter_idx)
 
+    def _update_on_records(
+        self, batch_records: list[RolloutRecord], iter_idx: int
+    ) -> AlgoUpdateStats:
         # v0.8: running-reward normalization BEFORE prepare so the reward
         # used for advantage computation is whitened, while `raw_reward`
         # survives in metadata for logging.
         batch_records = self._maybe_normalize_rewards(batch_records)
+
+        # ── Replay buffer mixing (off-policy with TIS correction) ──────────
+        # Mix in stale-but-recent records from the replay buffer. Current
+        # records are pushed into the buffer for future iters but are NOT
+        # reused this iter (avoids double-counting). TIS/V-trace in the
+        # algo corrects for staleness automatically.
+        if self._replay_buffer is not None:
+            batch_records = self._replay_buffer.mix_with_current(
+                current=batch_records,
+                mix_ratio=float(getattr(self.cfg, "replay_mix_ratio", 0.25)),
+                policy_version=self._update_version,
+            )
+
+        # Stamp iteration index into metadata so curriculum-aware shaping
+        # functions (see rewards/shaping.py :: curriculum_shaping) can scale
+        # their effect with training progress.
+        for rec in batch_records:
+            meta = getattr(rec, "metadata", None)
+            if isinstance(meta, dict):
+                meta["_trainer_iter"] = int(iter_idx)
+
+        # Apply reward shaping (if configured via subclass constructor).
+        if getattr(self, "_reward_shaping_fn", None) is not None:
+            batch_records = list(self._reward_shaping_fn(batch_records))
+
+        # OPD in-trainer hint extraction: recover directive hints from the
+        # next-state signal for records that don't already carry one. Must run
+        # BEFORE the teacher fill so newly-stamped hints get teacher logprobs.
+        # OpenClaw-RL §3.2 produces hints from the PRM judge; this is the
+        # in-trainer equivalent that keeps OPD from silently degrading to GRPO.
+        self._last_hint_extract_stats: dict[str, float] | None = None
+        if self._hint_extractor is not None:
+            hint_stats = self._hint_extractor.extract(batch_records)
+            self._last_hint_extract_stats = hint_stats.as_dict()
+
+        # OPD teacher-logprob fill: re-score hinted records under a
+        # hint-enhanced context so the OPD / Hybrid branch has a real teacher
+        # distribution (OpenClaw-RL §3.2). No-op when no hints are present.
+        self._last_teacher_fill_stats: dict[str, float] | None = None
+        if self._teacher_filler is not None:
+            fill_stats = self._teacher_filler.fill(batch_records)
+            self._last_teacher_fill_stats = fill_stats.as_dict()
+
         batch = self._prepare_update_batch(RolloutBatch(records=batch_records))
 
         # v0.8: adaptive KL — sync β into algo.cfg BEFORE computing loss for
@@ -826,6 +1025,13 @@ class OnPolicyTrainer:
                 self.optim.zero_grad()
                 self._amp.update()
                 self._grad_accum.finish_step()
+                # Grad-accum-aware LR scheduling: advance per *optimizer step*
+                # (not per iteration) so warm-up/decay align with actual
+                # parameter updates.
+                self._lr_optim_step_counter += 1
+                new_lr = self._lr_sched.get_lr(self._lr_optim_step_counter)
+                for pg in self.optim.param_groups:
+                    pg["lr"] = new_lr
             elif did_step:
                 self.optim.zero_grad()
                 self._grad_accum.finish_step()
@@ -836,6 +1042,11 @@ class OnPolicyTrainer:
             stats.extra["optimizer_step_applied"] = 1.0 if did_step else 0.0
             stats.extra["amp_scale"] = self._amp.get_scale()
             stats.extra["grad_accum_step"] = float(mb_idx + 1)
+            stats.extra["grad_clip_triggered"] = (
+                1.0
+                if (self.cfg.grad_clip and self.cfg.grad_clip > 0 and grad_norm > self.cfg.grad_clip)
+                else 0.0
+            )
             per_step_stats.append(stats)
 
             # v0.8: ratio-based early stop.
@@ -857,6 +1068,10 @@ class OnPolicyTrainer:
             self.optim.zero_grad()
             self._amp.update()
             self._grad_accum.finish_step()
+            self._lr_optim_step_counter += 1
+            new_lr = self._lr_sched.get_lr(self._lr_optim_step_counter)
+            for pg in self.optim.param_groups:
+                pg["lr"] = new_lr
 
         # v0.8: feed the last-seen approx_kl into the adaptive controller.
         if self._kl_ctrl is not None and per_step_stats:
@@ -896,6 +1111,25 @@ class OnPolicyTrainer:
             ]
             if raws:
                 agg.mean_reward = sum(raws) / len(raws)
+        if self._last_teacher_fill_stats:
+            agg.extra.update(self._last_teacher_fill_stats)
+        if getattr(self, "_last_hint_extract_stats", None):
+            agg.extra.update(self._last_hint_extract_stats)
+        # P0-2 observability: how stale were the rollouts that drove this update
+        # (0 for synchronous/BSP, ~1 in steady-state pipelined mode), and the
+        # learner's policy version (number of completed updates so far).
+        agg.extra["rollout_staleness"] = float(self._rollout_staleness)
+        agg.extra["policy_version"] = float(self._update_version)
+        self._update_version += 1
+        # Replay buffer stats (when enabled).
+        if self._replay_buffer is not None:
+            agg.extra.update(self._replay_buffer.stats.as_dict())
+            n_replayed = sum(
+                1 for rec in batch.records
+                if isinstance(getattr(rec, "metadata", None), dict)
+                and rec.metadata.get("_replay_sampled")
+            )
+            agg.extra["replay_n_in_batch"] = float(n_replayed)
         return agg
 
     def train(self) -> TrainStats:
@@ -935,6 +1169,31 @@ class OnPolicyTrainer:
                 except Exception:
                     pass
             self.stats.add(record)
+
+            # EMA shadow update (after the learner step).
+            if self._ema is not None:
+                self._ema.update(self.policy)
+                record["ema_rollout"] = 1.0
+                record["ema_tau"] = self._ema.current_tau()
+
+            # Reference policy periodic re-clone (prevents KL drift).
+            ref_every = int(getattr(self.cfg, "ref_update_every", 0))
+            if (
+                ref_every > 0
+                and self.ref_policy is not None
+                and it > 0
+                and it % ref_every == 0
+            ):
+                if hasattr(self.policy, "clone_frozen"):
+                    self.ref_policy = self.policy.clone_frozen()
+                    record["ref_policy_updated"] = 1.0
+
+            # Eval hook: periodically evaluate with deterministic decoding.
+            eval_every = int(getattr(self.cfg, "eval_every", 0))
+            if eval_every > 0 and it > 0 and it % eval_every == 0:
+                eval_record = self._run_eval_hook(it)
+                if eval_record:
+                    record.update(eval_record)
 
             # Best-reward tracking + best checkpoint + early-stop counter.
             mean_r = float(record.get("mean_reward", 0.0))
@@ -1121,13 +1380,26 @@ class OnPolicyTrainer:
             "clip_frac",
             "n_updated",
         ]
+        # Keys that are internal / noisy and should not appear in the log.
+        _suppressed = {
+            "n_tokens", "ratio_mean", "optimizer_step_applied",
+            "amp_scale", "grad_accum_step",
+        }
         parts = []
+        seen_keys: set[str] = set()
         for k in keys:
             v = rec.get(k)
             if isinstance(v, float):
                 parts.append(f"{k}={v:.4f}")
             elif v is not None:
                 parts.append(f"{k}={v}")
+            seen_keys.add(k)
+        # Append any extra numeric keys not in the primary list and not suppressed.
+        for k, v in rec.items():
+            if k in seen_keys or k in _suppressed:
+                continue
+            if isinstance(v, (int, float)):
+                parts.append(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}")
         return "[train] " + " ".join(parts)
 
     def _build_update_batches(self, batch: RolloutBatch, *, iter_idx: int) -> list[RolloutBatch]:
@@ -1276,6 +1548,38 @@ class OnPolicyTrainer:
             n_records=total_records,
             extra=extras,
         )
+
+    def _run_eval_hook(self, iter_idx: int) -> dict[str, Any] | None:
+        """Run a quick evaluation roll-out with deterministic decoding.
+
+        Uses the same env but sets temperature=0 (greedy) and collects
+        ``eval_prompts`` items. Returns a dict of ``eval_*`` metrics or None
+        if the env has no items.
+        """
+        n_eval = max(1, int(getattr(self.cfg, "eval_prompts", 4)))
+        eval_temp = float(getattr(self.cfg, "eval_temperature", 0.0))
+
+        try:
+            eval_records = asyncio.run(
+                self._collect_group(
+                    n_items=n_eval,
+                    temperature=eval_temp,
+                    group_size=1,  # greedy → 1 sample per prompt
+                )
+            )
+        except Exception:
+            return None
+
+        if not eval_records:
+            return None
+
+        rewards = [float(rec.reward) for rec in eval_records]
+        mean_r = sum(rewards) / len(rewards) if rewards else 0.0
+        return {
+            "eval_mean_reward": mean_r,
+            "eval_n_records": float(len(eval_records)),
+            "eval_temperature": eval_temp,
+        }
 
     def _maybe_run_interleaved_sft(self, iter_idx: int) -> dict[str, Any]:
         every = max(0, int(self.cfg.interleave_sft_every))
@@ -1582,6 +1886,26 @@ def _summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
         if group_reward_std_stats:
             summary["group_reward_std"] = group_reward_std_stats
 
+    # Per-stream breakdown (multi-stream unified training). Records sampled from
+    # a MixedCurriculumEnv carry a ``stream_level`` tag; aggregate reward / count
+    # / share per stream so the metrics sink sees where the optimizer budget went
+    # and how each stream is performing — complementing the env-level snapshot.
+    stream_rewards: dict[int, list[float]] = {}
+    for rec in batch.records:
+        lvl = rec.metadata.get("stream_level")
+        if isinstance(lvl, int) and not isinstance(lvl, bool):
+            stream_rewards.setdefault(lvl, []).append(float(rec.reward))
+    if stream_rewards:
+        summary["n_streams"] = len(stream_rewards)
+        total_stream_recs = sum(len(v) for v in stream_rewards.values())
+        for lvl, rws in sorted(stream_rewards.items()):
+            summary[f"stream/{lvl}/count"] = float(len(rws))
+            summary[f"stream/{lvl}/share"] = float(len(rws)) / total_stream_recs
+            summary[f"stream/{lvl}/mean_reward"] = sum(rws) / len(rws)
+            std = _series_stats(rws, include_mean=False).get("std")
+            if std is not None:
+                summary[f"stream/{lvl}/reward_std"] = std
+
     prompt_tokens = [float(len(rec.prompt_ids)) for rec in batch.records]
     prompt_stats = _series_stats(prompt_tokens)
     if prompt_stats:
@@ -1805,6 +2129,24 @@ def _extract_rl(trajectory: Trajectory) -> dict[str, Any] | None:
     rl = trajectory.metadata.get("rl")
     if isinstance(rl, dict):
         return rl
+    return None
+
+
+def _extract_next_state(trajectory: Trajectory) -> str | None:
+    """Pull the next-state signal from a trajectory's runtime metadata.
+
+    Mirrors ``NextStatePRMComponent`` which reads
+    ``trajectory.metadata["runtime"]["next_state"]``. Falls back to a top-level
+    ``next_state`` key. Returns None when no textual signal is present.
+    """
+    runtime_block = trajectory.metadata.get("runtime")
+    if isinstance(runtime_block, dict):
+        val = runtime_block.get("next_state")
+        if isinstance(val, str) and val.strip():
+            return val
+    val = trajectory.metadata.get("next_state")
+    if isinstance(val, str) and val.strip():
+        return val
     return None
 
 

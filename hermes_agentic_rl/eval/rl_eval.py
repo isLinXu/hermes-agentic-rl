@@ -11,7 +11,6 @@ import asyncio
 import copy
 import json
 import math
-import random
 import re
 from collections import defaultdict
 from dataclasses import asdict
@@ -25,6 +24,9 @@ from hermes_agentic_rl.cli.train_rl import (
     _build_backend,
     _build_env_and_rewards,
     _make_agent_loop_factory,
+)
+from hermes_agentic_rl.core.dataset import (
+    select_items_by_group as _select_items_by_group,
 )
 from hermes_agentic_rl.core.rollout_manager import RolloutManager
 from hermes_agentic_rl.core.trajectory import trajectory_to_dict
@@ -104,12 +106,6 @@ def _std(values: list[float]) -> float:
     return (sum((value - mean) ** 2 for value in values) / len(values)) ** 0.5
 
 
-def _ratio_count(total: int, ratio: float) -> int:
-    if total <= 0 or ratio <= 0:
-        return 0
-    return max(1, round(total * ratio))
-
-
 def select_items_by_group(
     items: list[dict[str, Any]],
     *,
@@ -120,62 +116,19 @@ def select_items_by_group(
     seed: int = 0,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Select train/val/test/all items while keeping trace groups intact."""
-    split = split.lower()
-    if split not in {"train", "val", "test", "all"}:
-        raise ValueError("eval split must be one of: train, val, test, all")
-    if split == "all":
-        group_ids = sorted(
-            {
-                str(item.get(group_key) or item.get("task_id") or idx)
-                for idx, item in enumerate(items)
-            }
+    try:
+        return _select_items_by_group(
+            items,
+            split=split,
+            group_key=group_key,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
         )
-        return list(items), {
-            "split": split,
-            "group_key": group_key,
-            "total_items": len(items),
-            "total_groups": len(group_ids),
-            "selected_items": len(items),
-            "selected_groups": len(group_ids),
-        }
-
-    groups: dict[str, list[int]] = defaultdict(list)
-    for idx, item in enumerate(items):
-        group_id = str(item.get(group_key) or item.get("task_id") or idx)
-        groups[group_id].append(idx)
-
-    group_ids = list(groups)
-    random.Random(seed).shuffle(group_ids)
-    total_groups = len(group_ids)
-    n_test = min(total_groups, _ratio_count(total_groups, test_ratio))
-    n_val = min(total_groups - n_test, _ratio_count(total_groups, val_ratio))
-    n_train = max(0, total_groups - n_val - n_test)
-
-    split_ids = {
-        "train": set(group_ids[:n_train]),
-        "val": set(group_ids[n_train : n_train + n_val]),
-        "test": set(group_ids[n_train + n_val :]),
-    }
-    selected_ids = split_ids[split]
-    selected = [
-        item
-        for item in items
-        if str(item.get(group_key) or item.get("task_id") or "") in selected_ids
-    ]
-    return selected, {
-        "split": split,
-        "group_key": group_key,
-        "seed": seed,
-        "val_ratio": val_ratio,
-        "test_ratio": test_ratio,
-        "total_items": len(items),
-        "total_groups": total_groups,
-        "train_groups": len(split_ids["train"]),
-        "val_groups": len(split_ids["val"]),
-        "test_groups": len(split_ids["test"]),
-        "selected_items": len(selected),
-        "selected_groups": len(selected_ids),
-    }
+    except ValueError as exc:
+        if "split must be one of" in str(exc):
+            raise ValueError("eval split must be one of: train, val, test, all") from exc
+        raise
 
 
 def split_items_by_source_trace_id(

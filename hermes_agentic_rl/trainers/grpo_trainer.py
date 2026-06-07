@@ -122,6 +122,7 @@ class GRPOTrainerConfig:
     lr_warmup_start_lr: float = 0.0
     lr_total_steps: int = 0
     lr_end_lr: float = 0.0
+    pipeline_rollouts: bool = False
 
 
 # v0.2 kept this as a bespoke TrainStats; re-export the shared one for BC.

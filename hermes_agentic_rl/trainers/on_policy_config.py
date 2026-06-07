@@ -16,6 +16,11 @@ class OnPolicyTrainerConfig:
     temperature: float = 1.0
     grad_clip: float = 1.0
     use_reference: bool = False
+    # How often to re-clone the reference policy from the current policy.
+    # 0 = never (classic frozen-ref), N = every N iters. Prevents KL drift
+    # in long training runs. When adaptive_kl is also enabled, the ref-update
+    # interval acts as a ceiling on how far the KL anchor can drift.
+    ref_update_every: int = 0
     multi_turn: bool = False
     multi_turn_credit: dict[str, Any] | None = None
     log_every: int = 1
@@ -83,6 +88,34 @@ class OnPolicyTrainerConfig:
     lr_warmup_start_lr: float = 0.0
     lr_total_steps: int = 0
     lr_end_lr: float = 0.0
+    # --- OPD teacher-logprob closed loop (OpenClaw-RL §3.2) ---
+    # When True, after rewards are computed each iter, re-score hinted records
+    # under a hint-enhanced context (self-distillation) to fill
+    # ``metadata["teacher_logprobs"]`` so the OPD / Hybrid branch fires.
+    opd_teacher_fill: bool = False
+    opd_hint_template: str = "\n\n[HINT_START]{hint}[HINT_END]\n"
+    opd_teacher_max_hint_tokens: int = 128
+    # Optional {axis_name: weight} map for capability-axis-aware OPD weighting.
+    opd_capability_axis_weights: dict[str, float] | None = None
+    # --- OPD in-trainer hint extraction (closes the "OPD silently dies" gap) ---
+    opd_hint_extractor: dict[str, Any] | None = None
+    # --- P0-2: pipelined (double-buffered) rollout/update ---
+    # When True AND a rollout_pool is attached, dispatch iter N+1's rollouts
+    # before iter N's gradient update so they overlap (tolerates 1-step policy
+    # staleness; PPO/GRPO ratio clipping absorbs the lag).
+    pipeline_rollouts: bool = False
+    # --- Replay buffer (off-policy mixing with TIS correction) ---
+    # When enabled, a fraction of recent-but-not-current rollouts are mixed into
+    # each update. TIS/V-trace corrects for staleness. See replay_buffer.py.
+    replay_buffer: dict[str, Any] | None = None
+    replay_mix_ratio: float = 0.25
+    # --- Eval hook (periodic evaluation during training) ---
+    # When > 0, run evaluation every N iters using the same env but with
+    # deterministic decoding (temperature=0). Results are logged as
+    # ``eval_*`` keys in the iteration record.
+    eval_every: int = 0
+    eval_prompts: int = 4
+    eval_temperature: float = 0.0
 
 
 def build_shared_on_policy_config(source: Any) -> OnPolicyTrainerConfig:
@@ -127,4 +160,9 @@ def validate_on_policy_config(cfg: OnPolicyTrainerConfig) -> list[str]:
         warnings.append("EMA rollout cannot be combined with vLLM rollout")
     if cfg.lr_warmup_steps > 0 and cfg.lr_schedule == "constant":
         warnings.append("lr_warmup_steps is ignored when lr_schedule='constant'")
+    if cfg.replay_buffer and not cfg.use_reference:
+        warnings.append(
+            "replay_buffer works best with use_reference=True so KL to the "
+            "reference policy constrains off-policy drift"
+        )
     return warnings
