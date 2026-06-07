@@ -284,3 +284,108 @@ class LetterCountingReward(BaseReward):
                 weight=self.weight,
                 reason="correct" if ok else "mismatch",
             )
+
+
+# ---------------------------------------------------------------------------
+# Next-state PRM reward (closes the OpenClaw-RL OPD loop on letter_counting)
+# ---------------------------------------------------------------------------
+
+
+def _expected_answer_text(item: dict[str, Any]) -> str | None:
+    """Render the ground-truth answer in the env's <answer>...</answer> format."""
+    correct = item.get("correct_counts", {})
+    targets = item.get("target_letters", [])
+    if not correct or not targets:
+        return None
+    if len(targets) == 1:
+        return f"<answer>{correct[targets[0]]}</answer>"
+    ordered = {ch: correct[ch] for ch in targets}
+    return f"<answer>{json.dumps(ordered)}</answer>"
+
+
+class LetterCountingNextStateReward(BaseReward):
+    """Evaluative + directive reward built from the env's ground truth.
+
+    This is a faithful, deterministic instance of the OpenClaw-RL §3.1
+    next-state mechanism for a verifiable task:
+
+      * **Evaluative**: scalar reward (correct → +1, wrong → 0).
+      * **Directive**: when the answer is wrong the *next state* is corrective
+        ("the correct answer was <answer>N</answer>"). That corrective signal is
+        written to ``runtime["rl"]["opd_hint"]`` so the OPD branch (after the
+        teacher-logprob fill) can distil the policy toward the right answer.
+
+    No LLM judge is required because the environment is verifiable: the
+    next-state and hint are derived directly from ``correct_counts``.
+    """
+
+    name = "letter_counting_next_state"
+
+    def __init__(self, weight: float = 1.0, *, emit_hint_on_correct: bool = False) -> None:
+        self.weight = weight
+        self.emit_hint_on_correct = emit_hint_on_correct
+
+    async def evaluate(
+        self,
+        item: dict[str, Any],
+        trajectory: Trajectory,
+        tool_context: Any,
+    ) -> RewardResult:
+        del tool_context
+        expected = _expected_answer_text(item)
+        if expected is None:
+            return RewardResult(name=self.name, score=0.0, weight=self.weight, reason="no data")
+
+        response = trajectory.final_output or ""
+        m = re.search(r"<answer>(.*?)</answer>", response, re.DOTALL)
+        predicted = m.group(1).strip() if m else None
+
+        correct = item.get("correct_counts", {})
+        targets = item.get("target_letters", [])
+        ok = False
+        if predicted is not None:
+            if len(targets) == 1:
+                try:
+                    ok = int(predicted) == int(correct[targets[0]])
+                except (ValueError, TypeError):
+                    ok = False
+            else:
+                try:
+                    pred_dict = json.loads(predicted)
+                    ok = isinstance(pred_dict, dict) and all(
+                        pred_dict.get(ch, -1) == correct[ch] for ch in targets
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    ok = False
+
+        # Build the next-state feedback string + directive hint.
+        if ok:
+            next_state = "The environment accepted your answer."
+            hint = (
+                f"The correct answer is {expected}."
+                if self.emit_hint_on_correct
+                else None
+            )
+        else:
+            said = f" (you said {predicted!r})" if predicted is not None else ""
+            next_state = (
+                f"Wrong answer{said}. The correct answer was {expected}."
+            )
+            # Directive hint: tell the policy how the answer should differ.
+            hint = f"The correct answer is {expected}."
+
+        runtime = trajectory.metadata.setdefault("runtime", {})
+        if isinstance(runtime, dict):
+            runtime["next_state"] = next_state
+            if hint is not None:
+                rl = runtime.setdefault("rl", {})
+                if isinstance(rl, dict):
+                    rl["opd_hint"] = hint
+                    rl.setdefault("teacher_logprobs", [])
+
+        return RewardResult(
+            name=self.name,
+            score=self.weight if ok else 0.0,
+            weight=self.weight,
+            reason=("correct" if ok else "wrong+hint"),
+        )

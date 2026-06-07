@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from hermes_agentic_rl.cli.train_rl import _build_env_and_rewards
@@ -12,8 +14,11 @@ from hermes_agentic_rl.envs.context_benchmark import (
 )
 
 
-@pytest.mark.asyncio
-async def test_context_benchmark_reward_scores_retention_and_distractors() -> None:
+def test_context_benchmark_reward_scores_retention_and_distractors() -> None:
+    asyncio.run(_test_retention_and_distractors())
+
+
+async def _test_retention_and_distractors() -> None:
     item = build_context_benchmark_dataset(n=1, seed=0, noise_blocks=3)[0]
     output = (
         "Project atlas uses label blue. The relevant component is CSV parser; "
@@ -40,8 +45,11 @@ async def test_context_benchmark_reward_scores_retention_and_distractors() -> No
     assert reward.metadata["context_compression_ok"] == 1.0
 
 
-@pytest.mark.asyncio
-async def test_context_benchmark_reward_penalizes_stale_context() -> None:
+def test_context_benchmark_reward_penalizes_stale_context() -> None:
+    asyncio.run(_test_penalizes_stale_context())
+
+
+async def _test_penalizes_stale_context() -> None:
     item = build_context_benchmark_dataset(n=1, seed=0, noise_blocks=3)[0]
     stale = item["forbidden_facts"][0]
     reward = await ContextBenchmarkReward(ContextBenchmarkConfig()).evaluate(
