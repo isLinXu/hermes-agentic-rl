@@ -15,6 +15,7 @@ from hermes_agentic_rl.monitor.writers import (
     StdoutMetricsWriter,
     build_writer_from_config,
 )
+from hermes_agentic_rl.monitor import UnifiedObservable
 
 
 def test_jsonl_writer_appends(tmp_path: Path) -> None:
@@ -73,6 +74,19 @@ def test_build_writer_from_config_defaults(tmp_path: Path) -> None:
     w({"iter": 0, "loss": 0.1})
     w.close()
     assert (tmp_path / "metrics.jsonl").exists()
+
+
+def test_unified_observable_defaults_to_jsonl(tmp_path: Path) -> None:
+    with UnifiedObservable(tmp_path) as observable:
+        observable({"iter": 0, "loss": 0.1})
+        observable.log({"iter": 1}, loss=0.2)
+
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert rows == [{"iter": 0, "loss": 0.1}, {"iter": 1, "loss": 0.2}]
 
 
 def test_build_writer_from_config_no_config_returns_none() -> None:

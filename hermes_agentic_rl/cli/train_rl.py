@@ -1,7 +1,7 @@
 """`train-rl` CLI: real RL training on a configured env.
 
 Supports:
-  - algo: "grpo" (default) | "ppo"
+  - algo: "grpo" (default) | "ppo" | "hybrid" (GRPO + OPD, OpenClaw-RL §3.3)
   - env: "echo" | "sim_tool" | "curriculum" | "letter_counting" | "hermes_reasoning_traces"
   - backend: "tiny" | "hf" (HuggingFace AutoModelForCausalLM)
   - agent_loop: "policy" (default, single-turn) | "multi_turn" (tool-use)
@@ -23,7 +23,6 @@ from hermes_agentic_rl.agent_loop.multi_turn_loop import MultiTurnAgentLoop
 from hermes_agentic_rl.backends.base import LLMBackend
 from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 from hermes_agentic_rl.core.reward_manager import RewardManager
-from hermes_agentic_rl.rewards.base import BaseReward
 from hermes_agentic_rl.envs.base_env import BaseEnv
 from hermes_agentic_rl.envs.context_benchmark import ContextBenchmarkEnv
 from hermes_agentic_rl.envs.curriculum import CurriculumEnv
@@ -46,7 +45,12 @@ from hermes_agentic_rl.monitor.writers import (
     MultiMetricsWriter,
     build_writer_from_config,
 )
+from hermes_agentic_rl.rewards.base import BaseReward
 from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConfig
+from hermes_agentic_rl.trainers.hybrid_trainer import (
+    HybridTrainer,
+    HybridTrainerConfig,
+)
 from hermes_agentic_rl.trainers.ppo_trainer import PPOTrainer, PPOTrainerConfig
 
 KLEstimator = Literal["k1", "k2", "k3"]
@@ -193,6 +197,19 @@ def _build_reward_component(spec: dict[str, Any]) -> BaseReward:
             apply_on=str(spec.get("apply_on", "response")),
         )
         return LengthPenaltyReward(cfg, weight=weight)
+    if typ in {"letter_counting", "LetterCountingReward"}:
+        from hermes_agentic_rl.envs.letter_counting import LetterCountingReward
+
+        return LetterCountingReward(weight=weight)
+    if typ in {"letter_counting_next_state", "LetterCountingNextStateReward"}:
+        from hermes_agentic_rl.envs.letter_counting import (
+            LetterCountingNextStateReward,
+        )
+
+        return LetterCountingNextStateReward(
+            weight=weight,
+            emit_hint_on_correct=bool(spec.get("emit_hint_on_correct", False)),
+        )
     raise RuntimeError(f"reward component type '{typ}' not supported")
 
 
@@ -291,7 +308,7 @@ def _build_reward_model_component(cfg: dict[str, Any]) -> Any | None:
 def _build_env_and_rewards(cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]:
     env_cfg = cfg.get("environment", {}) or {}
     env_type = env_cfg.get("type", "echo")
-    if env_type != "curriculum":
+    if env_type not in {"curriculum", "multi_stream"}:
         env, rm_manager = _build_single_env(env_cfg)
         rm_manager = _build_reward_manager(
             cfg, env_cfg=env_cfg, default_manager=rm_manager
@@ -300,6 +317,9 @@ def _build_env_and_rewards(cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]
         if extra is not None:
             rm_manager.rewards.append(extra)
         return env, rm_manager
+
+    if env_type == "multi_stream":
+        return _build_multi_stream(env_cfg)
 
     sub_specs = env_cfg.get("levels") or []
     if not sub_specs:
@@ -326,6 +346,59 @@ def _build_env_and_rewards(cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]
             return await reward_managers[lvl].evaluate(item, trajectory, tool_context)
 
     return cur_env, _CurrRewardManager()  # type: ignore[return-value]
+
+
+def _build_multi_stream(env_cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]:
+    """Build a :class:`MixedCurriculumEnv` from a ``multi_stream`` env spec.
+
+    YAML shape::
+
+        environment:
+          type: multi_stream
+          window: 20
+          adapt_lr: 0.1
+          min_weight: 0.01
+          target_reward: 0.5
+          streams:
+            - {type: echo, weight: 1.0}
+            - {type: letter_counting, weight: 2.0}
+
+    Each stream carries its own reward manager; rewards are routed per-rollout
+    by the ``_curriculum_level`` tag the mixture stamps onto every item.
+    """
+    from hermes_agentic_rl.envs.curriculum import MixedCurriculumEnv
+
+    sub_specs = env_cfg.get("streams") or env_cfg.get("levels") or []
+    if not sub_specs:
+        raise RuntimeError("multi_stream env requires a non-empty 'streams' list")
+    sub_envs: list[BaseEnv] = []
+    reward_managers: list[RewardManager] = []
+    weights: list[float] = []
+    for spec in sub_specs:
+        spec = dict(spec)
+        weights.append(float(spec.pop("weight", 1.0)))
+        sub_env, sub_rm = _build_single_env(spec)
+        sub_envs.append(sub_env)
+        reward_managers.append(sub_rm)
+
+    mixed = MixedCurriculumEnv(
+        levels=sub_envs,
+        weights=weights,
+        window=int(env_cfg.get("window", 20)),
+        adapt_lr=float(env_cfg.get("adapt_lr", 0.1)),
+        min_weight=float(env_cfg.get("min_weight", 0.01)),
+        target_reward=float(env_cfg.get("target_reward", 0.5)),
+        seed=env_cfg.get("seed", 0),
+    )
+
+    # Route reward by the per-item stream tag (robust to mixed sampling).
+    class _MixedRewardManager:
+        async def evaluate(self, item, trajectory, tool_context):  # type: ignore[no-untyped-def]
+            lvl = int(item.get("_curriculum_level", mixed.current_level))
+            lvl = lvl if 0 <= lvl < len(reward_managers) else mixed.current_level
+            return await reward_managers[lvl].evaluate(item, trajectory, tool_context)
+
+    return mixed, _MixedRewardManager()  # type: ignore[return-value]
 
 
 # ----------------------------------------------------------------------------
@@ -529,6 +602,96 @@ def _build_ppo(cfg: dict[str, Any], output_dir: str | None) -> PPOTrainerConfig:
     )
 
 
+def _optional_axis_weights(value: Any) -> dict[str, float] | None:
+    if not isinstance(value, dict) or not value:
+        return None
+    return {str(k): float(v) for k, v in value.items()}
+
+
+def _build_hybrid(cfg: dict[str, Any], output_dir: str | None) -> HybridTrainerConfig:
+    """Build a HybridTrainerConfig from the `train_rl:` + `opd:` YAML blocks.
+
+    The OPD branch only fires when ``opd.teacher_fill`` is true (default) AND a
+    reward component emits ``opd_hint`` (e.g. ``letter_counting_next_state``).
+    """
+    tcfg = cfg.get("train_rl", {}) or {}
+    opd_cfg = cfg.get("opd", {}) or {}
+    out = _optional_path(output_dir if output_dir else tcfg.get("output_dir"))
+    return HybridTrainerConfig(
+        n_iters=int(tcfg.get("n_iters", 30)),
+        group_size=int(tcfg.get("group_size", 4)),
+        prompts_per_iter=int(tcfg.get("prompts_per_iter", 2)),
+        lr=float(tcfg.get("lr", 5e-3)),
+        max_new_tokens=int(tcfg.get("max_new_tokens", 8)),
+        temperature=float(tcfg.get("temperature", 1.0)),
+        use_reference=bool(tcfg.get("use_reference", False)),
+        log_every=int(tcfg.get("log_every", 5)),
+        save_every=int(tcfg.get("save_every", 0)),
+        output_dir=out,
+        seed=tcfg.get("seed", 0),
+        multi_turn=bool(tcfg.get("multi_turn", False)),
+        multi_turn_credit=_optional_dict(tcfg.get("multi_turn_credit")),
+        grad_clip=float(tcfg.get("grad_clip", 1.0)),
+        update_epochs=int(tcfg.get("update_epochs", 1)),
+        minibatch_size=int(tcfg.get("minibatch_size", 0)),
+        shuffle_minibatches=bool(tcfg.get("shuffle_minibatches", True)),
+        # --- hybrid weights ---
+        w_rl=float(tcfg.get("w_rl", 1.0)),
+        w_opd=float(tcfg.get("w_opd", 1.0)),
+        # --- GRPO branch ---
+        clip_eps=float(tcfg.get("clip_eps", 0.2)),
+        clip_eps_high=float(tcfg.get("clip_eps_high", 0.28)),
+        kl_coef=float(tcfg.get("kl_coef", 0.02)),
+        entropy_coef=float(tcfg.get("entropy_coef", 0.0)),
+        advantage_norm=tcfg.get("advantage_norm", "group"),
+        loss_agg=tcfg.get("loss_agg", "mean_token"),
+        per_token_advantage=bool(tcfg.get("per_token_advantage", False)),
+        kl_estimator=_kl_estimator(tcfg.get("kl_estimator", "k3")),
+        # --- OPD branch ---
+        opd_kl_coef=float(opd_cfg.get("kl_coef", 0.02)),
+        opd_clip_eps=float(opd_cfg.get("clip_eps", 0.2)),
+        opd_clip_eps_high=float(opd_cfg.get("clip_eps_high", 0.28)),
+        opd_adv_diff_clip=float(opd_cfg.get("adv_diff_clip", 1.0)),
+        opd_skip_missing_hints=bool(opd_cfg.get("skip_missing_hints", False)),
+        # --- OPD teacher-logprob closed loop ---
+        opd_teacher_fill=bool(opd_cfg.get("teacher_fill", True)),
+        opd_hint_template=str(
+            opd_cfg.get("hint_template", "\n\n[HINT_START]{hint}[HINT_END]\n")
+        ),
+        opd_teacher_max_hint_tokens=int(opd_cfg.get("max_hint_tokens", 128)),
+        opd_capability_axis_weights=_optional_axis_weights(
+            opd_cfg.get("capability_axis_weights")
+        ),
+        opd_hint_extractor=_optional_dict(opd_cfg.get("hint_extractor")),
+        # --- SFT / checkpoint / shared controls ---
+        interleave_sft_every=int(tcfg.get("interleave_sft_every", 0)),
+        interleave_sft_samples=int(tcfg.get("interleave_sft_samples", 32)),
+        interleave_sft_lr=float(tcfg.get("interleave_sft_lr", 1e-4)),
+        interleave_sft_epochs=int(tcfg.get("interleave_sft_epochs", 1)),
+        interleave_sft_batch_size=int(tcfg.get("interleave_sft_batch_size", 8)),
+        bootstrap_sft_rounds=int(tcfg.get("bootstrap_sft_rounds", 0)),
+        batch_generate=bool(tcfg.get("batch_generate", False)),
+        checkpoint_every=int(tcfg.get("checkpoint_every", 0)),
+        keep_last_checkpoints=int(tcfg.get("keep_last_checkpoints", 3)),
+        resume_from=tcfg.get("resume_from"),
+        auto_resume=bool(tcfg.get("auto_resume", False)),
+        save_best_checkpoint=bool(tcfg.get("save_best_checkpoint", False)),
+        early_stop_patience=int(tcfg.get("early_stop_patience", 0)),
+        early_stop_min_delta=float(tcfg.get("early_stop_min_delta", 1e-4)),
+        target_kl=float(tcfg.get("target_kl", 0.0)),
+        adaptive_kl=bool(tcfg.get("adaptive_kl", False)),
+        normalize_reward=bool(tcfg.get("normalize_reward", False)),
+        reward_norm_clip=float(tcfg.get("reward_norm_clip", 10.0)),
+        stability_preset=str(tcfg.get("stability_preset", "none")),
+        amp_dtype=str(tcfg.get("amp_dtype", "fp32")),
+        grad_accum_steps=int(tcfg.get("grad_accum_steps", 1)),
+        vllm_rollout_model=tcfg.get("vllm_rollout_model") or None,
+        vllm_sync_every=int(tcfg.get("vllm_sync_every", 1)),
+        distributed_strategy=str(tcfg.get("distributed_strategy", "none")),
+        flash_attention=bool(tcfg.get("flash_attention", False)),
+    )
+
+
 # ----------------------------------------------------------------------------
 # Entry point
 # ----------------------------------------------------------------------------
@@ -582,9 +745,25 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
         metrics_sink = extra_sinks[0]
 
     backend: LLMBackend
-    trainer: GRPOTrainer | PPOTrainer
-    trainer_cfg: GRPOTrainerConfig | PPOTrainerConfig
-    if algo == "grpo":
+    trainer: GRPOTrainer | PPOTrainer | HybridTrainer
+    trainer_cfg: GRPOTrainerConfig | PPOTrainerConfig | HybridTrainerConfig
+    if algo == "hybrid":
+        backend = _build_backend(cfg, need_value_head=False)
+        hybrid_cfg = _build_hybrid(cfg, output_dir)
+        hybrid_cfg.metrics_sink = metrics_sink
+        trainer_cfg = hybrid_cfg
+        print(
+            f"[train-rl] algo=hybrid backend={backend_name} device={backend.device} "
+            f"params={backend.num_parameters()} "
+            f"iters={hybrid_cfg.n_iters} group={hybrid_cfg.group_size} "
+            f"w_rl={hybrid_cfg.w_rl} w_opd={hybrid_cfg.w_opd} "
+            f"teacher_fill={hybrid_cfg.opd_teacher_fill}"
+        )
+        trainer = HybridTrainer(
+            policy=backend, env=env, reward_manager=reward_manager, cfg=hybrid_cfg,
+            agent_loop_factory=agent_loop_factory,
+        )
+    elif algo == "grpo":
         backend = _build_backend(cfg, need_value_head=False)
         grpo_cfg = _build_grpo(cfg, output_dir)
         grpo_cfg.metrics_sink = metrics_sink

@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
+from hermes_agentic_rl.core.dataset import split_dataset
+
 
 def _load_config(path: str | Path) -> dict[str, Any]:
     p = Path(path)
@@ -207,24 +209,13 @@ def _split_examples(
     train_ratio: float,
     val_ratio: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    items = list(examples)
-    if not items:
-        return [], [], []
-
-    if len(items) < 3:
-        return items, [], []
-
-    n_total = len(items)
-    n_train = max(1, int(n_total * train_ratio))
-    n_val = max(1, int(n_total * val_ratio))
-    if n_train + n_val >= n_total:
-        n_val = max(1, n_total - n_train - 1)
-    n_holdout = max(0, n_total - n_train - n_val)
-    return (
-        items[:n_train],
-        items[n_train:n_train + n_val],
-        items[n_train + n_val:n_train + n_val + n_holdout],
+    splits = split_dataset(
+        examples,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        shuffle=False,
     )
+    return splits.as_tuple()
 
 
 def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> str:

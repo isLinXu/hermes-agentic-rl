@@ -99,6 +99,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="print effective train config (after CLI overrides) and exit 0 (train only)",
     )
     parser.add_argument(
+        "--traces",
+        nargs="+",
+        default=None,
+        help="raw trace files for distill-skills (.json / .jsonl)",
+    )
+    parser.add_argument(
+        "--out",
+        dest="out_dir",
+        type=str,
+        default=None,
+        help="output directory for distill-skills",
+    )
+    parser.add_argument(
+        "--min-reward",
+        type=float,
+        default=0.0,
+        help="minimum per-turn reward to keep a candidate (distill-skills)",
+    )
+    parser.add_argument(
+        "--status",
+        choices=["ready_for_review", "draft", "blocked"],
+        default=None,
+        help="highlight only skills with this quality status (distill-skills)",
+    )
+    parser.add_argument(
+        "--json",
+        dest="json_out",
+        action="store_true",
+        help="print full summary JSON to stdout (distill-skills)",
+    )
+    parser.add_argument(
         "command",
         nargs="?",
         default="help",
@@ -120,6 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
             "self-evolution-batch",
             "online-self-evolve",
             "skill-export",
+            "distill-skills",
         ],
     )
     return parser
@@ -587,6 +619,39 @@ def main() -> int:
                 input_path=args.input,
                 output_path=args.output_path,
             )
+        if args.command == "distill-skills":
+            if not args.traces:
+                raise RuntimeError(
+                    "--traces is required for distill-skills "
+                    "(e.g. --traces sessions.jsonl --out ./skills/)"
+                )
+            if not args.out_dir:
+                raise RuntimeError("--out is required for distill-skills")
+            from hermes_agentic_rl.collectors.distill_skills import distill_skills
+
+            summary = distill_skills(
+                trace_paths=list(args.traces),
+                output_dir=args.out_dir,
+                min_reward=float(args.min_reward),
+                status_filter=args.status,
+            )
+            if bool(args.json_out):
+                print(json.dumps(summary, ensure_ascii=False, indent=2))
+            else:
+                mining = summary.get("mining", {})
+                qc = summary.get("quality", {}).get("status_counts", {})
+                print(
+                    "[distill-skills] "
+                    f"traces={mining.get('trace_files', 0)} "
+                    f"turns_mined={mining.get('turns_mined', 0)} "
+                    f"candidates={summary.get('candidate_records', 0)} "
+                    f"skills={summary.get('skills_exported', 0)} "
+                    f"(ready={qc.get('ready_for_review', 0)} "
+                    f"draft={qc.get('draft', 0)} blocked={qc.get('blocked', 0)})"
+                )
+                print(f"[distill-skills] report: {summary.get('report_path')}")
+                print(f"[distill-skills] output: {summary.get('output_dir')}")
+            return 0
         if args.command == "atropos-preflight":
             from hermes_agentic_rl.integrations.atropos_preflight import run_atropos_preflight
 
