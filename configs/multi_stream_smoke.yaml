@@ -1,0 +1,48 @@
+# P0-3: multi-stream unified training (CPU smoke, no model download).
+# A single GRPO loop trains on two interleaved task streams (echo + letter
+# counting) drawn from a weighted, adaptively-reweighted mixture. Per-stream
+# weights/counts/means surface each iter under record["env_snapshot"].
+
+algo: grpo
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  max_len: 256
+  device: cpu
+  dtype: float32
+  seed: 0
+
+environment:
+  type: multi_stream
+  window: 8
+  adapt_lr: 0.1
+  min_weight: 0.05
+  target_reward: 0.5
+  seed: 0
+  streams:
+    - type: echo
+      weight: 1.0
+    - type: letter_counting
+      weight: 2.0
+      max_level: 2
+      dataset_seed: 42
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 4
+  group_size: 4
+  prompts_per_iter: 2
+  lr: 5e-3
+  max_new_tokens: 12
+  temperature: 1.0
+  kl_coef: 0.02
+  seed: 7
+  log_every: 1
+
+dashboard:
+  enabled: false

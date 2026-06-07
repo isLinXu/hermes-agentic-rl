@@ -1,0 +1,52 @@
+# Tiny smoke config for the hybrid+OPD closed loop (CPU, no model download).
+# Exercises: next_state reward -> opd_hint -> teacher-logprob fill -> OPD branch.
+
+algo: hybrid
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  max_len: 256
+  device: cpu
+  dtype: float32
+  seed: 0
+
+environment:
+  type: letter_counting
+  dataset_seed: 42
+  max_level: 2
+
+reward:
+  components:
+    - type: letter_counting_next_state
+      weight: 1.0
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 3
+  group_size: 4
+  prompts_per_iter: 1
+  lr: 5e-3
+  max_new_tokens: 12
+  temperature: 1.0
+  use_reference: true
+  kl_coef: 0.02
+  seed: 7
+  log_every: 100
+  w_rl: 1.0
+  w_opd: 1.0
+
+opd:
+  teacher_fill: true
+  kl_coef: 0.02
+  adv_diff_clip: 1.0
+  max_hint_tokens: 32
+  capability_axis_weights:
+    task_success: 1.5
+
+dashboard:
+  enabled: false

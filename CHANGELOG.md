@@ -1,5 +1,94 @@
 # Changelog
 
+## 0.11.0 - 2026-06-07
+
+OPD reliability + process-reward parity with OpenClaw-RL. Closes the "OPD
+silently degrades to GRPO" gap (deep-analysis A2/A3).
+
+- **`rewards/opd_hint_extractor.py::OPDHintExtractor`** (A2, P0). An in-trainer
+  judge that recovers OPD directive hints from the next-state signal for any
+  record lacking one, run *before* the teacher fill. Previously `opd_hint` only
+  existed if a specific env (`letter_counting`) or `NextStatePRMComponent`
+  pre-populated it; in every other config the OPD/Hybrid branch was a no-op and
+  silently degraded to plain GRPO. Now any env/reward that surfaces a next-state
+  signal drives OPD. Supports rule-based, LLM-judge (OpenAI-compatible), and
+  `letter_counting` extractors via the `opd.hint_extractor` YAML block. Adds a
+  de-templating quality filter (rejects "be more helpful"-style low-info hints),
+  per-iter `opd_hint_*` metrics including `opd_hint_effective_rate`, a
+  `max_records` cost guard, and fail-soft judge-error handling. The trainer now
+  propagates `runtime["next_state"]` onto records (`_extract_next_state`) so the
+  extractor has a signal to work with.
+- **`rewards/judge_cache.py::JudgeCache` + `cached_judge`** (A3). Content-
+  addressed, bounded-LRU, thread-safe cache wrapping any sync/async judge so the
+  m-vote PRM and OPD hint extractor stop re-querying identical
+  `(response, next_state)` pairs — the cost prerequisite for affordable LLM
+  judges. Opt-in via `opd.hint_extractor.cache`.
+- **`rewards/process_reward.py::ProcessRewardAggregator`** (A3). Implements
+  OpenClaw-RL's long-horizon objective `final = o + (1/m)·Σ rᵢ`: combines the
+  terminal outcome with the mean majority-voted per-step next-state PRM reward.
+  Reads `runtime["step_next_states"]`, gracefully falls back to the single
+  `next_state`, and resolves the outcome via metadata key or callable.
+- **Config**: `configs/letter_counting_hybrid_opd_extractor.yaml` demonstrates
+  OPD firing through the in-trainer extractor (no bespoke hint plumbing).
+- **Tests**: `tests/test_opd_hint_extractor.py` (extraction, quality filter,
+  fail-soft, async, factory, full trainer closed loop) and
+  `tests/test_process_reward_and_cache.py` (cache hit/miss/LRU, aggregation,
+  fallback, clip).
+
+## 0.10.0 - 2026-06-01
+
+OPD teacher-logprob **closed loop** — the headline algorithmic gap from the
+deep-analysis report is now closed (OpenClaw-RL §3.2). Also aligns
+`pyproject.toml` version (was a stale `0.6.0.dev0`).
+
+- **`rewards/opd_teacher.py::TeacherLogprobFiller`** (P0). Re-scores hinted
+  records under a hint-enhanced context (`prompt + [HINT_START]{hint}[HINT_END]`)
+  using the current policy as a self-distillation teacher, under
+  `torch.no_grad()` and re-using the rollout `response_ids` for token
+  alignment, then writes `metadata["teacher_logprobs"]`. Previously
+  `next_state_prm.py` only wrote an empty placeholder, so the OPD branch was a
+  no-op on real data and `HybridAlgo` silently degraded to plain GRPO.
+- **Capability-axis-aware OPD weighting** (hermes extension beyond OpenClaw-RL's
+  single global `w_opd`). The filler classifies each hint into a capability
+  axis and stamps a per-record `opd_adv_scale`; `OPDAlgo` multiplies the
+  token-level directive advantage by it and reports `opd_adv_scale_mean`.
+- **Trainer wiring.** `OnPolicyTrainer` gains `opd_teacher_fill` /
+  `opd_hint_template` / `opd_teacher_max_hint_tokens` /
+  `opd_capability_axis_weights` config, instantiates the filler, runs it each
+  iter after reward normalisation, propagates `opd_hint` into record metadata,
+  and fan-outs `opd_teacher_*` metrics.
+- **`hybrid` algo wired into `train-rl` CLI** via `HybridTrainer` /
+  `HybridTrainerConfig` and an `opd:` YAML block. `algo: hybrid` is now a
+  first-class CLI option alongside `grpo` / `ppo`.
+- **`letter_counting_next_state` reward** derives a corrective next-state +
+  directive hint from the verifiable ground truth, making the full OPD loop
+  runnable end-to-end. Ships A/B configs
+  (`letter_counting_hybrid_opd.yaml` vs `letter_counting_grpo_baseline.yaml`)
+  and a CPU smoke config.
+- **Pipelined (double-buffered) rollout/update** (P0-2, step 1). Opt-in
+  `pipeline_rollouts` (requires a rollout pool): iteration N+1's rollouts are
+  dispatched — and their weight snapshot broadcast — *before* iteration N's
+  gradient update, so rollout overlaps the update (tolerates 1-step policy
+  staleness; PPO/GRPO ratio clipping absorbs the lag). `OnPolicyTrainer._one_iter`
+  is split into `_collect_for_iter` + `_update_on_records`, and
+  `_collect_distributed` into `_dispatch_distributed` + `_drain_distributed`.
+  Emits `rollout_staleness` (0 for BSP, ~1 in steady-state pipelined mode) and
+  `policy_version` (completed-update count) per iter for observability.
+- **Multi-stream unified training** (P0-3). New `MixedCurriculumEnv` keeps all
+  task streams live and draws each item from a *weighted, adaptively-reweighted*
+  mixture (difficulty-prioritised: struggling streams gain sampling weight,
+  floored at `min_weight`), so heterogeneous task types train in a single
+  optimizer step instead of separate phases. `CurriculumEnv.observe` now accepts
+  a `level=` kwarg; the trainer's new `_observe_env_reward` helper forwards the
+  per-item stream tag so reward is attributed to the right stream. Reachable via
+  the CLI `environment.type: multi_stream` (per-stream reward routing by
+  `_curriculum_level`); per-stream weights/counts/means surface under
+  `env_snapshot`. Ships `configs/multi_stream_smoke.yaml`. Rollout records are
+  tagged with `stream_level` and `_summarize_batch_metadata` emits per-stream
+  `stream/{i}/{count,share,mean_reward,reward_std}` (plus `n_streams`) into the
+  flattened metrics record, so per-stream performance is visible alongside the
+  env snapshot.
+
 ## 0.9.2 - 2026-05-28
 
 Performance optimizations on top of 0.9.1 — backwards compatible.

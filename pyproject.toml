@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-agentic-rl"
-version = "0.6.0.dev0"
+version = "0.10.0"
 description = "Agentic RL framework for hermes-agent (GRPO + PPO + multi-turn + curriculum + dashboard + resumable checkpoints + K3 KL + pluggable metrics)"
 readme = "README.md"
 requires-python = ">=3.11"

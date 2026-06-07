@@ -1,0 +1,70 @@
+# Hybrid (GRPO + OPD) on letter_counting — OpenClaw-RL §3.3 closed loop.
+#
+# This is the A/B *candidate*. Pair it with letter_counting_grpo_baseline.yaml
+# (identical env/backend, algo: grpo) and compare on a held-out set via
+# `eval-rl` / `eval-gate`. The directive (OPD) signal comes from the verifiable
+# next-state: a wrong answer yields a corrective hint, the teacher-logprob
+# filler distils the policy toward it.
+
+algo: hybrid
+
+backend:
+  name: hf
+  model_name_or_path: gpt2
+  device: mps
+  dtype: float32
+  with_value_head: false
+
+environment:
+  type: letter_counting
+  dataset_seed: 42
+  max_level: 10
+
+# Replace the default scalar reward with the next-state PRM reward so every
+# wrong answer emits an `opd_hint`. This is what feeds the OPD branch.
+reward:
+  components:
+    - type: letter_counting_next_state
+      weight: 1.0
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 100
+  group_size: 6
+  prompts_per_iter: 2
+  lr: 5e-5
+  max_new_tokens: 128
+  temperature: 0.8
+  use_reference: true
+  kl_coef: 0.04
+  clip_eps: 0.2
+  clip_eps_high: 0.28
+  advantage_norm: group
+  loss_agg: mean_token
+  grad_clip: 1.0
+  seed: 42
+  log_every: 1
+  save_every: 50
+  # Hybrid weights: w_rl scales the evaluative (GRPO) branch, w_opd the
+  # directive (OPD) branch.
+  w_rl: 1.0
+  w_opd: 1.0
+
+# OPD branch + teacher-logprob closed loop.
+opd:
+  teacher_fill: true
+  kl_coef: 0.02
+  clip_eps: 0.2
+  clip_eps_high: 0.28
+  adv_diff_clip: 1.0
+  max_hint_tokens: 64
+  # Capability-axis-aware OPD weighting (hermes extension over OpenClaw-RL's
+  # single global w_opd). Emphasise the directive signal on chosen axes.
+  capability_axis_weights:
+    task_success: 1.5
+    tool_use_reliability: 1.0
+
+dashboard:
+  enabled: false

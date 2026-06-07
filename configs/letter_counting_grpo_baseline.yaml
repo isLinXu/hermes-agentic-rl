@@ -1,0 +1,48 @@
+# GRPO baseline on letter_counting — A/B *baseline* for the hybrid+OPD
+# candidate (letter_counting_hybrid_opd.yaml). Identical env/backend so the
+# only difference under test is the OPD directive signal.
+
+algo: grpo
+
+backend:
+  name: hf
+  model_name_or_path: gpt2
+  device: mps
+  dtype: float32
+  with_value_head: false
+
+environment:
+  type: letter_counting
+  dataset_seed: 42
+  max_level: 10
+
+# Same next-state reward so the scalar evaluative signal is identical; only the
+# OPD branch (absent here) differs from the hybrid candidate.
+reward:
+  components:
+    - type: letter_counting_next_state
+      weight: 1.0
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 100
+  group_size: 6
+  prompts_per_iter: 2
+  lr: 5e-5
+  max_new_tokens: 128
+  temperature: 0.8
+  use_reference: true
+  kl_coef: 0.04
+  clip_eps: 0.2
+  clip_eps_high: 0.28
+  advantage_norm: group
+  loss_agg: mean_token
+  grad_clip: 1.0
+  seed: 42
+  log_every: 1
+  save_every: 50
+
+dashboard:
+  enabled: false

@@ -1,0 +1,80 @@
+# Hybrid (GRPO + OPD) with IN-TRAINER hint extraction (A2).
+#
+# Unlike letter_counting_hybrid_opd.yaml — which relies on the
+# `letter_counting_next_state` reward to PRE-EXTRACT an `opd_hint` — this
+# config shows the OPD branch firing even when the reward only emits a raw
+# next-state signal. The in-trainer `opd.hint_extractor` recovers the directive
+# hint from that signal, and the teacher-logprob filler distils toward it.
+#
+# This closes the "OPD silently degrades to GRPO" gap: any env/reward that
+# surfaces a next-state signal can now drive OPD without bespoke hint plumbing.
+
+algo: hybrid
+
+backend:
+  name: hf
+  model_name_or_path: gpt2
+  device: mps
+  dtype: float32
+  with_value_head: false
+
+environment:
+  type: letter_counting
+  dataset_seed: 42
+  max_level: 10
+
+# The next-state PRM still scores correctness (evaluative signal) and writes a
+# next-state signal, but we let the IN-TRAINER extractor produce the hint.
+reward:
+  components:
+    - type: letter_counting_next_state
+      weight: 1.0
+
+agent_loop:
+  type: policy
+
+train_rl:
+  n_iters: 100
+  group_size: 6
+  prompts_per_iter: 2
+  lr: 5e-5
+  max_new_tokens: 128
+  temperature: 1.0          # 1.0 lets the Hybrid shared-forward cache feed OPD
+  use_reference: true
+  kl_coef: 0.04
+  clip_eps: 0.2
+  clip_eps_high: 0.28
+  advantage_norm: group
+  loss_agg: mean_token
+  grad_clip: 1.0
+  seed: 42
+  log_every: 1
+  save_every: 50
+  w_rl: 1.0
+  w_opd: 1.0
+
+opd:
+  teacher_fill: true
+  kl_coef: 0.02
+  clip_eps: 0.2
+  clip_eps_high: 0.28
+  adv_diff_clip: 1.0
+  max_hint_tokens: 64
+  capability_axis_weights:
+    task_success: 1.5
+    tool_use_reliability: 1.0
+  # --- A2: in-trainer hint extraction ---
+  # Recover an OPD hint from the next-state signal for any record lacking one.
+  #   type: rule         → deterministic, zero-cost (letter_counting feedback)
+  #   type: llm_judge    → OpenAI-compatible judge (set model/base_url/api_key_env)
+  hint_extractor:
+    type: rule
+    min_hint_chars: 10
+    select: longest        # OpenClaw-RL strategy; or `axis_aware` (hermes ext)
+    reject_low_info: true
+    overwrite_existing: false
+    # cache:               # uncomment for LLM judges to dedupe identical pairs
+    #   max_entries: 8192
+
+dashboard:
+  enabled: false
