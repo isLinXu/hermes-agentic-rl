@@ -233,6 +233,12 @@ class OPDAlgo(BaseAlgo):
                 "n_with_hints": len(with_hints),
                 "n_without_hints": len(without_hints),
                 "shared_logprobs_cache_hit": 1.0 if cache_hit_opd else 0.0,
+                "opd_adv_scale_mean": (
+                    sum(float(r.metadata.get("opd_adv_scale", 1.0)) for r in with_hints)
+                    / len(with_hints)
+                    if with_hints
+                    else 1.0
+                ),
             },
         )
         return total_loss, stats
@@ -304,6 +310,18 @@ class OPDAlgo(BaseAlgo):
         # OPD token-level advantage: A_t = clip(log π_T - log π_old, ±adv_diff_clip)
         raw_adv = teacher_logp - old_logp
         adv = raw_adv.clamp(-cfg.adv_diff_clip, cfg.adv_diff_clip)
+
+        # Capability-axis-aware OPD weighting (hermes extension beyond
+        # OpenClaw-RL's single global w_opd). ``TeacherLogprobFiller`` may
+        # stamp a per-record ``opd_adv_scale`` derived from the hint's target
+        # capability axis; emphasise the directive signal on the axes a run
+        # cares about. Absent the key the scale is a no-op (1.0).
+        adv_scale = torch.tensor(
+            [float(r.metadata.get("opd_adv_scale", 1.0)) for r in records],
+            dtype=dtype, device=device,
+        ).unsqueeze(1)
+        if not torch.allclose(adv_scale, torch.ones_like(adv_scale)):
+            adv = adv * adv_scale
 
         # PPO-style clipped surrogate with asymmetric clip (OpenClaw-RL §3.1)
         log_ratio = new_logp - old_logp

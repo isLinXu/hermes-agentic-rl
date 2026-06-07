@@ -37,7 +37,10 @@ from hermes_agentic_rl.algos.base import (
     RolloutBatch,
     RolloutRecord,
 )
-from hermes_agentic_rl.algos.common.advantage import group_normalize_advantage
+from hermes_agentic_rl.algos.common.advantage import (
+    dapo_group_advantage,
+    group_normalize_advantage,
+)
 from hermes_agentic_rl.algos.common.loss import (
     clipped_surrogate_loss_batched,
 )
@@ -59,7 +62,7 @@ class GRPOConfig:
     advantage_eps: float = 1e-6
     loss_agg: Literal["mean_token", "sum_token", "dr_grpo"] = "mean_token"
     max_len_for_dr_grpo: int = 256
-    advantage_norm: Literal["group", "batch", "whiten"] = "group"
+    advantage_norm: Literal["group", "batch", "whiten", "dapo"] = "group"
     per_token_advantage: bool = False
     answer_start_token_id: int | None = None
     reinforce_gamma: float = 0.95
@@ -68,9 +71,32 @@ class GRPOConfig:
     # signal is comparable across branches in HybridAlgo and feeds a single,
     # coherent AdaptiveKLController.
     kl_estimator: Literal["k1", "k2", "k3"] = "k3"
+    # --- Off-policy correction (async / stale-rollout training) ---
+    # When > 0, apply Truncated Importance Sampling to the advantage so stale
+    # rollouts (sampled under an older policy version) are bias-corrected. 0.0
+    # disables it, making the synchronous/BSP path a strict no-op. The IS weight
+    # is min(exp(logπ_new − logπ_behavior), tis_rho_clip), evaluated per token.
+    tis_rho_clip: float = 0.0
 
 
 class GRPO(BaseAlgo):
+    """Group Relative Policy Optimization (DeepSeek-Math / DeepSeek-R1).
+
+    Key differences from PPO:
+      - No value/critic head. Advantage is computed per-group.
+      - Supports batch-normalized or whitened advantage.
+      - Optional per-token advantage via REINFORCE++.
+      - Configurable off-policy correction (TIS/V-trace) via ``tis`` config.
+
+    Usage::
+
+        from hermes_agentic_rl.algos.grpo import GRPO, GRPOConfig
+
+        cfg = GRPOConfig(clip_eps=0.2, kl_coef=0.02, entropy_coef=0.01)
+        grpo = GRPO(cfg)
+        loss, stats = grpo.compute_loss(policy, ref_policy, batch)
+    """
+
     def __init__(self, cfg: GRPOConfig | None = None) -> None:
         self.cfg = cfg or GRPOConfig()
 
@@ -80,9 +106,20 @@ class GRPO(BaseAlgo):
         ref_policy: LLMBackend | None,
         batch: RolloutBatch,
     ) -> tuple[torch.Tensor, AlgoUpdateStats]:
+        """Compute the GRPO loss and return stats.
+
+        Args:
+            policy: The current policy (LLM backend).
+            ref_policy: Optional reference policy for KL regularization. If
+                None, no KL penalty is applied.
+            batch: A batch of rollout records.
+
+        Returns:
+            A tuple of (loss_tensor, stats).
+        """
         cfg = self.cfg
 
-        # 1) Build scalar or per-token advantage for each record.
+        # 1) Scalar or per-token advantage for each record.
         all_records = batch.records
         group_norm_batch_fallback = 0.0
         if not all_records:
@@ -149,6 +186,21 @@ class GRPO(BaseAlgo):
             records_with_adv = [
                 (rec, [a]) for rec, a in zip(all_records, scalar_advs, strict=False)
             ]
+        elif cfg.advantage_norm == "dapo":
+            # DAPO: z-score when informative, discard group when all rewards equal.
+            records_with_adv = []
+            grouped = batch.by_group()
+            for _gid, recs in grouped.items():
+                rewards_g = [r.reward for r in recs]
+                advs = dapo_group_advantage(rewards_g, eps=cfg.advantage_eps)
+                if advs is None:
+                    # Group has zero variance → skip entirely (DAPO filter).
+                    continue
+                for rec, adv in zip(recs, advs, strict=False):
+                    records_with_adv.append((rec, [adv]))
+            # Preserve original order
+            order = {id(r): i for i, r in enumerate(all_records)}
+            records_with_adv.sort(key=lambda p: order[id(p[0])])
         else:
             raise ValueError(f"Unknown advantage_norm: {cfg.advantage_norm}")
 
@@ -171,10 +223,8 @@ class GRPO(BaseAlgo):
             zero = new_logp.new_zeros(())
             return zero, AlgoUpdateStats(
                 loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=float(sum(r.reward for r in all_records) / max(1, len(all_records))),
-                mean_advantage=0.0, clip_frac=0.0,
-                n_records=len(all_records),
-                extra={"algo": "grpo", "n_updated": 0, "approx_kl": 0.0},
+                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
+                n_records=0, extra={"algo": "grpo", "n_updated": 0, "approx_kl": 0.0},
             )
 
         device = new_logp.device
@@ -209,6 +259,24 @@ class GRPO(BaseAlgo):
                 dtype=dtype, device=device,
             )  # [B]
             adv_tensor = scalars.unsqueeze(-1) * mask.to(dtype)  # [B, T_max]
+
+        # 5b) Off-policy correction (TIS) for stale rollouts. No-op when
+        #     tis_rho_clip <= 0 (synchronous/BSP). Multiplies the advantage by
+        #     a per-token clipped importance weight min(π_new/π_behavior, c̄).
+        tis_stats: dict[str, float] = {}
+        if cfg.tis_rho_clip > 0:
+            from hermes_agentic_rl.algos.common.vtrace import (
+                TISConfig,
+                tis_corrected_advantage,
+            )
+
+            adv_tensor, tis_stats = tis_corrected_advantage(
+                adv_tensor,
+                new_logp,
+                old_logp,
+                mask,
+                TISConfig(rho_clip=cfg.tis_rho_clip, enabled=True),
+            )
 
         # 6) Batched clipped surrogate.
         pol_loss, loss_stats = clipped_surrogate_loss_batched(
@@ -278,9 +346,33 @@ class GRPO(BaseAlgo):
                 "n_tokens": loss_stats["n_tokens"],
                 "score_temperature": float(score_temperature),
                 "group_norm_batch_fallback": float(group_norm_batch_fallback),
+                **tis_stats,
             },
         )
         return total, stats
+
+    def _expand_per_token(
+        self,
+        records_with_adv: list[tuple[RolloutRecord, list[float]]],
+    ) -> list[tuple[RolloutRecord, list[float]]]:
+        """Expand scalar advantages into per-token advantages via REINFORCE++."""
+        cfg = self.cfg
+        expanded: list[tuple[RolloutRecord, list[float]]] = []
+        for rec, adv_list in records_with_adv:
+            if len(rec.response_ids) == 0 or len(adv_list) == 0:
+                expanded.append((rec, adv_list))
+                continue
+            reward = adv_list[0]
+            per_tok = reinforce_plusplus_advantage(
+                response_ids=rec.response_ids,
+                old_logprobs=rec.old_logprobs,
+                reward=reward,
+                answer_start_id=cfg.answer_start_token_id,
+                gamma=cfg.reinforce_gamma,
+                eps=cfg.advantage_eps,
+            )
+            expanded.append((rec, per_tok))
+        return expanded
 
     def _expand_per_token(
         self,

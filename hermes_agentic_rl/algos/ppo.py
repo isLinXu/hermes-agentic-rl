@@ -44,6 +44,7 @@ from hermes_agentic_rl.backends.base import LLMBackend
 @dataclass(slots=True)
 class PPOConfig:
     clip_eps: float = 0.2
+    clip_eps_high: float = 0.28
     vf_coef: float = 0.5
     vf_clip_eps: float = 0.2
     entropy_coef: float = 0.0
@@ -178,6 +179,7 @@ class PPO(BaseAlgo):
         pol_loss, pol_stats = clipped_surrogate_loss_batched(
             new_logp, old_logp, advs, mask,
             clip_eps=cfg.clip_eps,
+            clip_eps_high=cfg.clip_eps_high,
             loss_agg=cfg.loss_agg,
             max_len_for_dr_grpo=cfg.max_len_for_dr_grpo,
         )

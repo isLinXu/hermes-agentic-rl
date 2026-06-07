@@ -58,7 +58,10 @@ def clipped_surrogate_loss_batched(
     tokens_per_row = mf.sum(dim=-1).clamp(min=1)
 
     eps_high = clip_eps if clip_eps_high is None else clip_eps_high
-    ratio = torch.exp(new_logprobs - old_logprobs)
+    # Mixed-precision: cast old_logprobs to new_logprobs' dtype so the loss
+    # stays in the lower precision (bfloat16 when AMP is active).
+    old_lp = old_logprobs.to(dtype=new_logprobs.dtype)
+    ratio = torch.exp(new_logprobs - old_lp)
     surr1 = ratio * adv
     surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + eps_high) * adv
     loss_per_tok = -torch.minimum(surr1, surr2) * mf

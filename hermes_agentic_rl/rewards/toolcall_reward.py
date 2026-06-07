@@ -5,6 +5,11 @@ from typing import Any
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
 from hermes_agentic_rl.rewards.base import BaseReward
 
+# Default weight blend for the three tool-call quality axes.
+_DEFAULT_NAME_WEIGHT = 0.4
+_DEFAULT_SCHEMA_WEIGHT = 0.3
+_DEFAULT_VALUE_WEIGHT = 0.3
+
 
 def _extract_tool_name(call: dict[str, Any]) -> str | None:
     name = call.get("name")
@@ -21,10 +26,38 @@ def _extract_tool_name(call: dict[str, Any]) -> str | None:
 
 
 class ToolcallReward(BaseReward):
+    """Reward based on tool-call quality across three axes.
+
+    Axes:
+      - **name**: whether the tool call has a valid name.
+      - **schema**: whether the tool call follows expected schema.
+      - **value**: whether the tool call arguments are sensible.
+
+    The three weights are normalised to sum to 1. If all weights are zero,
+    the default blend (0.4 / 0.3 / 0.3) is used as a fallback.
+    """
+
     name = "toolcall_reward"
 
-    def __init__(self, weight: float = 1.0) -> None:
+    def __init__(
+        self,
+        weight: float = 1.0,
+        *,
+        name_weight: float = _DEFAULT_NAME_WEIGHT,
+        schema_weight: float = _DEFAULT_SCHEMA_WEIGHT,
+        value_weight: float = _DEFAULT_VALUE_WEIGHT,
+    ) -> None:
         self.weight = weight
+        total = name_weight + schema_weight + value_weight
+        if total <= 0:
+            # All-zero fallback → use defaults.
+            self.name_weight = _DEFAULT_NAME_WEIGHT
+            self.schema_weight = _DEFAULT_SCHEMA_WEIGHT
+            self.value_weight = _DEFAULT_VALUE_WEIGHT
+        else:
+            self.name_weight = name_weight / total
+            self.schema_weight = schema_weight / total
+            self.value_weight = value_weight / total
 
     async def evaluate(
         self,

@@ -254,9 +254,11 @@ class NextStatePRMComponent:
             runtime.setdefault("rl", {})
             if isinstance(runtime["rl"], dict):
                 runtime["rl"]["opd_hint"] = hint
-                # teacher_logprobs will be filled later by the teacher model
-                # query; initialize as empty list so OPD branch can detect
-                # that a hint is available.
+                # teacher_logprobs are filled later by
+                # ``rewards.opd_teacher.TeacherLogprobFiller`` in the trainer
+                # (it re-scores the response under a hint-enhanced context).
+                # The empty placeholder lets downstream consumers detect that a
+                # hint is available before the teacher pass runs.
                 runtime["rl"].setdefault("teacher_logprobs", [])
 
         vote_label = VOTE_LABELS.get(score, "NEUTRAL")
