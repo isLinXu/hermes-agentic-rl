@@ -1,4 +1,5 @@
 from hermes_agentic_rl.monitor.dashboard import LiveDashboard, make_metrics_sink
+from hermes_agentic_rl.monitor.observable import UnifiedObservable
 from hermes_agentic_rl.monitor.writers import (
     JsonlMetricsWriter,
     MetricsWriter,
@@ -16,6 +17,7 @@ __all__ = [
     "MultiMetricsWriter",
     "StdoutMetricsWriter",
     "TensorBoardMetricsWriter",
+    "UnifiedObservable",
     "WandbMetricsWriter",
     "build_writer_from_config",
     "make_metrics_sink",

@@ -5,6 +5,50 @@ from typing import Any
 from hermes_agentic_rl.core.types import RolloutStep, Trajectory
 
 
+def _extract_assistant_messages_by_turn(
+    messages: list[dict[str, Any]],
+    *,
+    turn_count: int,
+) -> list[str | None]:
+    """Extract assistant message content for each turn.
+
+    If a message has an explicit ``turn_index`` key, use that for routing.
+    Otherwise, assign assistant messages to turns in positional order (skipping
+    non-assistant messages).
+
+    Returns a list of length *turn_count* where each element is the assistant
+    content string for that turn, or ``None`` if no assistant message was found
+    for that turn or the content is not a string.
+    """
+    result: list[str | None] = [None] * turn_count
+
+    # First pass: messages with explicit turn_index take priority.
+    positional_queue: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        ti = msg.get("turn_index")
+        if isinstance(ti, int) and 0 <= ti < turn_count:
+            content = msg.get("content")
+            result[ti] = content if isinstance(content, str) else None
+        else:
+            positional_queue.append(msg)
+
+    # Second pass: fill remaining None slots from positional assistant messages.
+    pos_idx = 0
+    for i in range(turn_count):
+        if result[i] is not None:
+            continue
+        while pos_idx < len(positional_queue):
+            content = positional_queue[pos_idx].get("content")
+            pos_idx += 1
+            if isinstance(content, str):
+                result[i] = content
+                break
+
+    return result
+
+
 class RolloutManager:
     def __init__(self, agent_loop: Any) -> None:
         self.agent_loop = agent_loop
