@@ -35,7 +35,7 @@ dev = [
     "pytest-cov>=6.0",
     "pytest-asyncio>=0.24",
     "coverage[toml]>=7.4",
-    "ruff==0.6.9",
+    "ruff>=0.15,<1",
     "mypy==1.11.2",
     "types-PyYAML>=6.0.12",
     "pre-commit>=3.7",
@@ -129,17 +129,13 @@ select = [
     "RUF",  # ruff-specific
 ]
 ignore = [
-    "E501",   # line too long (already enforced by formatter)
     "B008",   # function-call-in-default-argument (clashes with dataclass field())
     "SIM108", # allow explicit if/else instead of ternary where clearer
-    "B904",   # raise-without-from-inside-except (legacy tolerated)
-    "B023",   # function-uses-loop-variable (intentional closures in trainers)
     "B007",   # unused loop control variable
     "SIM105", # contextlib.suppress vs try/except pass (both fine)
     "RUF002", # full-width unicode in docstrings (Chinese comments are fine)
     "RUF003", # full-width unicode in comments (Chinese comments are fine)
     "RUF005", # `[*x, y]` vs `x + [y]` (style)
-    "UP038",  # `isinstance(x, X | Y)` — keep 3.10+ `(X, Y)` form for compat
     "SIM118", # `k in d.keys()` (explicit form OK)
     "SIM102", # nested if (clearer in some spots)
     "E741",   # ambiguous names (legacy `l` / `I` in a few tests)
@@ -160,6 +156,7 @@ quote-style = "double"
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+warn_unused_configs = true
 warn_unused_ignores = false
 warn_redundant_casts = true
 check_untyped_defs = true
@@ -167,6 +164,7 @@ check_untyped_defs = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 no_implicit_optional = true
+no_implicit_reexport = true
 strict_equality = true
 files = ["hermes_agentic_rl"]
 exclude = [
@@ -187,3 +185,12 @@ module = [
     "torch.utils.tensorboard.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "hermes_agentic_rl.collectors.replay_quality",
+    "hermes_agentic_rl.rewards.toolcall_reward",
+    "hermes_agentic_rl.rewards.next_turn_feedback",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

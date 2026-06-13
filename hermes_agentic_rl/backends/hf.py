@@ -24,6 +24,7 @@ from typing import Any, cast
 try:
     import torch
     from torch import nn
+
     _HAS_TORCH = True
 except Exception:  # pragma: no cover
     _HAS_TORCH = False
@@ -60,9 +61,7 @@ class _HFTokenizerAdapter:
             else (hf_tok.eos_token_id if hf_tok.eos_token_id is not None else 0)
         )
         self.eos_id = int(hf_tok.eos_token_id) if hf_tok.eos_token_id is not None else self.pad_id
-        self.bos_id = int(
-            hf_tok.bos_token_id if hf_tok.bos_token_id is not None else self.pad_id
-        )
+        self.bos_id = int(hf_tok.bos_token_id if hf_tok.bos_token_id is not None else self.pad_id)
 
     def encode(self, text: str, add_eos: bool = False) -> list[int]:
         ids = list(self._tok.encode(text, add_special_tokens=False))
@@ -101,8 +100,7 @@ class HFCausalLMBackend(LLMBackend):
             from transformers import AutoModelForCausalLM, AutoTokenizer
         except Exception as exc:  # pragma: no cover — exercised only when transformers absent
             raise BackendUnavailableError(
-                "HFCausalLMBackend requires `transformers`. "
-                "Install with: pip install -e '.[hf]'"
+                "HFCausalLMBackend requires `transformers`. Install with: pip install -e '.[hf]'"
             ) from exc
 
         self.cfg = cfg or HFBackendConfig()
@@ -123,6 +121,8 @@ class HFCausalLMBackend(LLMBackend):
             trust_remote_code=self.cfg.trust_remote_code,
             **extra_kw,
         ).to(self.cfg.device)
+        self._gradient_checkpointing_enabled = False
+        self._gradient_checkpointing_prev_use_cache: Any = None
 
         self.value_head: nn.Module | None = None
         if self.cfg.with_value_head:
@@ -139,6 +139,49 @@ class HFCausalLMBackend(LLMBackend):
 
     def _to_tensor(self, ids: list[int]) -> torch.Tensor:
         return torch.tensor(ids, dtype=torch.long, device=self.cfg.device)
+
+    def set_gradient_checkpointing(self, enabled: bool) -> bool:
+        """Toggle HF activation checkpointing and preserve ``use_cache``.
+
+        Transformers models generally require ``config.use_cache=False`` while
+        gradient checkpointing is enabled. Generation/rollout is faster and
+        safer with the original cache setting, so the trainer toggles this
+        around the update path.
+        """
+        if not hasattr(self.model, "gradient_checkpointing_enable"):
+            return False
+
+        config = getattr(self.model, "config", None)
+        if enabled:
+            if self._gradient_checkpointing_enabled:
+                return True
+            if config is not None and hasattr(config, "use_cache"):
+                self._gradient_checkpointing_prev_use_cache = bool(config.use_cache)
+                config.use_cache = False
+            self.model.gradient_checkpointing_enable()
+            enable_inputs = getattr(self.model, "enable_input_require_grads", None)
+            if callable(enable_inputs):
+                try:
+                    enable_inputs()
+                except Exception:
+                    pass
+            self._gradient_checkpointing_enabled = True
+            return True
+
+        if not self._gradient_checkpointing_enabled:
+            return True
+        disable = getattr(self.model, "gradient_checkpointing_disable", None)
+        if callable(disable):
+            disable()
+        if (
+            config is not None
+            and hasattr(config, "use_cache")
+            and self._gradient_checkpointing_prev_use_cache is not None
+        ):
+            config.use_cache = bool(self._gradient_checkpointing_prev_use_cache)
+        self._gradient_checkpointing_prev_use_cache = None
+        self._gradient_checkpointing_enabled = False
+        return True
 
     # ---- LLMBackend API ----
 

@@ -1,7 +1,11 @@
-.PHONY: help install install-dev test test-fast lint format typecheck ci clean docker docker-test smoke
+.PHONY: help install install-dev test test-fast lint format typecheck typecheck-strict audit ci clean docker docker-test smoke
 
 PYTHON ?= python
 IMG ?= hermes-agentic-rl:0.6
+STRICT_MYPY_TARGETS := \
+	hermes_agentic_rl/collectors/replay_quality.py \
+	hermes_agentic_rl/rewards/toolcall_reward.py \
+	hermes_agentic_rl/rewards/next_turn_feedback.py
 
 help:
 	@echo "Common targets:"
@@ -12,7 +16,9 @@ help:
 	@echo "  make lint          - ruff check + ruff format --check"
 	@echo "  make format        - ruff check --fix + ruff format"
 	@echo "  make typecheck     - mypy (non-blocking in CI)"
-	@echo "  make ci            - lint + typecheck + test"
+	@echo "  make typecheck-strict - strict mypy for hardened core modules"
+	@echo "  make audit         - pip-audit against requirements-lock.txt"
+	@echo "  make ci            - lint + strict typecheck + test"
 	@echo "  make smoke         - end-to-end smoke: echo GRPO on tiny backend"
 	@echo "  make docker        - build Docker image ($(IMG))"
 	@echo "  make docker-test   - run tests inside the Docker image"
@@ -42,7 +48,13 @@ format:
 typecheck:
 	$(PYTHON) -m mypy hermes_agentic_rl || true
 
-ci: lint typecheck test
+typecheck-strict:
+	$(PYTHON) -m mypy --config-file=mypy-strict.ini $(STRICT_MYPY_TARGETS)
+
+audit:
+	$(PYTHON) -m pip_audit -r requirements-lock.txt
+
+ci: lint typecheck-strict test
 
 smoke:
 	$(PYTHON) -m hermes_agentic_rl.cli.main train-rl \

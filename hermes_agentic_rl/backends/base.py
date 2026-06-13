@@ -14,26 +14,20 @@ class TokenizerProtocol(Protocol):
     """Minimal tokenizer contract. All backends share this surface."""
 
     @property
-    def vocab_size(self) -> int:
-        ...
+    def vocab_size(self) -> int: ...
 
     @property
-    def pad_id(self) -> int:
-        ...
+    def pad_id(self) -> int: ...
 
     @property
-    def bos_id(self) -> int:
-        ...
+    def bos_id(self) -> int: ...
 
     @property
-    def eos_id(self) -> int:
-        ...
+    def eos_id(self) -> int: ...
 
-    def encode(self, text: str, add_eos: bool = False) -> list[int]:
-        ...
+    def encode(self, text: str, add_eos: bool = False) -> list[int]: ...
 
-    def decode(self, ids: list[int]) -> str:
-        ...
+    def decode(self, ids: list[int]) -> str: ...
 
 
 @dataclass(slots=True)
@@ -123,6 +117,16 @@ class LLMBackend(ABC):
 
     def supports_value_head(self) -> bool:
         """True iff `score_with_value()` is implemented and a critic exists."""
+        return False
+
+    def set_gradient_checkpointing(self, enabled: bool) -> bool:
+        """Best-effort toggle for model gradient checkpointing.
+
+        Backends that support activation checkpointing should override this
+        and return True when the toggle was applied. The default keeps the
+        base protocol backward compatible for small/testing backends.
+        """
+        _ = enabled
         return False
 
     def score_with_value(

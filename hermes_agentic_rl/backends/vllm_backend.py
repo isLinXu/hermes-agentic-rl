@@ -123,17 +123,45 @@ class VLLMRolloutBackend(LLMBackend):
         vllm_tok = self._vllm_llm.get_tokenizer()
         self.tokenizer: TokenizerProtocol = _VLLMTokenizerAdapter(vllm_tok)
 
-        self._sampling_params = SamplingParams(
-            max_tokens=self.cfg.max_new_tokens,
+        self._SamplingParams = SamplingParams
+        # vLLM ≥0.7 renamed max_tokens → max_new_tokens.
+        # Probe which kwarg is accepted so we stay compatible with both versions.
+        try:
+            self._max_tokens_kwarg = "max_new_tokens"
+            SamplingParams(max_new_tokens=4)
+        except TypeError:
+            self._max_tokens_kwarg = "max_tokens"
+
+        self._sampling_params = self._make_sampling_params(
+            max_new_tokens=self.cfg.max_new_tokens,
             temperature=self.cfg.temperature,
-            top_p=self.cfg.top_p,
-            top_k=self.cfg.top_k if self.cfg.top_k > 0 else -1,
-            logprobs=1,  # needed for rollout logprobs
         )
 
     # ------------------------------------------------------------------
     # Generation (the ONLY thing this backend does)
     # ------------------------------------------------------------------
+
+    def _make_sampling_params(
+        self,
+        max_new_tokens: int | None = None,
+        temperature: float | None = None,
+        seed: int | None = None,
+        stop_strings: list[str] | None = None,
+    ) -> Any:
+        """Build SamplingParams, handling vLLM ≥0.7 API rename."""
+        kwargs: dict[str, Any] = {
+            self._max_tokens_kwarg: max_new_tokens or self.cfg.max_new_tokens,
+            "temperature": temperature if temperature is not None else self.cfg.temperature,
+            "top_p": self.cfg.top_p,
+            "logprobs": 1,
+        }
+        if self.cfg.top_k > 0:
+            kwargs["top_k"] = self.cfg.top_k
+        if seed is not None:
+            kwargs["seed"] = seed
+        if stop_strings:
+            kwargs["stop"] = list(stop_strings)
+        return self._SamplingParams(**kwargs)
 
     @torch.no_grad()  # type: ignore[name-defined]
     def generate(
@@ -176,27 +204,28 @@ class VLLMRolloutBackend(LLMBackend):
         """
         # Build per-request SamplingParams if overrides are provided.
         sp_list: list[Any] = []
-        default_sp = self._sampling_params
         for i in range(len(prompt_ids_list)):
-            kwargs: dict[str, Any] = {}
-            if max_new_tokens is not None:
-                kwargs["max_tokens"] = max_new_tokens
-            if temperature is not None:
-                kwargs["temperature"] = temperature
-            if seeds is not None and i < len(seeds) and seeds[i] is not None:
-                kwargs["seed"] = seeds[i]
-            if stop_strings:
-                kwargs["stop"] = list(stop_strings)
-            if kwargs:
-                sp_list.append(type(default_sp)(**{**default_sp.__dict__, **kwargs}))
-            else:
-                sp_list.append(default_sp)
+            seed_i = seeds[i] if seeds is not None and i < len(seeds) else None
+            sp = self._make_sampling_params(
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                seed=seed_i,
+                stop_strings=stop_strings,
+            )
+            sp_list.append(sp)
 
-        # Build prompt texts (vLLM offline API takes strings).
-        prompts = [self.tokenizer.decode(p_ids) for p_ids in prompt_ids_list]
+        # vLLM offline API accepts both token-id lists (TokensPrompt) and strings.
+        # Passing token IDs directly avoids a decode→re-encode roundtrip that
+        # can silently corrupt special tokens on some tokenizers.
+        try:
+            from vllm.inputs import TokensPrompt  # vLLM ≥0.5
+            prompts_input: list[Any] = [TokensPrompt(prompt_token_ids=p_ids) for p_ids in prompt_ids_list]
+        except ImportError:
+            # Pre-0.5 fallback: pass decoded strings (lossy but compatible).
+            prompts_input = [self.tokenizer.decode(p_ids) for p_ids in prompt_ids_list]
 
         # Run generation.
-        request_outputs = self._vllm_llm.generate(prompts, sampling_params=sp_list)
+        request_outputs = self._vllm_llm.generate(prompts_input, sampling_params=sp_list)
 
         # Parse outputs into GenerationOutput.
         outputs: list[GenerationOutput] = []
@@ -204,23 +233,26 @@ class VLLMRolloutBackend(LLMBackend):
             completion = req_out.outputs[0]
             response_ids = list(completion.token_ids)
 
-            # vLLM returns logprobs as dict {token_id: Logprob} per position.
+            # vLLM logprobs format changed across versions:
+            #   <0.5: dict {token_id: Logprob} per position
+            #   ≥0.5: list[Logprob | None] where Logprob.logprob is the sampled-token log-prob
             logprobs: list[float] = []
             if completion.logprobs is not None:
-                for lp_obj in completion.logprobs:
+                for idx, lp_obj in enumerate(completion.logprobs):
                     if lp_obj is None:
                         logprobs.append(0.0)
-                        continue
-                    # lp_obj is a dict {token_id: Logprob}; pick the sampled token.
-                    # vLLM stores Logprob(logprob=..., decoded_token=...)
-                    chosen_id = response_ids[len(logprobs)] if len(logprobs) < len(response_ids) else None
-                    if chosen_id is not None and chosen_id in lp_obj:
-                        logprobs.append(float(lp_obj[chosen_id].logprob))
-                    elif lp_obj:
-                        # fallback: take the first entry (shouldn't happen normally)
-                        logprobs.append(float(next(iter(lp_obj.values())).logprob))
+                    elif isinstance(lp_obj, dict):
+                        # Legacy dict format: {token_id: Logprob}
+                        chosen_id = response_ids[idx] if idx < len(response_ids) else None
+                        if chosen_id is not None and chosen_id in lp_obj:
+                            logprobs.append(float(lp_obj[chosen_id].logprob))
+                        elif lp_obj:
+                            logprobs.append(float(next(iter(lp_obj.values())).logprob))
+                        else:
+                            logprobs.append(0.0)
                     else:
-                        logprobs.append(0.0)
+                        # New scalar Logprob object (vLLM ≥0.5 with logprobs=1)
+                        logprobs.append(float(lp_obj.logprob))
 
             finished = completion.finish_reason == "stop"
             outputs.append(
@@ -257,27 +289,52 @@ class VLLMRolloutBackend(LLMBackend):
             actor_state_dict: state_dict from the HF learner backend's model
                 (or any mapping of parameter names → tensors). Must be on CPU.
         """
+        # vLLM's internal hierarchy has changed across versions:
+        #   <0.6:  llm_engine.model_executor.driver_worker.model_runner.model
+        #   0.6-0.7: same path, but driver_worker may be wrapped
+        #   ≥0.7:  llm_engine.model_executor uses a new executor API;
+        #          ``collective_rpc`` / ``update_weights`` is the stable surface.
         try:
             llm_engine = self._vllm_llm.llm_engine
-            # The driver worker owns the main model copy.
-            driver = llm_engine.model_executor.driver_worker
-            model_runner = driver.model_runner
-            model = model_runner.model
+            executor = llm_engine.model_executor
 
-            # vLLM 0.6+ load_weights API
-            if hasattr(model, "load_weights"):
-                model.load_weights(actor_state_dict.items())
+            # ── Priority 1: apply_model_updates (some vLLM forks / patches) ──
+            # Some vLLM distributions (e.g. SGLang-derived forks) expose a
+            # single ``apply_model_updates(state_dict)`` call that handles
+            # sharding internally.
+            if hasattr(executor, "apply_model_updates"):
+                executor.apply_model_updates(actor_state_dict)
+
+            # ── Priority 2: collective_rpc (vLLM ≥0.7 official API) ─────────
+            # Works across tensor-parallel ranks; ``update_weights`` broadcasts
+            # the new params to all workers.
+            elif hasattr(executor, "collective_rpc"):
+                named_params = list(actor_state_dict.items())
+                executor.collective_rpc("update_weights", args=(named_params,))
+
+            # ── Priority 3: driver_worker (vLLM 0.4–0.6) ─────────────────────
+            elif hasattr(executor, "driver_worker"):
+                driver = executor.driver_worker
+                model_runner = driver.model_runner
+                model = model_runner.model
+                if hasattr(model, "load_weights"):
+                    model.load_weights(actor_state_dict.items())
+                else:
+                    model.load_state_dict(actor_state_dict, strict=False)
+
             else:
-                # Fallback: direct state_dict load (works for most models).
-                model.load_state_dict(actor_state_dict, strict=False)
-
+                raise AttributeError(
+                    "Cannot find a supported weight-sync path on "
+                    f"{type(executor).__name__}. Supported: apply_model_updates, "
+                    "collective_rpc (vLLM ≥0.7), or driver_worker (vLLM 0.4–0.6)."
+                )
         except Exception as exc:
             raise RuntimeError(
-                "vLLM weight sync failed. The engine's internal model structure "
-                "may differ from the learner's state_dict (e.g., tensor parallelism "
-                "reshapes weights). Consider setting tensor_parallel_size=1 or "
-                "using a smaller model for rollout. Original error: "
-                + str(exc)
+                "vLLM weight sync failed. "
+                "This usually means a version mismatch. "
+                "Supported paths: apply_model_updates | collective_rpc (vLLM ≥0.7) | "
+                "driver_worker.model_runner.model (vLLM 0.4–0.6). "
+                "Original error: " + str(exc)
             ) from exc
 
     # ------------------------------------------------------------------
