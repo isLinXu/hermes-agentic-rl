@@ -6,6 +6,7 @@ from hermes_agentic_rl.backends.base import GenerationOutput
 from hermes_agentic_rl.cli.train_rl import (
     _build_backend,
     _build_grpo,
+    _build_hybrid,
     _build_ppo,
     _make_agent_loop_factory,
 )
@@ -120,6 +121,70 @@ def test_build_ppo_forwards_sft_and_batch_generate_knobs() -> None:
     assert tcfg.normalize_reward is True
     assert tcfg.grad_accum_steps == 3
     assert tcfg.amp_dtype == "fp32"
+
+
+def test_build_grpo_forwards_observability_and_replay_knobs(tmp_path) -> None:
+    cfg = {
+        "train_rl": {
+            "log_format": "json",
+            "profile": True,
+            "gradient_checkpointing": True,
+            "replay_mix_ratio": 0.5,
+            "replay_buffer": {
+                "enabled": True,
+                "sampler": "prioritized",
+                "priority_key": "approx_kl",
+            },
+        }
+    }
+
+    tcfg = _build_grpo(cfg, str(tmp_path))
+
+    assert tcfg.log_format == "json"
+    assert tcfg.profile is True
+    assert tcfg.gradient_checkpointing is True
+    assert tcfg.profile_output_path == tmp_path / "profile.jsonl"
+    assert tcfg.replay_mix_ratio == 0.5
+    assert tcfg.replay_buffer == {
+        "enabled": True,
+        "sampler": "prioritized",
+        "priority_key": "approx_kl",
+    }
+
+
+def test_build_hybrid_accepts_top_level_replay_buffer(tmp_path) -> None:
+    cfg = {
+        "train_rl": {
+            "profile": True,
+            "profile_output_path": str(tmp_path / "custom-profile.jsonl"),
+        },
+        "replay_buffer": {
+            "enabled": True,
+            "capacity": 32,
+        },
+    }
+
+    tcfg = _build_hybrid(cfg, None)
+
+    assert tcfg.profile is True
+    assert tcfg.profile_output_path == tmp_path / "custom-profile.jsonl"
+    assert tcfg.replay_buffer == {"enabled": True, "capacity": 32}
+
+
+def test_build_hybrid_forwards_weight_schedules() -> None:
+    cfg = {
+        "train_rl": {
+            "w_rl_schedule": {"mode": "linear", "start": 1.0, "end": 0.5},
+        },
+        "hybrid": {
+            "w_opd_schedule": {"mode": "cosine", "start": 0.0, "end": 1.0},
+        },
+    }
+
+    tcfg = _build_hybrid(cfg, None)
+
+    assert tcfg.w_rl_schedule == {"mode": "linear", "start": 1.0, "end": 0.5}
+    assert tcfg.w_opd_schedule == {"mode": "cosine", "start": 0.0, "end": 1.0}
 
 
 def test_build_tiny_backend_forwards_device_and_dtype() -> None:

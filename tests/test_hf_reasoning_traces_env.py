@@ -133,7 +133,22 @@ def test_load_hermes_reasoning_trace_turns_from_local_dataset_path(tmp_path) -> 
     dataset_path.write_text(
         "\n".join(
             [
-                '{"task_id":"trace-1","category":"browser","subcategory":"search","task":"Find the weather in SF","tools":[{"name":"search"}],"conversations":[{"from":"human","value":"Find the weather in SF."},{"from":"gpt","value":"<tool_call>search(weather sf)</tool_call>"}]}',
+                json.dumps(
+                    {
+                        "task_id": "trace-1",
+                        "category": "browser",
+                        "subcategory": "search",
+                        "task": "Find the weather in SF",
+                        "tools": [{"name": "search"}],
+                        "conversations": [
+                            {"from": "human", "value": "Find the weather in SF."},
+                            {
+                                "from": "gpt",
+                                "value": "<tool_call>search(weather sf)</tool_call>",
+                            },
+                        ],
+                    }
+                ),
             ]
         )
         + "\n",
@@ -477,3 +492,31 @@ def test_hermes_reasoning_trace_reward_gives_partial_structure_credit() -> None:
     assert 0.0 < result.score < 1.0
     assert result.metadata["tool_call_present"] == 1.0
     assert result.metadata["partial_tool_call_score"] > 0.0
+
+
+def test_hermes_reasoning_trace_reward_penalizes_invalid_argument_json() -> None:
+    target = (
+        "<tool_call>"
+        '{"name":"terminal","arguments":{"command":"python clean.py"}}'
+        "</tool_call>"
+    )
+    prediction = (
+        "<tool_call>"
+        '{"name":"terminal","arguments":"{\\"command\\": \\"python clean.py\\""}'
+        "</tool_call>"
+    )
+    item = {
+        "task_id": "trace-invalid-args::assistant::0",
+        "instruction": "Clean the file.\n\nAssistant:",
+        "target_response": target,
+    }
+    reward = HermesReasoningTraceReward(weight=1.0, reward_mode="tool_call")
+
+    result = asyncio.run(
+        reward.evaluate(item, _trajectory_for_output(item, prediction), tool_context=None)
+    )
+
+    assert 0.0 < result.score < 1.0
+    assert result.metadata["tool_call_json_valid"] == 1.0
+    assert result.metadata["argument_json_valid"] == 0.0
+    assert result.metadata["argument_schema_ok"] == 0.0

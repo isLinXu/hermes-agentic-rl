@@ -85,10 +85,10 @@ def test_session_training_pipeline_uses_configured_judge_for_replay_conversion()
     description = framework.session.describe()
 
     assert len(samples) == 1
-    assert train_samples[0].reward == 1.0
-    assert replay_buffer.samples[0].reward == 1.0
+    assert train_samples[0].reward == 0.4
+    assert replay_buffer.samples[0].reward == 0.4
     assert replay_buffer.samples[0].metadata["session_id"] == "sess-1"
-    assert replay_payloads[0]["reward"] == 1.0
+    assert replay_payloads[0]["reward"] == 0.4
     assert description["judge_components"] == ["session_toolcall_reward"]
 
 
@@ -189,4 +189,4 @@ def test_session_training_pipeline_can_submit_to_sidecar(tmp_path: Path):
 
     buffer = ReplayBuffer.load_jsonl(replay_output_path)
     assert len(buffer.samples) == 1
-    assert buffer.samples[0].reward == 1.0
+    assert buffer.samples[0].reward == 0.4

@@ -14,7 +14,7 @@ from hermes_agentic_rl.trainers.replay_buffer import (
 class _FakeRecord:
     """Minimal record with metadata dict (duck-types as RolloutRecord)."""
 
-    __slots__ = ("reward", "metadata")
+    __slots__ = ("metadata", "reward")
 
     def __init__(self, reward: float = 0.0, metadata: dict | None = None) -> None:
         self.reward = reward
@@ -103,6 +103,52 @@ class TestReplayBufferSampling:
         buf = ReplayBuffer(capacity=100)
         assert buf.sample(5) == []
 
+    def test_prioritized_weights_use_configured_metadata_key(self):
+        buf = ReplayBuffer(
+            capacity=100,
+            sampler="prioritized",
+            priority_key="td_error",
+            priority_alpha=1.0,
+            seed=42,
+        )
+        records = [
+            _FakeRecord(0.0, {"td_error": 0.1}),
+            _FakeRecord(0.0, {"td_error": 0.2}),
+            _FakeRecord(0.0, {"td_error": 5.0}),
+        ]
+        buf.push(records, policy_version=0)
+
+        weights, priorities = buf._sampling_weights(records)
+
+        assert priorities == [0.1, 0.2, 5.0]
+        assert weights[2] > weights[1] > weights[0]
+
+    def test_prioritized_sampling_stamps_probability_and_is_weight(self):
+        buf = ReplayBuffer(
+            capacity=100,
+            sampler="prioritized",
+            priority_key="td_error",
+            priority_alpha=1.0,
+            priority_beta=0.5,
+            seed=42,
+        )
+        buf.push(
+            [
+                _FakeRecord(0.0, {"td_error": 0.1}),
+                _FakeRecord(0.0, {"td_error": 2.0}),
+                _FakeRecord(0.0, {"td_error": 3.0}),
+            ],
+            policy_version=0,
+        )
+
+        sampled = buf.sample(2)
+
+        assert len(sampled) == 2
+        for rec in sampled:
+            assert rec.metadata["_replay_priority"] > 0.0
+            assert 0.0 < rec.metadata["_replay_sample_prob"] <= 1.0
+            assert 0.0 < rec.metadata["_replay_is_weight"] <= 1.0
+
 
 # ---------------------------------------------------------------------------
 # mix_with_current
@@ -143,6 +189,19 @@ class TestReplayBufferMixWithCurrent:
             if rec.metadata.get("_replay_sampled"):
                 assert rec.metadata.get("_replay_staleness", 0) >= 0
 
+    def test_current_records_are_not_sampled_in_same_mix(self):
+        buf = ReplayBuffer(capacity=100, recency_alpha=10.0, seed=42)
+        previous = [_FakeRecord(i, {"source": "previous"}) for i in range(3)]
+        current = [_FakeRecord(i, {"source": "current"}) for i in range(8)]
+        buf.push(previous, policy_version=0)
+
+        result = buf.mix_with_current(current, mix_ratio=1.0, policy_version=1)
+
+        replay_records = [rec for rec in result if rec.metadata.get("_replay_sampled")]
+        assert replay_records
+        assert all(rec.metadata["source"] == "previous" for rec in replay_records)
+        assert buf.size == 11
+
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -157,15 +216,37 @@ class TestBuildFromConfig:
         assert build_replay_buffer_from_config({"enabled": False}) is None
 
     def test_enabled_creates_buffer(self):
-        buf = build_replay_buffer_from_config({
-            "enabled": True,
-            "capacity": 512,
-            "recency_alpha": 1.0,
-            "seed": 42,
-        })
+        buf = build_replay_buffer_from_config(
+            {
+                "enabled": True,
+                "capacity": 512,
+                "recency_alpha": 1.0,
+                "seed": 42,
+            }
+        )
         assert isinstance(buf, ReplayBuffer)
         assert buf.capacity == 512
         assert buf.recency_alpha == 1.0
+
+    def test_prioritized_config_creates_prioritized_buffer(self):
+        buf = build_replay_buffer_from_config(
+            {
+                "enabled": True,
+                "sampler": "prioritized",
+                "priority_key": "td_error",
+                "priority_alpha": 0.7,
+                "priority_beta": 0.5,
+                "priority_mode": "rank",
+                "seed": 42,
+            }
+        )
+
+        assert isinstance(buf, ReplayBuffer)
+        assert buf.sampler == "prioritized"
+        assert buf.priority_key == "td_error"
+        assert buf.priority_alpha == 0.7
+        assert buf.priority_beta == 0.5
+        assert buf.priority_mode == "rank"
 
 
 # ---------------------------------------------------------------------------
