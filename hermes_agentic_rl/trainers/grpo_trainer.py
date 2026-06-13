@@ -46,6 +46,7 @@ class GRPOTrainerConfig:
     temperature: float = 1.0
     use_reference: bool = False
     log_every: int = 1
+    log_format: str = "text"
     save_every: int = 0
     output_dir: Path | None = None
     seed: int | None = 0
@@ -53,6 +54,8 @@ class GRPOTrainerConfig:
     multi_turn_credit: dict[str, Any] | None = None
     grad_clip: float = 1.0
     metrics_sink: Callable[[dict[str, Any]], None] | None = None
+    profile: bool = False
+    profile_output_path: Path | None = None
     update_epochs: int = 1
     minibatch_size: int = 0
     shuffle_minibatches: bool = True
@@ -109,6 +112,7 @@ class GRPOTrainerConfig:
     distributed_strategy: str = "none"
     fsdp_cpu_offload: bool = False
     flash_attention: bool = False
+    gradient_checkpointing: bool = False
     async_checkpoint: bool = False
     stability_preset: str = "none"
     token_budget: dict[str, Any] | None = None
@@ -123,6 +127,8 @@ class GRPOTrainerConfig:
     lr_total_steps: int = 0
     lr_end_lr: float = 0.0
     pipeline_rollouts: bool = False
+    replay_buffer: dict[str, Any] | None = None
+    replay_mix_ratio: float = 0.25
 
 
 # v0.2 kept this as a bespoke TrainStats; re-export the shared one for BC.

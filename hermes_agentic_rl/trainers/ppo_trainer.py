@@ -22,9 +22,9 @@ from hermes_agentic_rl.envs.base_env import BaseEnv
 from hermes_agentic_rl.trainers.on_policy import (
     AgentLoopFactory,
     OnPolicyTrainer,
-    OnPolicyTrainerConfig,
     TrainStats,
 )
+from hermes_agentic_rl.trainers.on_policy_config import build_shared_on_policy_config
 
 
 @dataclass(slots=True)
@@ -38,6 +38,7 @@ class PPOTrainerConfig:
     temperature: float = 1.0
     use_reference: bool = False
     log_every: int = 1
+    log_format: str = "text"
     save_every: int = 0
     output_dir: Path | None = None
     seed: int | None = 0
@@ -45,6 +46,8 @@ class PPOTrainerConfig:
     multi_turn_credit: dict[str, Any] | None = None
     grad_clip: float = 1.0
     metrics_sink: Callable[[dict[str, Any]], None] | None = None
+    profile: bool = False
+    profile_output_path: Path | None = None
     update_epochs: int = 1
     minibatch_size: int = 0
     shuffle_minibatches: bool = True
@@ -102,6 +105,9 @@ class PPOTrainerConfig:
     distributed_strategy: str = "none"
     fsdp_cpu_offload: bool = False
     flash_attention: bool = False
+    gradient_checkpointing: bool = False
+    replay_buffer: dict[str, Any] | None = None
+    replay_mix_ratio: float = 0.25
 
 
 PPOTrainStats = TrainStats
@@ -125,61 +131,7 @@ class PPOTrainer(OnPolicyTrainer):
         lagrangian: Any = None,
     ) -> None:
         cfg = cfg or PPOTrainerConfig()
-        shared = OnPolicyTrainerConfig(
-            n_iters=cfg.n_iters,
-            group_size=cfg.group_size,
-            prompts_per_iter=cfg.prompts_per_iter,
-            lr=cfg.lr,
-            max_new_tokens=cfg.max_new_tokens,
-            temperature=cfg.temperature,
-            grad_clip=cfg.grad_clip,
-            use_reference=cfg.use_reference,
-            multi_turn=cfg.multi_turn,
-            multi_turn_credit=cfg.multi_turn_credit,
-            log_every=cfg.log_every,
-            save_every=cfg.save_every,
-            output_dir=cfg.output_dir,
-            seed=cfg.seed,
-            metrics_sink=cfg.metrics_sink,
-            batch_generate=cfg.batch_generate,
-            update_epochs=cfg.update_epochs,
-            minibatch_size=cfg.minibatch_size,
-            shuffle_minibatches=cfg.shuffle_minibatches,
-            interleave_sft_every=cfg.interleave_sft_every,
-            interleave_sft_samples=cfg.interleave_sft_samples,
-            interleave_sft_lr=cfg.interleave_sft_lr,
-            interleave_sft_epochs=cfg.interleave_sft_epochs,
-            interleave_sft_batch_size=cfg.interleave_sft_batch_size,
-            bootstrap_sft_rounds=cfg.bootstrap_sft_rounds,
-            bootstrap_sft_samples=cfg.bootstrap_sft_samples,
-            bootstrap_sft_lr=cfg.bootstrap_sft_lr,
-            bootstrap_sft_epochs=cfg.bootstrap_sft_epochs,
-            checkpoint_every=cfg.checkpoint_every,
-            keep_last_checkpoints=cfg.keep_last_checkpoints,
-            resume_from=cfg.resume_from,
-            auto_resume=cfg.auto_resume,
-            save_best_checkpoint=cfg.save_best_checkpoint,
-            early_stop_patience=cfg.early_stop_patience,
-            early_stop_min_delta=cfg.early_stop_min_delta,
-            target_kl=cfg.target_kl,
-            adaptive_kl=cfg.adaptive_kl,
-            adaptive_kl_horizon=cfg.adaptive_kl_horizon,
-            adaptive_kl_min=cfg.adaptive_kl_min,
-            adaptive_kl_max=cfg.adaptive_kl_max,
-            normalize_reward=cfg.normalize_reward,
-            reward_norm_clip=cfg.reward_norm_clip,
-            amp_dtype=cfg.amp_dtype,
-            grad_accum_steps=cfg.grad_accum_steps,
-            vllm_rollout_model=cfg.vllm_rollout_model,
-            vllm_tensor_parallel_size=cfg.vllm_tensor_parallel_size,
-            vllm_max_model_len=cfg.vllm_max_model_len,
-            vllm_gpu_memory_utilization=cfg.vllm_gpu_memory_utilization,
-            vllm_enable_prefix_caching=cfg.vllm_enable_prefix_caching,
-            vllm_sync_every=cfg.vllm_sync_every,
-            distributed_strategy=cfg.distributed_strategy,
-            fsdp_cpu_offload=cfg.fsdp_cpu_offload,
-            flash_attention=cfg.flash_attention,
-        )
+        shared = build_shared_on_policy_config(cfg)
         algo = PPO(
             PPOConfig(
                 clip_eps=cfg.clip_eps,

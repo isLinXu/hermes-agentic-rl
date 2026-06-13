@@ -24,10 +24,13 @@ class OnPolicyTrainerConfig:
     multi_turn: bool = False
     multi_turn_credit: dict[str, Any] | None = None
     log_every: int = 1
+    log_format: str = "text"
     save_every: int = 0
     output_dir: Path | None = None
     seed: int | None = 0
     metrics_sink: Callable[[dict[str, Any]], None] | None = None
+    profile: bool = False
+    profile_output_path: Path | None = None
     batch_generate: bool = False
     update_epochs: int = 1
     minibatch_size: int = 0
@@ -60,6 +63,15 @@ class OnPolicyTrainerConfig:
     adaptive_kl_horizon: float = 10000.0
     adaptive_kl_min: float = 1e-4
     adaptive_kl_max: float = 10.0
+    # KL controller type: "p" = InstructGPT proportional (default, backward-
+    # compatible); "pid" = PID controller (DeepSeek/DAPO style, eliminates
+    # steady-state error and reacts to oscillations).
+    adaptive_kl_type: str = "p"
+    # PID gains — only used when adaptive_kl_type = "pid".
+    adaptive_kl_Kp: float = 0.1
+    adaptive_kl_Ki: float = 0.01
+    adaptive_kl_Kd: float = 0.005
+    adaptive_kl_I_max: float = 2.0
     normalize_reward: bool = False
     reward_norm_clip: float = 10.0
     stability_preset: str = "none"
@@ -74,6 +86,7 @@ class OnPolicyTrainerConfig:
     distributed_strategy: str = "none"
     fsdp_cpu_offload: bool = False
     flash_attention: bool = False
+    gradient_checkpointing: bool = False
     token_budget: dict[str, Any] | None = None
     entropy_schedule: dict[str, Any] | None = None
     use_ema_rollout: bool = False
@@ -109,6 +122,11 @@ class OnPolicyTrainerConfig:
     # each update. TIS/V-trace corrects for staleness. See replay_buffer.py.
     replay_buffer: dict[str, Any] | None = None
     replay_mix_ratio: float = 0.25
+    # --- Hybrid objective weight schedules ---
+    # Optional schedules for HybridAlgo weights. Dict shape:
+    # {mode: linear|cosine|constant, start: float, end: float, total_steps: int}
+    w_rl_schedule: dict[str, Any] | None = None
+    w_opd_schedule: dict[str, Any] | None = None
     # --- Eval hook (periodic evaluation during training) ---
     # When > 0, run evaluation every N iters using the same env but with
     # deterministic decoding (temperature=0). Results are logged as
@@ -116,6 +134,30 @@ class OnPolicyTrainerConfig:
     eval_every: int = 0
     eval_prompts: int = 4
     eval_temperature: float = 0.0
+    # --- PRM online co-training pipeline ---
+    # When set, a ProcessRewardModel is trained online every ``prm_train_every``
+    # iters using ORM pseudo-labels derived from the current rollout batch.
+    # Dict keys match PRMPipelineConfig fields plus ``prm_model_path`` (optional
+    # path to a pre-trained PRM head for warm start).
+    prm_pipeline: dict[str, Any] | None = None
+    # --- Memory-aware reward shaping (cross-session improvement bonus) ---
+    # Differentiator over OpenClaw-RL: rewards improvement over the agent's OWN
+    # per-task history, not just the current batch baseline. Keys: alpha,
+    # bonus_coef, clip_max, sigma_floor, min_obs, axis_bonus_coef, task_key_mode.
+    memory_reward: dict[str, Any] | None = None
+    # --- Dynamic reward balancer (adaptive component weight scheduling) ---
+    # Differentiator over OpenClaw-RL: automatically adjusts reward component
+    # weights based on their informative variance. Required keys: base_weights
+    # (dict of {component_name: base_weight}). Optional: alpha, variance_floor,
+    # warmup_iters, max_weight_change_ratio, preserve_scale, component_warmup.
+    dynamic_reward_balancer: dict[str, Any] | None = None
+    # --- Curriculum scheduler (progressive stage advancement) ---
+    # When set, a CurriculumScheduler is created that tracks per-stage metrics
+    # and advances through curriculum stages when mastery conditions are met.
+    # Dict keys: auto_advance (bool), min_iters_per_stage (int),
+    # allow_regression (bool), regression_factor (float),
+    # stages (optional list of CurriculumStage dicts).
+    curriculum: dict[str, Any] | None = None
 
 
 def build_shared_on_policy_config(source: Any) -> OnPolicyTrainerConfig:
@@ -160,9 +202,32 @@ def validate_on_policy_config(cfg: OnPolicyTrainerConfig) -> list[str]:
         warnings.append("EMA rollout cannot be combined with vLLM rollout")
     if cfg.lr_warmup_steps > 0 and cfg.lr_schedule == "constant":
         warnings.append("lr_warmup_steps is ignored when lr_schedule='constant'")
+    if cfg.log_format not in {"text", "json"}:
+        warnings.append("log_format should be either 'text' or 'json'")
+    if cfg.profile_output_path is not None and not cfg.profile:
+        warnings.append("profile_output_path is ignored when profile=False")
+    for schedule_name, schedule in {
+        "w_rl_schedule": cfg.w_rl_schedule,
+        "w_opd_schedule": cfg.w_opd_schedule,
+    }.items():
+        if isinstance(schedule, dict) and schedule:
+            mode = str(schedule.get("mode", schedule.get("kind", "linear"))).lower()
+            if mode not in {"constant", "linear", "cosine"}:
+                warnings.append(f"{schedule_name}.mode should be one of: constant, linear, cosine")
     if cfg.replay_buffer and not cfg.use_reference:
         warnings.append(
             "replay_buffer works best with use_reference=True so KL to the "
             "reference policy constrains off-policy drift"
         )
+    if cfg.adaptive_kl_type == "pid":
+        if cfg.adaptive_kl_Kp <= 0:
+            warnings.append(
+                "adaptive_kl_type='pid' but adaptive_kl_Kp <= 0; "
+                "the proportional gain should be positive (default 0.1)"
+            )
+        if cfg.adaptive_kl_I_max <= 0:
+            warnings.append(
+                "adaptive_kl_I_max <= 0; PID integral anti-windup will be "
+                "ineffective — set a positive value (default 2.0)"
+            )
     return warnings

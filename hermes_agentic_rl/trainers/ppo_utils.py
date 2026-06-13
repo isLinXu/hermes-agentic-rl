@@ -3,19 +3,25 @@
 Contents:
   - :class:`RunningMeanStd` — Welford online mean/variance, used to
     normalize rewards across iterations without biasing the gradient.
-  - :class:`AdaptiveKLController` — InstructGPT (Ouyang 2022, Appendix A.2)
-    style β-adaptive KL coefficient. Scales ``kl_coef`` up when KL drifts
-    above ``target_kl``, down when it dips below — keeps PPO inside a
-    trust region without hand-tuning.
-
-Both are pure-Python, stateless w.r.t. torch, and fully serializable via
-``state_dict`` / ``load_state_dict`` so they survive checkpoint resume.
+  - :class:`AdaptiveKLController` — re-exported from ``kl_controller`` for
+    backward compatibility. New code should import from
+    ``hermes_agentic_rl.trainers.kl_controller`` directly and use
+    ``build_kl_controller`` / ``build_kl_controller_from_config`` to get
+    either the P-controller or the new PID variant.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
+
+# Re-export for backward compatibility.
+from hermes_agentic_rl.trainers.kl_controller import (  # noqa: F401
+    AdaptiveKLController,
+    PIDKLController,
+    build_kl_controller,
+    build_kl_controller_from_config,
+)
 
 
 @dataclass
@@ -71,63 +77,7 @@ class RunningMeanStd:
         self.eps = float(state.get("eps", 1e-8))
 
 
-@dataclass
-class AdaptiveKLController:
-    """InstructGPT β-adaptive KL coefficient.
-
-    Reference: Ouyang et al., "Training language models to follow
-    instructions with human feedback" (2022), Appendix A.2::
-
-        proportional_error = clip(kl / target_kl - 1, -0.2, 0.2)
-        beta_next = beta * (1 + proportional_error * horizon_scale)
-
-    Where ``horizon_scale = n_steps / horizon``. With default ``horizon =
-    10000`` and one call per iter, β doubles/halves roughly every 10k
-    iters of sustained over/under-shoot. Tunable via ``horizon``.
-
-    Set ``target_kl <= 0`` to disable adaptive behavior (β stays fixed).
-    """
-
-    init_kl_coef: float = 0.2
-    target_kl: float = 0.1
-    horizon: float = 10000.0
-    value: float = field(init=False)
-    min_coef: float = 1e-4
-    max_coef: float = 10.0
-    _step_count: int = field(default=0, init=False)
-
-    def __post_init__(self) -> None:
-        self.value = float(self.init_kl_coef)
-
-    def update(self, current_kl: float, n_steps: int = 1) -> float:
-        """Update β given observed KL; returns new β."""
-        self._step_count += int(max(1, n_steps))
-        if self.target_kl <= 0:
-            return self.value
-        # Proportional error in [-0.2, 0.2]
-        pe = current_kl / max(self.target_kl, 1e-8) - 1.0
-        pe = max(-0.2, min(0.2, pe))
-        mult = 1.0 + pe * (n_steps / max(1.0, self.horizon))
-        self.value = float(self.value * mult)
-        self.value = max(self.min_coef, min(self.max_coef, self.value))
-        return self.value
-
-    def state_dict(self) -> dict[str, Any]:
-        return {
-            "init_kl_coef": self.init_kl_coef,
-            "target_kl": self.target_kl,
-            "horizon": self.horizon,
-            "value": self.value,
-            "min_coef": self.min_coef,
-            "max_coef": self.max_coef,
-            "step_count": self._step_count,
-        }
-
-    def load_state_dict(self, state: dict[str, Any]) -> None:
-        self.init_kl_coef = float(state.get("init_kl_coef", self.init_kl_coef))
-        self.target_kl = float(state.get("target_kl", self.target_kl))
-        self.horizon = float(state.get("horizon", self.horizon))
-        self.value = float(state.get("value", self.value))
-        self.min_coef = float(state.get("min_coef", self.min_coef))
-        self.max_coef = float(state.get("max_coef", self.max_coef))
-        self._step_count = int(state.get("step_count", 0))
+# AdaptiveKLController is now defined in kl_controller.py and imported above.
+# Kept as re-export for backward compatibility — existing imports of
+# ``from hermes_agentic_rl.trainers.ppo_utils import AdaptiveKLController``
+# continue to work without modification.

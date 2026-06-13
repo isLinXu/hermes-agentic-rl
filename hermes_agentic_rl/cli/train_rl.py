@@ -69,6 +69,15 @@ def _optional_path(value: Any) -> Path | None:
     return Path(str(value))
 
 
+def _profile_output_path(tcfg: dict[str, Any], output_dir: Path | None) -> Path | None:
+    explicit = _optional_path(tcfg.get("profile_output_path"))
+    if explicit is not None:
+        return explicit
+    if bool(tcfg.get("profile", False)) and output_dir is not None:
+        return output_dir / "profile.jsonl"
+    return None
+
+
 def _optional_dict(value: Any) -> dict[str, Any] | None:
     return dict(value) if isinstance(value, dict) else None
 
@@ -97,7 +106,9 @@ def _build_backend(cfg: dict[str, Any], *, need_value_head: bool) -> LLMBackend:
                 dtype=str(backend_cfg.get("dtype", "float32")),
                 seed=backend_cfg.get("seed", 0),
                 with_value_head=need_value_head or bool(backend_cfg.get("with_value_head", False)),
-                use_sdpa=bool(backend_cfg.get("use_sdpa", backend_cfg.get("flash_attention", False))),
+                use_sdpa=bool(
+                    backend_cfg.get("use_sdpa", backend_cfg.get("flash_attention", False))
+                ),
             )
         )
     if name == "hf":
@@ -118,9 +129,7 @@ def _build_backend(cfg: dict[str, Any], *, need_value_head: bool) -> LLMBackend:
                 ),
             )
         )
-    raise RuntimeError(
-        f"backend '{name}' not supported; choose 'tiny' or 'hf'."
-    )
+    raise RuntimeError(f"backend '{name}' not supported; choose 'tiny' or 'hf'.")
 
 
 def _backend_name(cfg: dict[str, Any]) -> str:
@@ -310,9 +319,7 @@ def _build_env_and_rewards(cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]
     env_type = env_cfg.get("type", "echo")
     if env_type not in {"curriculum", "multi_stream"}:
         env, rm_manager = _build_single_env(env_cfg)
-        rm_manager = _build_reward_manager(
-            cfg, env_cfg=env_cfg, default_manager=rm_manager
-        )
+        rm_manager = _build_reward_manager(cfg, env_cfg=env_cfg, default_manager=rm_manager)
         extra = _build_reward_model_component(cfg)
         if extra is not None:
             rm_manager.rewards.append(extra)
@@ -338,6 +345,7 @@ def _build_env_and_rewards(cfg: dict[str, Any]) -> tuple[BaseEnv, RewardManager]
         allow_demote=bool(env_cfg.get("allow_demote", False)),
         on_level_change=lambda old, new: print(f"[curriculum] level {old} -> {new}"),
     )
+
     # Reward dispatches through env.compute_reward → active.compute_reward;
     # we build a thin aggregator that asks the current level's reward manager.
     class _CurrRewardManager:
@@ -468,12 +476,15 @@ def _build_grpo(cfg: dict[str, Any], output_dir: str | None) -> GRPOTrainerConfi
         entropy_coef=float(tcfg.get("entropy_coef", 0.0)),
         use_reference=bool(tcfg.get("use_reference", False)),
         log_every=int(tcfg.get("log_every", 5)),
+        log_format=str(tcfg.get("log_format", "text")),
         save_every=int(tcfg.get("save_every", 0)),
         output_dir=out,
         seed=tcfg.get("seed", 0),
         multi_turn=bool(tcfg.get("multi_turn", False)),
         multi_turn_credit=_optional_dict(tcfg.get("multi_turn_credit")),
         grad_clip=float(tcfg.get("grad_clip", 1.0)),
+        profile=bool(tcfg.get("profile", False)),
+        profile_output_path=_profile_output_path(tcfg, out),
         update_epochs=int(tcfg.get("update_epochs", 1)),
         minibatch_size=int(tcfg.get("minibatch_size", 0)),
         shuffle_minibatches=bool(tcfg.get("shuffle_minibatches", True)),
@@ -523,6 +534,9 @@ def _build_grpo(cfg: dict[str, Any], output_dir: str | None) -> GRPOTrainerConfi
         distributed_strategy=str(tcfg.get("distributed_strategy", "none")),
         fsdp_cpu_offload=bool(tcfg.get("fsdp_cpu_offload", False)),
         flash_attention=bool(tcfg.get("flash_attention", False)),
+        gradient_checkpointing=bool(tcfg.get("gradient_checkpointing", False)),
+        replay_buffer=_optional_dict(tcfg.get("replay_buffer") or cfg.get("replay_buffer")),
+        replay_mix_ratio=float(tcfg.get("replay_mix_ratio", 0.25)),
     )
 
 
@@ -546,12 +560,15 @@ def _build_ppo(cfg: dict[str, Any], output_dir: str | None) -> PPOTrainerConfig:
         normalize_advantage=bool(tcfg.get("normalize_advantage", True)),
         use_reference=bool(tcfg.get("use_reference", False)),
         log_every=int(tcfg.get("log_every", 5)),
+        log_format=str(tcfg.get("log_format", "text")),
         save_every=int(tcfg.get("save_every", 0)),
         output_dir=out,
         seed=tcfg.get("seed", 0),
         multi_turn=bool(tcfg.get("multi_turn", False)),
         multi_turn_credit=_optional_dict(tcfg.get("multi_turn_credit")),
         grad_clip=float(tcfg.get("grad_clip", 1.0)),
+        profile=bool(tcfg.get("profile", False)),
+        profile_output_path=_profile_output_path(tcfg, out),
         update_epochs=int(tcfg.get("update_epochs", 1)),
         minibatch_size=int(tcfg.get("minibatch_size", 0)),
         shuffle_minibatches=bool(tcfg.get("shuffle_minibatches", True)),
@@ -599,6 +616,9 @@ def _build_ppo(cfg: dict[str, Any], output_dir: str | None) -> PPOTrainerConfig:
         distributed_strategy=str(tcfg.get("distributed_strategy", "none")),
         fsdp_cpu_offload=bool(tcfg.get("fsdp_cpu_offload", False)),
         flash_attention=bool(tcfg.get("flash_attention", False)),
+        gradient_checkpointing=bool(tcfg.get("gradient_checkpointing", False)),
+        replay_buffer=_optional_dict(tcfg.get("replay_buffer") or cfg.get("replay_buffer")),
+        replay_mix_ratio=float(tcfg.get("replay_mix_ratio", 0.25)),
     )
 
 
@@ -616,6 +636,7 @@ def _build_hybrid(cfg: dict[str, Any], output_dir: str | None) -> HybridTrainerC
     """
     tcfg = cfg.get("train_rl", {}) or {}
     opd_cfg = cfg.get("opd", {}) or {}
+    hybrid_cfg = cfg.get("hybrid", {}) or {}
     out = _optional_path(output_dir if output_dir else tcfg.get("output_dir"))
     return HybridTrainerConfig(
         n_iters=int(tcfg.get("n_iters", 30)),
@@ -626,18 +647,25 @@ def _build_hybrid(cfg: dict[str, Any], output_dir: str | None) -> HybridTrainerC
         temperature=float(tcfg.get("temperature", 1.0)),
         use_reference=bool(tcfg.get("use_reference", False)),
         log_every=int(tcfg.get("log_every", 5)),
+        log_format=str(tcfg.get("log_format", "text")),
         save_every=int(tcfg.get("save_every", 0)),
         output_dir=out,
         seed=tcfg.get("seed", 0),
         multi_turn=bool(tcfg.get("multi_turn", False)),
         multi_turn_credit=_optional_dict(tcfg.get("multi_turn_credit")),
         grad_clip=float(tcfg.get("grad_clip", 1.0)),
+        profile=bool(tcfg.get("profile", False)),
+        profile_output_path=_profile_output_path(tcfg, out),
         update_epochs=int(tcfg.get("update_epochs", 1)),
         minibatch_size=int(tcfg.get("minibatch_size", 0)),
         shuffle_minibatches=bool(tcfg.get("shuffle_minibatches", True)),
         # --- hybrid weights ---
         w_rl=float(tcfg.get("w_rl", 1.0)),
         w_opd=float(tcfg.get("w_opd", 1.0)),
+        w_rl_schedule=_optional_dict(tcfg.get("w_rl_schedule") or hybrid_cfg.get("w_rl_schedule")),
+        w_opd_schedule=_optional_dict(
+            tcfg.get("w_opd_schedule") or hybrid_cfg.get("w_opd_schedule")
+        ),
         # --- GRPO branch ---
         clip_eps=float(tcfg.get("clip_eps", 0.2)),
         clip_eps_high=float(tcfg.get("clip_eps_high", 0.28)),
@@ -655,13 +683,9 @@ def _build_hybrid(cfg: dict[str, Any], output_dir: str | None) -> HybridTrainerC
         opd_skip_missing_hints=bool(opd_cfg.get("skip_missing_hints", False)),
         # --- OPD teacher-logprob closed loop ---
         opd_teacher_fill=bool(opd_cfg.get("teacher_fill", True)),
-        opd_hint_template=str(
-            opd_cfg.get("hint_template", "\n\n[HINT_START]{hint}[HINT_END]\n")
-        ),
+        opd_hint_template=str(opd_cfg.get("hint_template", "\n\n[HINT_START]{hint}[HINT_END]\n")),
         opd_teacher_max_hint_tokens=int(opd_cfg.get("max_hint_tokens", 128)),
-        opd_capability_axis_weights=_optional_axis_weights(
-            opd_cfg.get("capability_axis_weights")
-        ),
+        opd_capability_axis_weights=_optional_axis_weights(opd_cfg.get("capability_axis_weights")),
         opd_hint_extractor=_optional_dict(opd_cfg.get("hint_extractor")),
         # --- SFT / checkpoint / shared controls ---
         interleave_sft_every=int(tcfg.get("interleave_sft_every", 0)),
@@ -689,6 +713,9 @@ def _build_hybrid(cfg: dict[str, Any], output_dir: str | None) -> HybridTrainerC
         vllm_sync_every=int(tcfg.get("vllm_sync_every", 1)),
         distributed_strategy=str(tcfg.get("distributed_strategy", "none")),
         flash_attention=bool(tcfg.get("flash_attention", False)),
+        gradient_checkpointing=bool(tcfg.get("gradient_checkpointing", False)),
+        replay_buffer=_optional_dict(tcfg.get("replay_buffer") or cfg.get("replay_buffer")),
+        replay_mix_ratio=float(tcfg.get("replay_mix_ratio", 0.25)),
     )
 
 
@@ -721,9 +748,7 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
     # Resolve metrics output dir (for jsonl/tb defaults): CLI arg > tcfg > None.
     _tcfg_block = cfg.get("train_rl", {}) or {}
     _metrics_base = output_dir or _tcfg_block.get("output_dir")
-    default_run_name = (
-        Path(str(_metrics_base)).name if _metrics_base else Path(config_path).stem
-    )
+    default_run_name = Path(str(_metrics_base)).name if _metrics_base else Path(config_path).stem
     metrics_writer = build_writer_from_config(
         cfg.get("metrics"),
         output_dir=_metrics_base,
@@ -760,7 +785,10 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
             f"teacher_fill={hybrid_cfg.opd_teacher_fill}"
         )
         trainer = HybridTrainer(
-            policy=backend, env=env, reward_manager=reward_manager, cfg=hybrid_cfg,
+            policy=backend,
+            env=env,
+            reward_manager=reward_manager,
+            cfg=hybrid_cfg,
             agent_loop_factory=agent_loop_factory,
         )
     elif algo == "grpo":
@@ -774,7 +802,10 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
             f"iters={grpo_cfg.n_iters} group={grpo_cfg.group_size} lr={grpo_cfg.lr}"
         )
         trainer = GRPOTrainer(
-            policy=backend, env=env, reward_manager=reward_manager, cfg=grpo_cfg,
+            policy=backend,
+            env=env,
+            reward_manager=reward_manager,
+            cfg=grpo_cfg,
             agent_loop_factory=agent_loop_factory,
         )
     elif algo == "ppo":
@@ -789,7 +820,10 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
             f"vf_coef={ppo_cfg.vf_coef} lam={ppo_cfg.lam}"
         )
         trainer = PPOTrainer(
-            policy=backend, env=env, reward_manager=reward_manager, cfg=ppo_cfg,
+            policy=backend,
+            env=env,
+            reward_manager=reward_manager,
+            cfg=ppo_cfg,
             agent_loop_factory=agent_loop_factory,
         )
     else:
@@ -814,9 +848,7 @@ def run_train_rl(config_path: str, output_dir: str | None = None) -> int:
                 "last_mean_reward": stats.last_reward(),
                 "best_mean_reward": stats.best_reward(),
                 "reward_delta": stats.mean_reward_delta(),
-                "curriculum_snapshot": (
-                    env.snapshot() if hasattr(env, "snapshot") else None
-                ),
+                "curriculum_snapshot": (env.snapshot() if hasattr(env, "snapshot") else None),
             }
             summary_path.write_text(
                 json.dumps(summary_payload, ensure_ascii=False, indent=2),

@@ -38,11 +38,20 @@ def _get_full_state_dict(
     *,
     fsdp_enabled: bool = False,
 ) -> dict[str, Any]:
-    """Get the full state dict of a model, using FSDP context if enabled.
+    """Get the full (unsharded) state dict of a model.
 
-    When ``fsdp_enabled`` is True, wraps the call in
-    ``torch.distributed.fsdp.state_dict_type(FULL_STATE_DICT)`` so that
-    rank-0 gets the full (unsharded) state dict with CPU offload.
+    When ``fsdp_enabled`` is True, configures FSDP to gather all shards on
+    rank-0 and offload to CPU before calling ``state_dict()``.
+
+    API compatibility:
+      - PyTorch <2.1: ``FullyShardedDataParallel.state_dict_type(...)``
+        context manager (deprecated but still present).
+      - PyTorch ≥2.1: ``FSDP.set_state_dict_type(...)`` + explicit
+        ``full_state_dict`` call is preferred. We detect which API is
+        available at runtime and use the right one.
+
+    On non-rank-0 processes the returned dict is empty ``{}``. Callers must
+    only save/load on rank-0 and broadcast if needed.
     """
     if not fsdp_enabled:
         return model.state_dict()
@@ -50,13 +59,36 @@ def _get_full_state_dict(
     from torch.distributed.fsdp import (  # noqa: I001
         FullStateDictConfig,
         StateDictType,
-        FullyShardedDataParallel,
+        FullyShardedDataParallel as FSDP,
     )
 
-    with FullyShardedDataParallel.state_dict_type(
+    full_cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+
+    # PyTorch ≥2.1: use the non-deprecated ``FSDP.set_state_dict_type`` API.
+    # PyTorch <2.1: fall back to the context-manager form.
+    if hasattr(FSDP, "set_state_dict_type"):
+        # New API: returns a context object that restores the old type on exit.
+        # ``full_state_dict`` returns only the gathered state on rank-0.
+        try:
+            FSDP.set_state_dict_type(
+                model,
+                StateDictType.FULL_STATE_DICT,
+                full_cfg,
+            )
+            state = model.state_dict()
+        finally:
+            # Reset to LOCAL_STATE_DICT to avoid leaking config changes.
+            try:
+                FSDP.set_state_dict_type(model, StateDictType.LOCAL_STATE_DICT)
+            except Exception:
+                pass
+        return state
+
+    # Legacy context-manager form (PyTorch <2.1, deprecated in 2.1).
+    with FSDP.state_dict_type(
         model,
         StateDictType.FULL_STATE_DICT,
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+        full_cfg,
     ):
         return model.state_dict()
 
@@ -114,6 +146,13 @@ class CheckpointState:
     best_iteration: int
     running_stats: dict[str, Any] | None = None
     kl_ctrl_state: dict[str, Any] | None = None
+    # EMA shadow policy weights (saved for correct rollout behavior on resume).
+    # None when EMA rollout is disabled (cfg.use_ema_rollout=False).
+    ema_state: dict[str, Any] | None = None
+    # PRM head weights (saved when PRM pipeline is enabled).
+    prm_head_state: dict[str, Any] | None = None
+    # Curriculum scheduler state (saved when curriculum is enabled).
+    curriculum_state: dict[str, Any] | None = None
 
 
 class CheckpointManager:
@@ -170,6 +209,23 @@ class CheckpointManager:
         if state.rng_state is not None:
             _atomic_save(state.rng_state, ckpt_dir / "rng_state.pt", "torch")
 
+        # Extended state: running_stats (reward normalizer), kl_ctrl,
+        # EMA shadow weights, PRM head. These are small and JSON-serializable
+        # (plain floats/dicts), so we pack them into one file for efficiency.
+        extra: dict[str, Any] = {}
+        if state.running_stats is not None:
+            extra["running_stats"] = state.running_stats
+        if state.kl_ctrl_state is not None:
+            extra["kl_ctrl_state"] = state.kl_ctrl_state
+        if extra:
+            _atomic_save(extra, ckpt_dir / "extra_state.json", "json")
+
+        # EMA and PRM states may contain tensors — save as .pt files.
+        if state.ema_state is not None:
+            _atomic_save(state.ema_state, ckpt_dir / "ema_state.pt", "torch")
+        if state.prm_head_state is not None:
+            _atomic_save(state.prm_head_state, ckpt_dir / "prm_head_state.pt", "torch")
+
         # Cleanup old checkpoints
         self._prune()
 
@@ -205,6 +261,9 @@ class CheckpointManager:
         state_path = ckpt_dir / "trainer_state.json"
         config_path = ckpt_dir / "config.yaml"
         rng_path = ckpt_dir / "rng_state.pt"
+        extra_path = ckpt_dir / "extra_state.json"
+        ema_path = ckpt_dir / "ema_state.pt"
+        prm_path = ckpt_dir / "prm_head_state.pt"
 
         if not model_path.exists():
             return None
@@ -240,6 +299,31 @@ class CheckpointManager:
             with open(config_path, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
 
+        # Extended state (reward normalizer + KL controller).
+        extra: dict[str, Any] = {}
+        if extra_path.exists():
+            with open(extra_path, encoding="utf-8") as f:
+                extra = json.load(f)
+
+        # EMA and PRM tensors.
+        ema_state: dict[str, Any] | None = None
+        if ema_path.exists():
+            try:
+                ema_state = torch.load(ema_path, map_location="cpu", weights_only=True)
+            except Exception:
+                ema_state = torch.load(ema_path, map_location="cpu", weights_only=False)
+
+        prm_head_state: dict[str, Any] | None = None
+        if prm_path.exists():
+            try:
+                prm_head_state = torch.load(
+                    prm_path, map_location="cpu", weights_only=True
+                )
+            except Exception:
+                prm_head_state = torch.load(
+                    prm_path, map_location="cpu", weights_only=False
+                )
+
         return CheckpointState(
             iteration=trainer_state["iteration"],
             model_state=model_state,
@@ -249,6 +333,10 @@ class CheckpointManager:
             config=config,
             best_reward=trainer_state.get("best_reward", 0.0),
             best_iteration=trainer_state.get("best_iteration", 0),
+            running_stats=extra.get("running_stats"),
+            kl_ctrl_state=extra.get("kl_ctrl_state"),
+            ema_state=ema_state,
+            prm_head_state=prm_head_state,
         )
 
     def _prune(self) -> None:

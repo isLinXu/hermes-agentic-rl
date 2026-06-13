@@ -31,10 +31,15 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from hermes_agentic_rl.algos.base import RolloutRecord
 from hermes_agentic_rl.distributed.experience_queue import (
     ExperienceItem,
     ExperienceQueue,
 )
+
+if TYPE_CHECKING:
+    from hermes_agentic_rl.trainers.on_policy import OnPolicyTrainer
+    from hermes_agentic_rl.trainers.train_stats import TrainStats
 
 
 @dataclass(slots=True)
@@ -62,7 +67,7 @@ class AsyncLoopConfig:
     stale_threshold: int = 0
 
 
-def _flatten(items: list[ExperienceItem[list["RolloutRecord"]]]) -> list["RolloutRecord"]:
+def _flatten(items: list[ExperienceItem[list[RolloutRecord]]]) -> list[RolloutRecord]:
     out: list[RolloutRecord] = []
     for it in items:
         payload = it.payload
@@ -82,10 +87,10 @@ def _max_staleness(
 
 
 def run_async_training(
-    trainer: "OnPolicyTrainer",
-    exp_queue: "ExperienceQueue[list[RolloutRecord]]",
+    trainer: OnPolicyTrainer,
+    exp_queue: ExperienceQueue[list[RolloutRecord]],
     cfg: AsyncLoopConfig | None = None,
-) -> "TrainStats":
+) -> TrainStats:
     """Drive ``trainer`` from ``exp_queue`` until ``max_updates`` updates land.
 
     Returns the trainer's ``TrainStats``. The trainer's policy/optimizer/algo

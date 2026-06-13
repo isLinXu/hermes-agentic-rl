@@ -44,6 +44,7 @@ class HybridTrainerConfig:
     temperature: float = 1.0
     use_reference: bool = False
     log_every: int = 1
+    log_format: str = "text"
     save_every: int = 0
     output_dir: Path | None = None
     seed: int | None = 0
@@ -51,12 +52,16 @@ class HybridTrainerConfig:
     multi_turn_credit: dict[str, Any] | None = None
     grad_clip: float = 1.0
     metrics_sink: Callable[[dict[str, Any]], None] | None = None
+    profile: bool = False
+    profile_output_path: Path | None = None
     update_epochs: int = 1
     minibatch_size: int = 0
     shuffle_minibatches: bool = True
     # --- hybrid weights ---
     w_rl: float = 1.0
     w_opd: float = 1.0
+    w_rl_schedule: dict[str, Any] | None = None
+    w_opd_schedule: dict[str, Any] | None = None
     # --- GRPO branch ---
     clip_eps: float = 0.2
     clip_eps_high: float = 0.28
@@ -120,6 +125,7 @@ class HybridTrainerConfig:
     distributed_strategy: str = "none"
     fsdp_cpu_offload: bool = False
     flash_attention: bool = False
+    gradient_checkpointing: bool = False
     async_checkpoint: bool = False
     token_budget: dict[str, Any] | None = None
     entropy_schedule: dict[str, Any] | None = None
@@ -133,6 +139,8 @@ class HybridTrainerConfig:
     lr_total_steps: int = 0
     lr_end_lr: float = 0.0
     pipeline_rollouts: bool = False
+    replay_buffer: dict[str, Any] | None = None
+    replay_mix_ratio: float = 0.25
 
 
 HybridTrainStats = TrainStats

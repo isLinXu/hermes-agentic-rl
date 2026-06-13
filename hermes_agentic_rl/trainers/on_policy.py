@@ -22,10 +22,9 @@ subclasses.
 from __future__ import annotations
 
 import asyncio
+import math
 import random
-import statistics
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
@@ -44,12 +43,60 @@ from hermes_agentic_rl.backends.base import LLMBackend
 from hermes_agentic_rl.backends.batch_generate import BatchRolloutGenerator
 from hermes_agentic_rl.core.reward_manager import RewardManager
 from hermes_agentic_rl.core.rollout_manager import RolloutManager
-from hermes_agentic_rl.core.types import RolloutStep, Trajectory
+from hermes_agentic_rl.core.types import Trajectory
 from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
 from hermes_agentic_rl.mdp.state_encoder import PromptStateEncoder
-from hermes_agentic_rl.trainers.batch_stats import _rl_dense_reward_metadata
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    batch_single_turn_trajectory as _batch_single_turn_trajectory,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    config_to_dict as _config_to_dict,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    extract_next_state as _extract_next_state,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    extract_rl as _extract_rl,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    grad_l2_norm as _grad_l2_norm,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    param_l2_norm as _param_l2_norm,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    reward_component_payload as _reward_component_payload,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    rollout_temperature_from_meta as _rollout_temperature_from_meta,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    summarize_batch_metadata as _summarize_batch_metadata,
+)
+from hermes_agentic_rl.trainers._rollout_helpers import (
+    turn_group_id as _turn_group_id,
+)
+from hermes_agentic_rl.trainers.batch_stats import (
+    _rl_dense_reward_metadata,
+    _teacher_responses_from_env,
+)
+from hermes_agentic_rl.trainers.minibatch_builder import (
+    aggregate_update_stats as _aggregate_update_stats_fn,
+)
+from hermes_agentic_rl.trainers.minibatch_builder import (
+    build_update_batches as _build_update_batches_fn,
+)
+from hermes_agentic_rl.trainers.minibatch_builder import (
+    split_minibatches as _split_minibatches_fn,
+)
 from hermes_agentic_rl.trainers.multi_turn_credit import assign_multi_turn_rewards
 from hermes_agentic_rl.trainers.on_policy_config import OnPolicyTrainerConfig
+from hermes_agentic_rl.trainers.profiling import (
+    StepProfiler,
+    append_jsonl,
+    format_json_record,
+)
+from hermes_agentic_rl.trainers.train_stats import TrainStats as _TrainStats
 
 
 class AgentLoopFactory(Protocol):
@@ -113,57 +160,33 @@ def _observe_env_reward(env: Any, item: dict[str, Any] | None, reward: float) ->
         pass
 
 
-@dataclass(slots=True)
-class TrainStats:
-    iters: list[dict[str, Any]] = field(default_factory=list, repr=False)
+def _scheduled_scalar(
+    schedule: dict[str, Any] | None,
+    *,
+    default: float,
+    iter_idx: int,
+    total_steps: int,
+) -> float:
+    if not isinstance(schedule, dict) or not schedule:
+        return float(default)
 
-    def add(self, record: dict[str, Any]) -> None:
-        self.iters.append(record)
+    mode = str(schedule.get("mode", schedule.get("kind", "linear"))).lower()
+    start = float(schedule.get("start", schedule.get("value", default)))
+    end = float(schedule.get("end", start))
+    steps = max(1, int(schedule.get("total_steps", total_steps)))
+    progress = max(0.0, min(1.0, float(iter_idx) / float(steps)))
 
-    def best_reward(self) -> float:
-        return max((r["mean_reward"] for r in self.iters), default=0.0)
+    if mode == "constant":
+        return float(schedule.get("value", start))
+    if mode == "linear":
+        return start + (end - start) * progress
+    if mode == "cosine":
+        return end + (start - end) * 0.5 * (1.0 + math.cos(math.pi * progress))
+    raise ValueError("hybrid weight schedule mode must be one of: constant, linear, cosine")
 
-    def last_reward(self) -> float:
-        return self.iters[-1]["mean_reward"] if self.iters else 0.0
 
-    def mean_reward_delta(self) -> float:
-        if len(self.iters) < 2:
-            return 0.0
-        return self.iters[-1]["mean_reward"] - self.iters[0]["mean_reward"]
-
-    # -- v0.10 convenience accessors -------------------------------------
-
-    def reward_curve(self) -> list[float]:
-        """Return the per-iteration mean_reward series."""
-        return [float(r.get("mean_reward", 0.0)) for r in self.iters]
-
-    def mean_kl(self) -> float:
-        """Average KL divergence across all iterations."""
-        kls = [float(r.get("kl", 0.0)) for r in self.iters]
-        return sum(kls) / len(kls) if kls else 0.0
-
-    def loss_curve(self) -> list[float]:
-        """Return the per-iteration loss series."""
-        return [float(r.get("loss", 0.0)) for r in self.iters]
-
-    def get_column(self, key: str) -> list[Any]:
-        """Extract a single column from all iteration records."""
-        return [r.get(key) for r in self.iters]
-
-    def summary(self) -> dict[str, Any]:
-        """Return a summary dict with key training statistics."""
-        return {
-            "n_iters": len(self.iters),
-            "best_reward": self.best_reward(),
-            "last_reward": self.last_reward(),
-            "mean_kl": self.mean_kl(),
-        }
-
-    def to_dataframe(self):
-        """Convert to a pandas DataFrame (requires pandas)."""
-        import pandas as pd
-
-        return pd.DataFrame(self.iters)
+# TrainStats is defined in train_stats.py; re-export here for backward compat.
+TrainStats = _TrainStats
 
 
 class OnPolicyTrainer:
@@ -211,6 +234,7 @@ class OnPolicyTrainer:
                 DistributedConfig,
                 wrap_for_distributed,
             )
+
             dist_cfg = DistributedConfig(
                 strategy=_distributed_strategy(self.cfg.distributed_strategy),
                 fsdp_cpu_offload=self.cfg.fsdp_cpu_offload,
@@ -218,7 +242,8 @@ class OnPolicyTrainer:
             )
             if hasattr(policy, "model"):
                 wrapped, self._fsdp_enabled = wrap_for_distributed(
-                    policy.model, dist_cfg,
+                    policy.model,
+                    dist_cfg,
                 )
                 policy.model = wrapped  # type: ignore[attr-defined]
 
@@ -261,6 +286,7 @@ class OnPolicyTrainer:
         # ── EMA + vLLM conflict check (before any heavy init) ──
         if self.cfg.use_ema_rollout and self.cfg.vllm_rollout_model:
             from hermes_agentic_rl.runtime.errors import RuntimeConfigurationError
+
             raise RuntimeConfigurationError(
                 "EMA rollout is incompatible with vLLM rollout. "
                 "Set use_ema_rollout=False or remove vllm_rollout_model."
@@ -273,6 +299,7 @@ class OnPolicyTrainer:
                 VLLMRolloutBackend,
                 VLLMRolloutConfig,
             )
+
             self._vllm_rollout = VLLMRolloutBackend(
                 VLLMRolloutConfig(
                     model=self.cfg.vllm_rollout_model,
@@ -294,6 +321,7 @@ class OnPolicyTrainer:
         self._ema: Any = None
         if self.cfg.use_ema_rollout:
             from hermes_agentic_rl.trainers.ema import EMAModel
+
             self._ema = EMAModel(
                 policy,
                 tau=self.cfg.ema_tau,
@@ -306,28 +334,41 @@ class OnPolicyTrainer:
             temperature=self.cfg.temperature,
         )
         self._prompt_encoder = PromptStateEncoder(self.policy.tokenizer)
-        self.logger = logger or (lambda rec: print(self._format_log(rec)))
+        self.logger = logger or self._default_logger
+        self._profiler = StepProfiler(enabled=bool(getattr(self.cfg, "profile", False)))
+        self._profile_output_path = (
+            Path(self.cfg.profile_output_path) if self.cfg.profile_output_path is not None else None
+        )
+        self._gradient_checkpointing_supported = False
         self.stats = TrainStats()
         self._seed_counter = 0
 
         # v0.8: reward normalizer + adaptive KL controller (opt-in).
-        from hermes_agentic_rl.trainers.ppo_utils import (
-            AdaptiveKLController,
-            RunningMeanStd,
+        from hermes_agentic_rl.trainers.kl_controller import (
+            KLControllerType,
+            build_kl_controller,
         )
+        from hermes_agentic_rl.trainers.ppo_utils import RunningMeanStd
+
         self._reward_rms: RunningMeanStd | None = (
             RunningMeanStd() if self.cfg.normalize_reward else None
         )
-        self._kl_ctrl: AdaptiveKLController | None = None
+        self._kl_ctrl: KLControllerType | None = None
         if self.cfg.adaptive_kl and self.cfg.target_kl > 0 and self.cfg.use_reference:
             algo_cfg = getattr(self.algo, "cfg", None)
             init_beta = float(getattr(algo_cfg, "kl_coef", 0.02)) or 0.02
-            self._kl_ctrl = AdaptiveKLController(
+            kl_kind = str(getattr(self.cfg, "adaptive_kl_type", "p") or "p")
+            self._kl_ctrl = build_kl_controller(
+                kind=kl_kind,  # type: ignore[arg-type]
                 init_kl_coef=init_beta,
                 target_kl=float(self.cfg.target_kl),
                 horizon=float(self.cfg.adaptive_kl_horizon),
                 min_coef=float(self.cfg.adaptive_kl_min),
                 max_coef=float(self.cfg.adaptive_kl_max),
+                Kp=float(getattr(self.cfg, "adaptive_kl_Kp", 0.1)),
+                Ki=float(getattr(self.cfg, "adaptive_kl_Ki", 0.01)),
+                Kd=float(getattr(self.cfg, "adaptive_kl_Kd", 0.005)),
+                I_max=float(getattr(self.cfg, "adaptive_kl_I_max", 2.0)),
             )
         # Entropy-coefficient scheduler (opt-in via cfg.entropy_schedule).
         # The dict mirrors the stability-preset shape, e.g.
@@ -342,15 +383,10 @@ class OnPolicyTrainer:
             )
 
             sched_kwargs = dict(self.cfg.entropy_schedule)
-            kind = str(
-                sched_kwargs.pop("mode", sched_kwargs.pop("kind", "linear"))
-            )
+            kind = str(sched_kwargs.pop("mode", sched_kwargs.pop("kind", "linear")))
             # Default total_steps to the full run length for step schedules
             # so users do not have to restate it in YAML.
-            if (
-                kind in ("linear", "cosine")
-                and "total_steps" not in sched_kwargs
-            ):
+            if kind in ("linear", "cosine") and "total_steps" not in sched_kwargs:
                 sched_kwargs["total_steps"] = max(1, int(self.cfg.n_iters))
             try:
                 self._entropy_sched = make_entropy_scheduler(kind, **sched_kwargs)
@@ -447,12 +483,8 @@ class OnPolicyTrainer:
                             "\n\n[HINT_START]{hint}[HINT_END]\n",
                         )
                     ),
-                    max_hint_tokens=int(
-                        getattr(self.cfg, "opd_teacher_max_hint_tokens", 128)
-                    ),
-                    capability_axis_weights=getattr(
-                        self.cfg, "opd_capability_axis_weights", None
-                    ),
+                    max_hint_tokens=int(getattr(self.cfg, "opd_teacher_max_hint_tokens", 128)),
+                    capability_axis_weights=getattr(self.cfg, "opd_capability_axis_weights", None),
                 ),
             )
 
@@ -462,6 +494,8 @@ class OnPolicyTrainer:
         # even when the env / reward did not pre-populate a hint. Opt-in via the
         # ``opd.hint_extractor`` YAML block; ``None`` keeps legacy behaviour.
         self._hint_extractor: Any = None
+        # Persistent stats so metrics are always emitted (0 when extractor is off).
+        self._last_hint_extract_stats: dict[str, float] | None = None
         hint_cfg = getattr(self.cfg, "opd_hint_extractor", None)
         if hint_cfg:
             from hermes_agentic_rl.rewards.opd_hint_extractor import (
@@ -477,9 +511,151 @@ class OnPolicyTrainer:
             from hermes_agentic_rl.trainers.replay_buffer import (
                 build_replay_buffer_from_config,
             )
+
             self._replay_buffer = build_replay_buffer_from_config(replay_cfg)
 
+        # ── PRM online co-training pipeline ────────────────────────────────
+        # Enabled via cfg.prm_pipeline = {train_every: N, ...} in YAML.
+        # The pipeline generates step-level pseudo-labels from each iter's
+        # rollout batch and trains the PRM every train_every iters in place.
+        self._prm_pipeline: Any = None
+        prm_cfg_dict = getattr(self.cfg, "prm_pipeline", None)
+        if isinstance(prm_cfg_dict, dict) and prm_cfg_dict:
+            from hermes_agentic_rl.rewards.prm import ProcessRewardModel
+            from hermes_agentic_rl.trainers.prm_pipeline import (
+                build_prm_pipeline_from_config,
+            )
+
+            # Build PRM model from the same backbone as the policy (shared trunk).
+            if hasattr(policy, "model"):
+                try:
+                    prm_model = ProcessRewardModel(
+                        policy,
+                        freeze_base=bool(prm_cfg_dict.get("prm_freeze_base", True)),
+                    )
+                    prm_model_path = prm_cfg_dict.get("prm_model_path")
+                    if prm_model_path is not None:
+                        import torch as _torch
+
+                        state = _torch.load(str(prm_model_path), map_location="cpu")
+                        prm_model.head.load_state_dict(state)
+                    self._prm_pipeline = build_prm_pipeline_from_config(prm_cfg_dict, prm_model)
+                except Exception as _prm_e:
+                    import warnings
+
+                    warnings.warn(
+                        f"PRM pipeline init failed, continuing without PRM: {_prm_e}",
+                        stacklevel=2,
+                    )
+
+        # ── Memory-aware reward shaper (cross-session improvement bonus) ───
+        # Differentiator: rewards improvement over the agent's OWN history,
+        # not just the current batch baseline. Opt-in via cfg.memory_reward.
+        self._memory_shaper: Any = None
+        memory_cfg = getattr(self.cfg, "memory_reward", None)
+        if isinstance(memory_cfg, dict) and memory_cfg:
+            from hermes_agentic_rl.rewards.memory_reward_shaper import (
+                MemoryAwareRewardShaper,
+                MemoryRewardConfig,
+            )
+
+            _mem_cfg = MemoryRewardConfig(
+                alpha=float(memory_cfg.get("alpha", 0.9)),
+                bonus_coef=float(memory_cfg.get("bonus_coef", 0.1)),
+                clip_max=float(memory_cfg.get("clip_max", 0.5)),
+                sigma_floor=float(memory_cfg.get("sigma_floor", 0.1)),
+                min_obs=int(memory_cfg.get("min_obs", 3)),
+                axis_bonus_coef={
+                    str(k): float(v) for k, v in (memory_cfg.get("axis_bonus_coef") or {}).items()
+                },
+                task_key_mode=str(memory_cfg.get("task_key_mode", "task_id")),
+                apply_inplace=bool(memory_cfg.get("apply_inplace", True)),
+            )
+            self._memory_shaper = MemoryAwareRewardShaper(_mem_cfg)
+
+        # ── Dynamic reward balancer (adaptive component weight scheduling) ──
+        # Differentiator: automatically adjusts component weights based on
+        # their informative variance. OpenClaw-RL uses static weights.
+        self._dynamic_balancer: Any = None
+        dynamic_cfg = getattr(self.cfg, "dynamic_reward_balancer", None)
+        if isinstance(dynamic_cfg, dict) and dynamic_cfg:
+            base_weights = dynamic_cfg.get("base_weights")
+            if isinstance(base_weights, dict) and base_weights:
+                from hermes_agentic_rl.rewards.dynamic_reward_balancer import (
+                    build_dynamic_balancer_from_config,
+                )
+
+                self._dynamic_balancer = build_dynamic_balancer_from_config(
+                    dynamic_cfg, {str(k): float(v) for k, v in base_weights.items()}
+                )
+
+        # ── Curriculum scheduler (progressive stage advancement) ──
+        # Integrates with DynamicRewardBalancer to adjust component weights
+        # based on curriculum stage progression. This ensures the model
+        # learns tool call structure before content before summary quality.
+        self._curriculum_scheduler: Any = None
+        curriculum_cfg = getattr(self.cfg, "curriculum", None)
+        if isinstance(curriculum_cfg, dict) and curriculum_cfg:
+            from hermes_agentic_rl.curriculum import (
+                CurriculumScheduler,
+                CurriculumSchedulerConfig,
+                create_default_curriculum,
+            )
+
+            stages = create_default_curriculum()
+            # Allow custom stages via config
+            custom_stages = curriculum_cfg.get("stages")
+            if isinstance(custom_stages, list) and custom_stages:
+                from hermes_agentic_rl.curriculum import CurriculumStage
+
+                stages = [
+                    CurriculumStage(**s) if isinstance(s, dict) else s
+                    for s in custom_stages
+                ]
+            sched_cfg = CurriculumSchedulerConfig(
+                auto_advance=bool(curriculum_cfg.get("auto_advance", True)),
+                min_iters_per_stage=int(curriculum_cfg.get("min_iters_per_stage", 10)),
+                allow_regression=bool(curriculum_cfg.get("allow_regression", False)),
+                regression_factor=float(curriculum_cfg.get("regression_factor", 0.5)),
+            )
+            self._curriculum_scheduler = CurriculumScheduler(
+                stages=stages, cfg=sched_cfg
+            )
+
         self._maybe_resume()
+
+    # ------------------------------------------------------------------
+    # Optimizer step helper (eliminates duplicate unscale/clip/step/LR logic)
+    # ------------------------------------------------------------------
+
+    def _optimizer_step(self, *, requires_grad: bool) -> float:
+        """Execute one optimizer step: unscale → clip → step → zero_grad → LR.
+
+        Returns the gradient norm (0.0 if no gradients were applied).
+        """
+        grad_norm = 0.0
+        if requires_grad:
+            self._amp.unscale_(self.optim)
+            if self.cfg.grad_clip and self.cfg.grad_clip > 0:
+                grad_norm_raw = torch.nn.utils.clip_grad_norm_(
+                    self._trainable_params,
+                    max_norm=self.cfg.grad_clip,
+                )
+                grad_norm = float(grad_norm_raw.detach().item())
+            else:
+                grad_norm = _grad_l2_norm(self._trainable_params)
+            self._amp.step(self.optim)
+            self.optim.zero_grad()
+            self._amp.update()
+            self._grad_accum.finish_step()
+            self._lr_optim_step_counter += 1
+            new_lr = self._lr_sched.get_lr(self._lr_optim_step_counter)
+            for pg in self.optim.param_groups:
+                pg["lr"] = new_lr
+        else:
+            self.optim.zero_grad()
+            self._grad_accum.finish_step()
+        return grad_norm
 
     # ------------------------------------------------------------------
     # hooks for subclasses
@@ -512,6 +688,7 @@ class OnPolicyTrainer:
             from hermes_agentic_rl.trainers.distributed import (
                 gather_fsdp_state_dict,
             )
+
             state = gather_fsdp_state_dict(policy.model)  # type: ignore[attr-defined]
         else:
             state = {
@@ -524,9 +701,48 @@ class OnPolicyTrainer:
         """Hook for subclasses to freeze rollout-time signals before SGD epochs."""
         return batch
 
-    def _maybe_normalize_rewards(
-        self, records: list[RolloutRecord]
-    ) -> list[RolloutRecord]:
+    def _set_gradient_checkpointing(self, enabled: bool) -> bool:
+        if not bool(getattr(self.cfg, "gradient_checkpointing", False)):
+            return False
+        toggle = getattr(self.policy, "set_gradient_checkpointing", None)
+        if callable(toggle):
+            try:
+                applied = bool(toggle(bool(enabled)))
+                self._gradient_checkpointing_supported = (
+                    self._gradient_checkpointing_supported or applied
+                )
+                return applied
+            except Exception:
+                return False
+        return False
+
+    def _apply_hybrid_weight_schedules(self, iter_idx: int) -> dict[str, float]:
+        algo_cfg = getattr(self.algo, "cfg", None)
+        if algo_cfg is None or not hasattr(algo_cfg, "w_rl") or not hasattr(algo_cfg, "w_opd"):
+            return {}
+
+        metrics: dict[str, float] = {}
+        total_steps = max(1, int(self.cfg.n_iters) - 1)
+        schedule_specs = {
+            "w_rl": getattr(self.cfg, "w_rl_schedule", None),
+            "w_opd": getattr(self.cfg, "w_opd_schedule", None),
+        }
+        for attr, schedule in schedule_specs.items():
+            if not isinstance(schedule, dict) or not schedule:
+                continue
+            current = float(getattr(algo_cfg, attr))
+            value = _scheduled_scalar(
+                schedule,
+                default=current,
+                iter_idx=iter_idx,
+                total_steps=total_steps,
+            )
+            setattr(algo_cfg, attr, value)
+            metrics[attr] = float(value)
+            metrics[f"{attr}_schedule_active"] = 1.0
+        return metrics
+
+    def _maybe_normalize_rewards(self, records: list[RolloutRecord]) -> list[RolloutRecord]:
         """Apply running-reward normalization if enabled.
 
         Records are mutated in-place: ``reward`` is replaced by the
@@ -585,9 +801,7 @@ class OnPolicyTrainer:
                     pass
             rl_meta = _extract_rl(trajectory)
             if rl_meta is None:
-                raise RuntimeError(
-                    "Agent loop must emit trajectory.metadata['runtime']['rl']"
-                )
+                raise RuntimeError("Agent loop must emit trajectory.metadata['runtime']['rl']")
             dense_meta = _rl_dense_reward_metadata(rl_meta)
             rollout_temperature = _rollout_temperature_from_meta(
                 rl_meta,
@@ -597,8 +811,7 @@ class OnPolicyTrainer:
             base_meta = {
                 "final_output": trajectory.final_output,
                 "reward_components": [
-                    _reward_component_payload(component)
-                    for component in summary.components
+                    _reward_component_payload(component) for component in summary.components
                 ],
                 "finished_naturally": bool(trajectory.finished_naturally),
                 "turns_used": trajectory.turns_used,
@@ -735,9 +948,7 @@ class OnPolicyTrainer:
             dense_meta = _rl_dense_reward_metadata(rl_meta)
             opd_hint = rl_meta.get("opd_hint")
             opd_meta = (
-                {"opd_hint": opd_hint}
-                if isinstance(opd_hint, str) and opd_hint.strip()
-                else {}
+                {"opd_hint": opd_hint} if isinstance(opd_hint, str) and opd_hint.strip() else {}
             )
             next_state = _extract_next_state(trajectory)
             if isinstance(next_state, str) and next_state.strip():
@@ -759,21 +970,22 @@ class OnPolicyTrainer:
                         **opd_meta,
                         "final_output": trajectory.final_output,
                         "reward_components": [
-                            _reward_component_payload(component)
-                            for component in summary.components
+                            _reward_component_payload(component) for component in summary.components
                         ],
                         "finished_naturally": bool(trajectory.finished_naturally),
                         "turns_used": trajectory.turns_used,
                         "tool_calls_count": sum(len(step.tool_calls) for step in trajectory.steps),
-                        "tool_results_count": sum(len(step.tool_results) for step in trajectory.steps),
-                    "final_output_chars": len(trajectory.final_output or ""),
-                    "prompt_tokens": len(prompt_ids),
-                    "response_tokens": len(gen.response_ids),
-                    "rollout_temperature": float(self.cfg.temperature),
-                    "reward_summary_metadata": dict(summary.metadata),
-                    **dense_meta,
-                },
-            )
+                        "tool_results_count": sum(
+                            len(step.tool_results) for step in trajectory.steps
+                        ),
+                        "final_output_chars": len(trajectory.final_output or ""),
+                        "prompt_tokens": len(prompt_ids),
+                        "response_tokens": len(gen.response_ids),
+                        "rollout_temperature": float(self.cfg.temperature),
+                        "reward_summary_metadata": dict(summary.metadata),
+                        **dense_meta,
+                    },
+                )
             )
         return records
 
@@ -847,10 +1059,7 @@ class OnPolicyTrainer:
     # ------------------------------------------------------------------
 
     def _pipeline_enabled(self) -> bool:
-        return (
-            bool(getattr(self.cfg, "pipeline_rollouts", False))
-            and self.rollout_pool is not None
-        )
+        return bool(getattr(self.cfg, "pipeline_rollouts", False)) and self.rollout_pool is not None
 
     async def _collect_for_iter(self, iter_idx: int) -> list[RolloutRecord]:
         """Collect this iteration's rollouts.
@@ -901,11 +1110,27 @@ class OnPolicyTrainer:
         return batch_records
 
     async def _one_iter(self, iter_idx: int) -> AlgoUpdateStats:
+        self._profiler.reset()
         if self.lagrangian is not None:
             self.lagrangian.begin_iter()
 
-        batch_records = await self._collect_for_iter(iter_idx)
-        return self._update_on_records(batch_records, iter_idx)
+        with self._profiler.measure("iter.total"):
+            self._set_gradient_checkpointing(False)
+            with self._profiler.measure("rollout.collect"):
+                batch_records = await self._collect_for_iter(iter_idx)
+            with self._profiler.measure("update.total"):
+                gc_applied = self._set_gradient_checkpointing(True)
+                try:
+                    stats = self._update_on_records(batch_records, iter_idx)
+                finally:
+                    self._set_gradient_checkpointing(False)
+        stats.extra.update(self._profiler.as_metrics())
+        if bool(getattr(self.cfg, "gradient_checkpointing", False)):
+            stats.extra["gradient_checkpointing"] = 1.0 if gc_applied else 0.0
+            stats.extra["gradient_checkpointing_supported"] = (
+                1.0 if self._gradient_checkpointing_supported else 0.0
+            )
+        return stats
 
     def _update_on_records(
         self, batch_records: list[RolloutRecord], iter_idx: int
@@ -913,20 +1138,36 @@ class OnPolicyTrainer:
         # v0.8: running-reward normalization BEFORE prepare so the reward
         # used for advantage computation is whitened, while `raw_reward`
         # survives in metadata for logging.
-        batch_records = self._maybe_normalize_rewards(batch_records)
+        with self._profiler.measure("reward.normalize"):
+            batch_records = self._maybe_normalize_rewards(batch_records)
 
         # ── Replay buffer mixing (off-policy with TIS correction) ──────────
         # Mix in stale-but-recent records from the replay buffer. Current
         # records are pushed into the buffer for future iters but are NOT
         # reused this iter (avoids double-counting). TIS/V-trace in the
         # algo corrects for staleness automatically.
-        if self._replay_buffer is not None:
-            batch_records = self._replay_buffer.mix_with_current(
-                current=batch_records,
-                mix_ratio=float(getattr(self.cfg, "replay_mix_ratio", 0.25)),
-                policy_version=self._update_version,
-            )
+        with self._profiler.measure("replay.mix"):
+            if self._replay_buffer is not None:
+                batch_records = self._replay_buffer.mix_with_current(
+                    current=batch_records,
+                    mix_ratio=float(getattr(self.cfg, "replay_mix_ratio", 0.25)),
+                    policy_version=self._update_version,
+                )
 
+        # Cache the current-iter batch for PRM pipeline co-training.
+        # We snapshot before potential in-place mutations below.
+        if self._prm_pipeline is not None:
+            self._last_train_batch = RolloutBatch(records=list(batch_records))
+
+        # ── Memory-aware reward shaping (cross-session improvement bonus) ──
+        # Runs AFTER normalization but BEFORE advantage computation so the
+        # bonus is included in the advantage signal.
+        with self._profiler.measure("reward.memory_shape"):
+            if self._memory_shaper is not None:
+                batch_records = self._memory_shaper.shape_records(
+                    batch_records,
+                    tokenizer=getattr(self.policy, "tokenizer", None),
+                )
         # Stamp iteration index into metadata so curriculum-aware shaping
         # functions (see rewards/shaping.py :: curriculum_shaping) can scale
         # their effect with training progress.
@@ -936,28 +1177,43 @@ class OnPolicyTrainer:
                 meta["_trainer_iter"] = int(iter_idx)
 
         # Apply reward shaping (if configured via subclass constructor).
-        if getattr(self, "_reward_shaping_fn", None) is not None:
-            batch_records = list(self._reward_shaping_fn(batch_records))
+        with self._profiler.measure("reward.shape"):
+            if getattr(self, "_reward_shaping_fn", None) is not None:
+                batch_records = list(self._reward_shaping_fn(batch_records))
 
         # OPD in-trainer hint extraction: recover directive hints from the
         # next-state signal for records that don't already carry one. Must run
         # BEFORE the teacher fill so newly-stamped hints get teacher logprobs.
         # OpenClaw-RL §3.2 produces hints from the PRM judge; this is the
         # in-trainer equivalent that keeps OPD from silently degrading to GRPO.
-        self._last_hint_extract_stats: dict[str, float] | None = None
-        if self._hint_extractor is not None:
-            hint_stats = self._hint_extractor.extract(batch_records)
-            self._last_hint_extract_stats = hint_stats.as_dict()
+        with self._profiler.measure("opd.hint_extract"):
+            if self._hint_extractor is not None:
+                hint_stats = self._hint_extractor.extract(batch_records)
+                self._last_hint_extract_stats = hint_stats.as_dict()
+            else:
+                # Always emit zero-value OPD hint metrics so dashboards don't lose
+                # the series when the extractor is disabled or not yet configured.
+                self._last_hint_extract_stats = {
+                    "opd_hint_n_records": float(len(batch_records)),
+                    "opd_hint_n_with_next_state": 0.0,
+                    "opd_hint_n_judged": 0.0,
+                    "opd_hint_n_added": 0.0,
+                    "opd_hint_n_rejected_quality": 0.0,
+                    "opd_hint_n_errors": 0.0,
+                    "opd_hint_effective_rate": 0.0,
+                }
 
         # OPD teacher-logprob fill: re-score hinted records under a
         # hint-enhanced context so the OPD / Hybrid branch has a real teacher
         # distribution (OpenClaw-RL §3.2). No-op when no hints are present.
         self._last_teacher_fill_stats: dict[str, float] | None = None
-        if self._teacher_filler is not None:
-            fill_stats = self._teacher_filler.fill(batch_records)
-            self._last_teacher_fill_stats = fill_stats.as_dict()
+        with self._profiler.measure("opd.teacher_fill"):
+            if self._teacher_filler is not None:
+                fill_stats = self._teacher_filler.fill(batch_records)
+                self._last_teacher_fill_stats = fill_stats.as_dict()
 
-        batch = self._prepare_update_batch(RolloutBatch(records=batch_records))
+        with self._profiler.measure("update.prepare_batch"):
+            batch = self._prepare_update_batch(RolloutBatch(records=batch_records))
 
         # v0.8: adaptive KL — sync β into algo.cfg BEFORE computing loss for
         # this iter. The previous iter's KL drove the update.
@@ -986,7 +1242,10 @@ class OnPolicyTrainer:
                 algo_cfg.entropy_coef = coef
                 entropy_coef_applied = coef
 
-        update_batches = self._build_update_batches(batch, iter_idx=iter_idx)
+        schedule_metrics = self._apply_hybrid_weight_schedules(iter_idx)
+
+        with self._profiler.measure("update.build_batches"):
+            update_batches = self._build_update_batches(batch, iter_idx=iter_idx)
         per_step_stats: list[AlgoUpdateStats] = []
         early_stopped = False
         last_approx_kl = 0.0
@@ -997,7 +1256,8 @@ class OnPolicyTrainer:
         for mb_idx, mini_batch in enumerate(update_batches):
             # v0.9: autocast the forward pass
             with self._amp.autocast_ctx():
-                loss, stats = self.algo.compute_loss(self.policy, self.ref_policy, mini_batch)
+                with self._profiler.measure("algo.compute_loss"):
+                    loss, stats = self.algo.compute_loss(self.policy, self.ref_policy, mini_batch)
                 if self.lagrangian is not None:
                     loss = self.lagrangian.penalty_term(loss)
 
@@ -1011,30 +1271,9 @@ class OnPolicyTrainer:
             # BEFORE optimizer.step(); doing it after step silently made
             # grad_clip a no-op on normal minibatches.
             did_step = self._grad_accum.advance()
-            if did_step and loss.requires_grad:
-                self._amp.unscale_(self.optim)
-                if self.cfg.grad_clip and self.cfg.grad_clip > 0:
-                    grad_norm_raw = torch.nn.utils.clip_grad_norm_(
-                        self._trainable_params,
-                        max_norm=self.cfg.grad_clip,
-                    )
-                    grad_norm = float(grad_norm_raw.detach().item())
-                else:
-                    grad_norm = _grad_l2_norm(self._trainable_params)
-                self._amp.step(self.optim)
-                self.optim.zero_grad()
-                self._amp.update()
-                self._grad_accum.finish_step()
-                # Grad-accum-aware LR scheduling: advance per *optimizer step*
-                # (not per iteration) so warm-up/decay align with actual
-                # parameter updates.
-                self._lr_optim_step_counter += 1
-                new_lr = self._lr_sched.get_lr(self._lr_optim_step_counter)
-                for pg in self.optim.param_groups:
-                    pg["lr"] = new_lr
-            elif did_step:
-                self.optim.zero_grad()
-                self._grad_accum.finish_step()
+            if did_step:
+                with self._profiler.measure("optimizer.step"):
+                    grad_norm = self._optimizer_step(requires_grad=loss.requires_grad)
 
             stats.extra["grad_norm"] = grad_norm
             stats.extra["param_norm"] = _param_l2_norm(self._trainable_params)
@@ -1044,7 +1283,9 @@ class OnPolicyTrainer:
             stats.extra["grad_accum_step"] = float(mb_idx + 1)
             stats.extra["grad_clip_triggered"] = (
                 1.0
-                if (self.cfg.grad_clip and self.cfg.grad_clip > 0 and grad_norm > self.cfg.grad_clip)
+                if (
+                    self.cfg.grad_clip and self.cfg.grad_clip > 0 and grad_norm > self.cfg.grad_clip
+                )
                 else 0.0
             )
             per_step_stats.append(stats)
@@ -1059,19 +1300,8 @@ class OnPolicyTrainer:
         # v0.9: drain remaining grad_accum steps if any.
         if self._grad_accum.has_pending():
             # Force a final step with whatever's in the buffer.
-            self._amp.unscale_(self.optim)
-            if self.cfg.grad_clip and self.cfg.grad_clip > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self._trainable_params, max_norm=self.cfg.grad_clip,
-                )
-            self._amp.step(self.optim)
-            self.optim.zero_grad()
-            self._amp.update()
-            self._grad_accum.finish_step()
-            self._lr_optim_step_counter += 1
-            new_lr = self._lr_sched.get_lr(self._lr_optim_step_counter)
-            for pg in self.optim.param_groups:
-                pg["lr"] = new_lr
+            with self._profiler.measure("optimizer.step"):
+                self._optimizer_step(requires_grad=True)
 
         # v0.8: feed the last-seen approx_kl into the adaptive controller.
         if self._kl_ctrl is not None and per_step_stats:
@@ -1082,11 +1312,12 @@ class OnPolicyTrainer:
             for s in per_step_stats:
                 s.extra["adaptive_kl_coef"] = float(new_beta)
 
-        agg = self._aggregate_update_stats(
-            batch=batch,
-            step_stats=per_step_stats,
-            n_update_batches=len(update_batches),
-        )
+        with self._profiler.measure("update.aggregate_stats"):
+            agg = self._aggregate_update_stats(
+                batch=batch,
+                step_stats=per_step_stats,
+                n_update_batches=len(update_batches),
+            )
         # Entropy schedule bookkeeping: record the coef used this iter and
         # (for PID) feed the measured entropy back to drive the next iter.
         if self._entropy_sched is not None:
@@ -1100,15 +1331,14 @@ class OnPolicyTrainer:
         if early_stopped:
             agg.extra["early_stopped_by_kl"] = 1.0
             agg.extra["last_minibatch_approx_kl"] = last_approx_kl
+        if schedule_metrics:
+            agg.extra.update(schedule_metrics)
         if self._reward_rms is not None:
             agg.extra["reward_norm_mean"] = float(self._reward_rms.mean)
             agg.extra["reward_norm_std"] = float(self._reward_rms.std)
             # Restore mean_reward to RAW scale for logging (the normalized
             # scalar that drove the gradient is in `mean_advantage`).
-            raws = [
-                float(r.metadata.get("raw_reward", r.reward))
-                for r in batch.records
-            ]
+            raws = [float(r.metadata.get("raw_reward", r.reward)) for r in batch.records]
             if raws:
                 agg.mean_reward = sum(raws) / len(raws)
         if self._last_teacher_fill_stats:
@@ -1125,7 +1355,8 @@ class OnPolicyTrainer:
         if self._replay_buffer is not None:
             agg.extra.update(self._replay_buffer.stats.as_dict())
             n_replayed = sum(
-                1 for rec in batch.records
+                1
+                for rec in batch.records
                 if isinstance(getattr(rec, "metadata", None), dict)
                 and rec.metadata.get("_replay_sampled")
             )
@@ -1176,14 +1407,66 @@ class OnPolicyTrainer:
                 record["ema_rollout"] = 1.0
                 record["ema_tau"] = self._ema.current_tau()
 
+            # PRM online co-training (after policy update, using latest batch).
+            if self._prm_pipeline is not None:
+                _last_batch = getattr(self, "_last_train_batch", None)
+                if _last_batch is not None:
+                    tokenizer = getattr(self.policy, "tokenizer", None)
+                    if tokenizer is not None:
+                        try:
+                            prm_metrics = self._prm_pipeline.step(
+                                it, _last_batch, tokenizer=tokenizer
+                            )
+                            if prm_metrics:
+                                record.update(prm_metrics)
+                        except Exception as _prm_e:
+                            record["prm_error"] = str(_prm_e)
+
+            # Dynamic reward balancer: update component weights based on
+            # per-batch variance (differentiator over OpenClaw-RL static weights).
+            if self._dynamic_balancer is not None:
+                try:
+                    new_weights = self._dynamic_balancer.observe_batch(it, record)
+                    # Apply updated weights to reward_manager components.
+                    for comp in getattr(self.reward_manager, "components", []):
+                        name = getattr(comp, "name", None)
+                        if name is not None and name in new_weights:
+                            comp.weight = new_weights[name]
+                    record.update(self._dynamic_balancer.snapshot())
+                except Exception:
+                    pass
+
+            # Curriculum scheduler: observe batch stats and maybe advance stage.
+            # This integrates with DynamicRewardBalancer by adjusting the
+            # base_weights based on curriculum stage progression.
+            if self._curriculum_scheduler is not None:
+                try:
+                    self._curriculum_scheduler.observe_batch_stats(it, record)
+                    if self._curriculum_scheduler.should_advance():
+                        old_name = self._curriculum_scheduler.get_current_stage().name
+                        self._curriculum_scheduler.advance()
+                        new_stage = self._curriculum_scheduler.get_current_stage()
+                        if new_stage is not None:
+                            record["curriculum_advanced"] = 1.0
+                            record["curriculum_from"] = old_name
+                            record["curriculum_to"] = new_stage.name
+                            # Update dynamic balancer base weights if present
+                            if self._dynamic_balancer is not None:
+                                stage_weights = self._curriculum_scheduler.get_stage_weights()
+                                for wname, wval in stage_weights.items():
+                                    if wname in self._dynamic_balancer.base_weights:
+                                        self._dynamic_balancer.base_weights[wname] = wval
+                    record.update(self._curriculum_scheduler.snapshot())
+                except Exception:
+                    pass
+
+            # Memory shaper snapshot for logging.
+            if self._memory_shaper is not None:
+                record.update(self._memory_shaper.snapshot())
+
             # Reference policy periodic re-clone (prevents KL drift).
             ref_every = int(getattr(self.cfg, "ref_update_every", 0))
-            if (
-                ref_every > 0
-                and self.ref_policy is not None
-                and it > 0
-                and it % ref_every == 0
-            ):
+            if ref_every > 0 and self.ref_policy is not None and it > 0 and it % ref_every == 0:
                 if hasattr(self.policy, "clone_frozen"):
                     self.ref_policy = self.policy.clone_frozen()
                     record["ref_policy_updated"] = 1.0
@@ -1215,6 +1498,17 @@ class OnPolicyTrainer:
                 except Exception:
                     # metrics must never break training
                     pass
+            if self._profiler.enabled and self._profile_output_path is not None:
+                profile_record = {
+                    "iter": it,
+                    "algo": self.algo_name,
+                    **{
+                        k: v
+                        for k, v in record.items()
+                        if isinstance(k, str) and k.startswith("time_")
+                    },
+                }
+                append_jsonl(self._profile_output_path, profile_record)
             if (
                 self.cfg.save_every
                 and self.cfg.output_dir is not None
@@ -1293,6 +1587,27 @@ class OnPolicyTrainer:
             config=_config_to_dict(self.cfg),
             best_reward=self._best_reward,
             best_iteration=self._best_iter,
+            # Reward normalizer state (RunningMeanStd).
+            running_stats=(self._reward_rms.state_dict() if self._reward_rms is not None else None),
+            # Adaptive KL controller state (P or PID).
+            kl_ctrl_state=(self._kl_ctrl.state_dict() if self._kl_ctrl is not None else None),
+            # EMA shadow weights so rollout behavior is deterministic on resume.
+            ema_state=(
+                {
+                    k: v.detach().cpu()
+                    for k, v in self._ema.shadow.model.state_dict().items()  # type: ignore[attr-defined]
+                }
+                if self._ema is not None and hasattr(self._ema.shadow, "model")
+                else None
+            ),
+            # PRM head weights for warm-start on next run.
+            prm_head_state=(
+                self._prm_pipeline.prm.head.state_dict() if self._prm_pipeline is not None else None
+            ),
+            # Curriculum scheduler state for resuming stage progression.
+            curriculum_state=(
+                self._curriculum_scheduler.state_dict() if self._curriculum_scheduler is not None else None
+            ),
         )
         use_async = (
             background
@@ -1349,6 +1664,47 @@ class OnPolicyTrainer:
         self._best_iter = int(target.best_iteration)
         # Resume from the NEXT iteration — we already finished `iteration`.
         self._start_iter = int(target.iteration) + 1
+
+        # Restore reward normalizer state.
+        running_stats = getattr(target, "running_stats", None)
+        if running_stats is not None and self._reward_rms is not None:
+            try:
+                self._reward_rms.load_state_dict(running_stats)
+            except Exception:
+                pass
+
+        # Restore adaptive KL controller state.
+        kl_ctrl_state = getattr(target, "kl_ctrl_state", None)
+        if kl_ctrl_state is not None and self._kl_ctrl is not None:
+            try:
+                self._kl_ctrl.load_state_dict(kl_ctrl_state)
+            except Exception:
+                pass
+
+        # Restore EMA shadow weights.
+        ema_state = getattr(target, "ema_state", None)
+        if ema_state is not None and self._ema is not None and hasattr(self._ema.shadow, "model"):
+            try:
+                self._ema.shadow.model.load_state_dict(ema_state, strict=False)  # type: ignore[attr-defined]
+            except Exception:
+                pass  # shape mismatch → shadow will re-track from scratch
+
+        # Restore PRM head weights for warm-start.
+        prm_head_state = getattr(target, "prm_head_state", None)
+        if prm_head_state is not None and self._prm_pipeline is not None:
+            try:
+                self._prm_pipeline.prm.head.load_state_dict(prm_head_state)
+            except Exception:
+                pass
+
+        # Restore curriculum scheduler state.
+        curriculum_state = getattr(target, "curriculum_state", None)
+        if curriculum_state is not None and self._curriculum_scheduler is not None:
+            try:
+                self._curriculum_scheduler.load_state_dict(curriculum_state)
+            except Exception:
+                pass
+
         print(
             f"[train] resumed from iter={target.iteration} "
             f"(best_reward={self._best_reward:.4f} start_iter={self._start_iter})"
@@ -1362,6 +1718,12 @@ class OnPolicyTrainer:
         target = out / f"policy_iter_{it:04d}.pt"
         if hasattr(self.policy, "model"):
             torch.save(self.policy.model.state_dict(), target)  # type: ignore[attr-defined]
+
+    def _default_logger(self, rec: dict[str, Any]) -> None:
+        if str(getattr(self.cfg, "log_format", "text")).lower() == "json":
+            print(format_json_record(rec))
+        else:
+            print(self._format_log(rec))
 
     def _format_log(self, rec: dict[str, Any]) -> str:
         keys = [
@@ -1382,8 +1744,11 @@ class OnPolicyTrainer:
         ]
         # Keys that are internal / noisy and should not appear in the log.
         _suppressed = {
-            "n_tokens", "ratio_mean", "optimizer_step_applied",
-            "amp_scale", "grad_accum_step",
+            "n_tokens",
+            "ratio_mean",
+            "optimizer_step_applied",
+            "amp_scale",
+            "grad_accum_step",
         }
         parts = []
         seen_keys: set[str] = set()
@@ -1403,31 +1768,16 @@ class OnPolicyTrainer:
         return "[train] " + " ".join(parts)
 
     def _build_update_batches(self, batch: RolloutBatch, *, iter_idx: int) -> list[RolloutBatch]:
-        update_epochs = max(1, int(self.cfg.update_epochs))
-        minibatch_size = int(self.cfg.minibatch_size)
-        if minibatch_size == 0:
-            minibatch_size = len(batch.records)
-        minibatch_size = max(1, minibatch_size)
-
-        batches: list[RolloutBatch] = []
-        for epoch_idx in range(update_epochs):
-            if (
-                minibatch_size >= len(batch.records)
-                or len(batch.records) <= 1
-            ):
-                batches.append(RolloutBatch(records=list(batch.records)))
-                continue
-            epoch_batches = self._split_minibatches(
-                batch,
-                minibatch_size=minibatch_size,
-                iter_idx=iter_idx,
-                epoch_idx=epoch_idx,
-            )
-            if not epoch_batches:
-                batches.append(RolloutBatch(records=list(batch.records)))
-            else:
-                batches.extend(epoch_batches)
-        return batches
+        # Delegates to minibatch_builder for testability and code-size reduction.
+        return _build_update_batches_fn(
+            batch,
+            update_epochs=max(1, int(self.cfg.update_epochs)),
+            minibatch_size=int(self.cfg.minibatch_size),
+            shuffle_minibatches=bool(self.cfg.shuffle_minibatches),
+            preserve_group_boundaries=self._preserve_group_boundaries(),
+            seed=self.cfg.seed,
+            iter_idx=iter_idx,
+        )
 
     def _split_minibatches(
         self,
@@ -1437,43 +1787,20 @@ class OnPolicyTrainer:
         iter_idx: int,
         epoch_idx: int,
     ) -> list[RolloutBatch]:
-        rng = self._minibatch_rng(iter_idx=iter_idx, epoch_idx=epoch_idx)
-        if self._preserve_group_boundaries():
-            groups = [list(group) for group in batch.by_group().values()]
-            if self.cfg.shuffle_minibatches:
-                rng.shuffle(groups)
-            out: list[RolloutBatch] = []
-            current: list[Any] = []
-            current_size = 0
-            for group in groups:
-                group_size = len(group)
-                if current and current_size + group_size > minibatch_size:
-                    out.append(RolloutBatch(records=list(current)))
-                    current = []
-                    current_size = 0
-                current.extend(group)
-                current_size += group_size
-                if current_size >= minibatch_size:
-                    out.append(RolloutBatch(records=list(current)))
-                    current = []
-                    current_size = 0
-            if current:
-                out.append(RolloutBatch(records=list(current)))
-            return out
+        from hermes_agentic_rl.trainers.minibatch_builder import _make_rng
 
-        records = list(batch.records)
-        if self.cfg.shuffle_minibatches:
-            rng.shuffle(records)
-        return [
-            RolloutBatch(records=records[start : start + minibatch_size])
-            for start in range(0, len(records), minibatch_size)
-        ]
+        return _split_minibatches_fn(
+            batch,
+            minibatch_size=minibatch_size,
+            shuffle=bool(self.cfg.shuffle_minibatches),
+            preserve_group_boundaries=self._preserve_group_boundaries(),
+            rng=_make_rng(seed=self.cfg.seed, iter_idx=iter_idx, epoch_idx=epoch_idx),
+        )
 
     def _minibatch_rng(self, *, iter_idx: int, epoch_idx: int) -> random.Random:
-        seed = self.cfg.seed
-        if seed is None:
-            return random.Random()
-        return random.Random(int(seed) + (iter_idx * 1009) + (epoch_idx * 9173))
+        from hermes_agentic_rl.trainers.minibatch_builder import _make_rng
+
+        return _make_rng(seed=self.cfg.seed, iter_idx=iter_idx, epoch_idx=epoch_idx)
 
     def _aggregate_update_stats(
         self,
@@ -1482,71 +1809,13 @@ class OnPolicyTrainer:
         step_stats: list[AlgoUpdateStats],
         n_update_batches: int,
     ) -> AlgoUpdateStats:
-        total_records = len(batch.records)
-        if not step_stats:
-            return AlgoUpdateStats(
-                loss=0.0,
-                policy_loss=0.0,
-                kl=0.0,
-                entropy=0.0,
-                mean_reward=0.0,
-                mean_advantage=0.0,
-                clip_frac=0.0,
-                n_records=total_records,
-                extra={
-                    "n_updated": 0,
-                    "n_optimizer_steps": 0,
-                    "update_epochs": max(1, int(self.cfg.update_epochs)),
-                    "n_minibatches": n_update_batches,
-                },
-            )
-
-        def _weight(stat: AlgoUpdateStats) -> int:
-            return max(1, int(stat.n_records))
-
-        total_weight = sum(_weight(stat) for stat in step_stats)
-
-        def _weighted(attr: str) -> float:
-            return sum(float(getattr(stat, attr)) * _weight(stat) for stat in step_stats) / max(
-                1, total_weight
-            )
-
-        extras: dict[str, Any] = {}
-        first_extra = step_stats[0].extra
-        if "algo" in first_extra:
-            extras["algo"] = first_extra["algo"]
-        extras["n_updated"] = sum(int(stat.extra.get("n_updated", 0)) for stat in step_stats)
-        extras["n_optimizer_steps"] = len(step_stats)
-        extras["update_epochs"] = max(1, int(self.cfg.update_epochs))
-        extras["n_minibatches"] = n_update_batches
-        extras["minibatch_size"] = (
-            len(batch.records) if int(self.cfg.minibatch_size) <= 0 else int(self.cfg.minibatch_size)
-        )
-
-        numeric_means: dict[str, list[tuple[float, int]]] = {}
-        for stat in step_stats:
-            for key, value in stat.extra.items():
-                if key in {"n_updated", "algo"}:
-                    continue
-                if isinstance(value, bool):
-                    continue
-                if isinstance(value, (int, float)):
-                    numeric_means.setdefault(key, []).append((float(value), _weight(stat)))
-        for key, values in numeric_means.items():
-            denom = sum(weight for _, weight in values)
-            extras[key] = sum(value * weight for value, weight in values) / max(1, denom)
-        extras.update(_summarize_batch_metadata(batch))
-
-        return AlgoUpdateStats(
-            loss=_weighted("loss"),
-            policy_loss=_weighted("policy_loss"),
-            kl=_weighted("kl"),
-            entropy=_weighted("entropy"),
-            mean_reward=_weighted("mean_reward"),
-            mean_advantage=_weighted("mean_advantage"),
-            clip_frac=_weighted("clip_frac"),
-            n_records=total_records,
-            extra=extras,
+        return _aggregate_update_stats_fn(
+            batch=batch,
+            step_stats=step_stats,
+            n_update_batches=n_update_batches,
+            update_epochs=max(1, int(self.cfg.update_epochs)),
+            minibatch_size=int(self.cfg.minibatch_size),
+            summarize_batch_meta_fn=_summarize_batch_metadata,
         )
 
     def _run_eval_hook(self, iter_idx: int) -> dict[str, Any] | None:
@@ -1757,407 +2026,4 @@ class OnPolicyTrainer:
         return out.logits if hasattr(out, "logits") else out
 
 
-def _config_to_dict(cfg: Any) -> dict[str, Any]:
-    """Shallow dataclass-to-dict for checkpoint config snapshot."""
-    out: dict[str, Any] = {}
-    for name in getattr(cfg, "__slots__", []) or []:
-        try:
-            v = getattr(cfg, name)
-        except AttributeError:
-            continue
-        if isinstance(v, Path):
-            out[name] = str(v)
-        elif isinstance(v, (str, int, float, bool, type(None))):
-            out[name] = v
-        else:
-            out[name] = repr(v)
-    return out
-
-
-def _turn_group_id(prompt_group_id: str, turn_index: int) -> str:
-    return f"{prompt_group_id}::turn:{turn_index}"
-
-
-def _teacher_responses_from_env(
-    env: BaseEnv,
-    item: dict[str, Any],
-    *,
-    n_turns: int,
-) -> list[str | None] | None:
-    samples = env.build_supervised_samples(item)
-    if not samples:
-        return None
-
-    out: list[str | None] = [None] * max(1, n_turns)
-    explicit = False
-    for sample in samples:
-        turn_index = sample.metadata.get("turn_index")
-        if isinstance(turn_index, int) and 0 <= turn_index < len(out):
-            out[turn_index] = str(sample.response)
-            explicit = True
-
-    if not explicit:
-        if len(samples) == len(out):
-            for idx, sample in enumerate(samples):
-                out[idx] = str(sample.response)
-        elif len(out) == 1 and samples:
-            out[0] = str(samples[0].response)
-
-    if all(response is None or not str(response).strip() for response in out):
-        return None
-    return out
-
-
-def _series_stats(
-    values: list[float],
-    *,
-    include_mean: bool = True,
-) -> dict[str, float]:
-    if not values:
-        return {}
-    summary: dict[str, float] = {
-        "min": min(values),
-        "max": max(values),
-        "std": statistics.pstdev(values) if len(values) > 1 else 0.0,
-    }
-    if include_mean:
-        summary["mean"] = sum(values) / len(values)
-    return summary
-
-
-def _sanitize_metric_name(name: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(name)).strip("_")
-    return cleaned or "metric"
-
-
-def _reward_component_payload(component: Any) -> dict[str, Any]:
-    payload = {
-        "name": getattr(component, "name", "reward"),
-        "score": getattr(component, "score", 0.0),
-        "weight": getattr(component, "weight", 1.0),
-    }
-    metadata = getattr(component, "metadata", None)
-    if isinstance(metadata, dict):
-        numeric_metadata = {
-            _sanitize_metric_name(str(key)): float(value)
-            for key, value in metadata.items()
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-        }
-        if numeric_metadata:
-            payload["metadata"] = numeric_metadata
-    return payload
-
-
-def _grad_l2_norm(params: list[torch.Tensor]) -> float:
-    total = 0.0
-    for param in params:
-        grad = getattr(param, "grad", None)
-        if grad is None:
-            continue
-        total += float((grad.detach().float() ** 2).sum().item())
-    return total ** 0.5
-
-
-def _param_l2_norm(params: list[torch.Tensor]) -> float:
-    total = 0.0
-    for param in params:
-        total += float((param.detach().float() ** 2).sum().item())
-    return total ** 0.5
-
-
-def _summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
-    summary: dict[str, Any] = {}
-
-    rewards = [float(rec.reward) for rec in batch.records]
-    reward_stats = _series_stats(rewards, include_mean=False)
-    summary.update({f"reward_{key}": value for key, value in reward_stats.items()})
-
-    groups = batch.by_group()
-    if groups:
-        summary["n_groups"] = len(groups)
-        group_size_stats = _series_stats([float(len(rows)) for rows in groups.values()])
-        if group_size_stats:
-            summary["records_per_group"] = group_size_stats
-        group_reward_std = [
-            _series_stats([float(rec.reward) for rec in rows], include_mean=False).get("std", 0.0)
-            for rows in groups.values()
-        ]
-        group_reward_std_stats = _series_stats(group_reward_std)
-        if group_reward_std_stats:
-            summary["group_reward_std"] = group_reward_std_stats
-
-    # Per-stream breakdown (multi-stream unified training). Records sampled from
-    # a MixedCurriculumEnv carry a ``stream_level`` tag; aggregate reward / count
-    # / share per stream so the metrics sink sees where the optimizer budget went
-    # and how each stream is performing — complementing the env-level snapshot.
-    stream_rewards: dict[int, list[float]] = {}
-    for rec in batch.records:
-        lvl = rec.metadata.get("stream_level")
-        if isinstance(lvl, int) and not isinstance(lvl, bool):
-            stream_rewards.setdefault(lvl, []).append(float(rec.reward))
-    if stream_rewards:
-        summary["n_streams"] = len(stream_rewards)
-        total_stream_recs = sum(len(v) for v in stream_rewards.values())
-        for lvl, rws in sorted(stream_rewards.items()):
-            summary[f"stream/{lvl}/count"] = float(len(rws))
-            summary[f"stream/{lvl}/share"] = float(len(rws)) / total_stream_recs
-            summary[f"stream/{lvl}/mean_reward"] = sum(rws) / len(rws)
-            std = _series_stats(rws, include_mean=False).get("std")
-            if std is not None:
-                summary[f"stream/{lvl}/reward_std"] = std
-
-    prompt_tokens = [float(len(rec.prompt_ids)) for rec in batch.records]
-    prompt_stats = _series_stats(prompt_tokens)
-    if prompt_stats:
-        summary["prompt_tokens"] = prompt_stats
-
-    response_tokens = [float(len(rec.response_ids)) for rec in batch.records]
-    response_stats = _series_stats(response_tokens)
-    if response_stats:
-        summary["response_tokens"] = response_stats
-
-    generation_metrics = {
-        "final_output_chars": [
-            float(rec.metadata["final_output_chars"])
-            for rec in batch.records
-            if isinstance(rec.metadata.get("final_output_chars"), (int, float))
-        ],
-        "turns_used": [
-            float(rec.metadata["turns_used"])
-            for rec in batch.records
-            if isinstance(rec.metadata.get("turns_used"), (int, float))
-        ],
-        "tool_calls_count": [
-            float(rec.metadata["tool_calls_count"])
-            for rec in batch.records
-            if isinstance(rec.metadata.get("tool_calls_count"), (int, float))
-        ],
-        "tool_results_count": [
-            float(rec.metadata["tool_results_count"])
-            for rec in batch.records
-            if isinstance(rec.metadata.get("tool_results_count"), (int, float))
-        ],
-        "rollout_temperature": [
-            float(rec.metadata["rollout_temperature"])
-            for rec in batch.records
-            if isinstance(rec.metadata.get("rollout_temperature"), (int, float))
-            and not isinstance(rec.metadata.get("rollout_temperature"), bool)
-        ],
-    }
-    for key, values in generation_metrics.items():
-        stats = _series_stats(values)
-        if stats:
-            summary[key] = stats
-
-    finished_naturally = [
-        1.0 if bool(rec.metadata["finished_naturally"]) else 0.0
-        for rec in batch.records
-        if "finished_naturally" in rec.metadata
-    ]
-    if finished_naturally:
-        summary["finished_naturally_rate"] = sum(finished_naturally) / len(finished_naturally)
-
-    reward_component_scores: dict[str, list[float]] = {}
-    reward_component_weights: dict[str, list[float]] = {}
-    reward_component_metadata: dict[str, dict[str, list[float]]] = {}
-    reward_summary_numeric: dict[str, list[float]] = {}
-    for rec in batch.records:
-        components = rec.metadata.get("reward_components")
-        if isinstance(components, list):
-            for component in components:
-                if not isinstance(component, dict):
-                    continue
-                name = _sanitize_metric_name(str(component.get("name", "reward")))
-                score = component.get("score")
-                if isinstance(score, (int, float)):
-                    reward_component_scores.setdefault(name, []).append(float(score))
-                weight = component.get("weight")
-                if isinstance(weight, (int, float)):
-                    reward_component_weights.setdefault(name, []).append(float(weight))
-                metadata = component.get("metadata")
-                if isinstance(metadata, dict):
-                    for key, value in metadata.items():
-                        if isinstance(value, bool):
-                            continue
-                        if isinstance(value, (int, float)):
-                            safe_key = _sanitize_metric_name(str(key))
-                            reward_component_metadata.setdefault(name, {}).setdefault(
-                                safe_key,
-                                [],
-                            ).append(float(value))
-        reward_meta = rec.metadata.get("reward_summary_metadata")
-        if isinstance(reward_meta, dict):
-            for key, value in reward_meta.items():
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    reward_summary_numeric.setdefault(_sanitize_metric_name(str(key)), []).append(
-                        float(value)
-                    )
-
-    if reward_component_scores:
-        summary["reward_components"] = {}
-        for name, values in sorted(reward_component_scores.items()):
-            component_summary = _series_stats(values)
-            weight_values = reward_component_weights.get(name, [])
-            if weight_values:
-                component_summary["weight_mean"] = sum(weight_values) / len(weight_values)
-            summary["reward_components"][name] = component_summary
-
-    if reward_component_metadata:
-        summary["reward_component_metadata"] = {
-            component_name: {
-                key: _series_stats(values)
-                for key, values in sorted(metadata.items())
-                if values
-            }
-            for component_name, metadata in sorted(reward_component_metadata.items())
-        }
-
-    if reward_summary_numeric:
-        summary["reward_summary"] = {
-            key: _series_stats(values)
-            for key, values in sorted(reward_summary_numeric.items())
-            if values
-        }
-
-    turn_credit_rows: list[dict[str, Any]] = []
-    for rec in batch.records:
-        turn_credit = rec.metadata.get("turn_credit")
-        if isinstance(turn_credit, dict):
-            turn_credit_rows.append(turn_credit)
-    if turn_credit_rows:
-        numeric_keys = [
-            "reward",
-            "final_component",
-            "local_component",
-            "judge_component",
-            "teacher_component",
-            "weighted_final_component",
-            "weighted_local_component",
-        ]
-        summary["n_turn_records"] = len(turn_credit_rows)
-        summary["turn_credit"] = {}
-        for key in numeric_keys:
-            values = [
-                float(row[key])
-                for row in turn_credit_rows
-                if isinstance(row.get(key), (int, float))
-            ]
-            stats = _series_stats(values)
-            if stats:
-                summary["turn_credit"][key] = stats
-                # Also expose as flat `turn_credit_<key>_<stat>` keys so
-                # downstream tests / log formatters / CSV writers don't
-                # need to walk the nested dict.
-                for stat_name, stat_val in stats.items():
-                    summary[f"turn_credit_{key}_{stat_name}"] = stat_val
-
-        turn_indices = [
-            float(rec.metadata["turn_index"])
-            for rec in batch.records
-            if isinstance(rec.metadata.get("turn_index"), int)
-        ]
-        turn_index_stats = _series_stats(turn_indices)
-        if turn_index_stats:
-            summary["turn_index"] = turn_index_stats
-
-        rollout_final_rewards = [
-            float(rec.metadata["rollout_final_reward"])
-            for rec in batch.records
-            if isinstance(rec.metadata.get("rollout_final_reward"), (int, float))
-        ]
-        rollout_reward_stats = _series_stats(rollout_final_rewards)
-        if rollout_reward_stats:
-            summary["rollout_final_reward"] = rollout_reward_stats
-    return summary
-
-
-def _batch_single_turn_trajectory(
-    *,
-    item: dict[str, Any],
-    instruction: str,
-    response_text: str,
-    prompt_ids: list[int],
-    response_ids: list[int],
-    old_logprobs: list[float],
-    temperature: float,
-    finished: bool,
-) -> Trajectory:
-    """Build a single-turn trajectory for batched rollout collection.
-
-    Batched generation bypasses RolloutManager, so we must populate at least
-    one :class:`RolloutStep` so trajectory-level rewards (tool-call fidelity,
-    turn discount, conditional gating on ``traj.steps``) behave like the
-    agent-loop path.
-    """
-    return Trajectory(
-        task_id=item["task_id"],
-        prompt=instruction,
-        steps=[
-            RolloutStep(
-                turn_index=0,
-                assistant_message=response_text,
-            )
-        ],
-        final_output=response_text,
-        finished_naturally=finished,
-        turns_used=1,
-        metadata={
-            "messages": [
-                {"role": "user", "content": instruction},
-                {"role": "assistant", "content": response_text},
-            ],
-            "runtime": {
-                "runtime": "policy_agent_loop",
-                "prompt": instruction,
-                "rl": {
-                    "prompt_ids": list(prompt_ids),
-                    "response_ids": list(response_ids),
-                    "old_logprobs": list(old_logprobs),
-                    "temperature": temperature,
-                },
-            },
-        },
-    )
-
-
-def _extract_rl(trajectory: Trajectory) -> dict[str, Any] | None:
-    runtime_block = trajectory.metadata.get("runtime")
-    if isinstance(runtime_block, dict):
-        rl = runtime_block.get("rl")
-        if isinstance(rl, dict):
-            return rl
-    rl = trajectory.metadata.get("rl")
-    if isinstance(rl, dict):
-        return rl
-    return None
-
-
-def _extract_next_state(trajectory: Trajectory) -> str | None:
-    """Pull the next-state signal from a trajectory's runtime metadata.
-
-    Mirrors ``NextStatePRMComponent`` which reads
-    ``trajectory.metadata["runtime"]["next_state"]``. Falls back to a top-level
-    ``next_state`` key. Returns None when no textual signal is present.
-    """
-    runtime_block = trajectory.metadata.get("runtime")
-    if isinstance(runtime_block, dict):
-        val = runtime_block.get("next_state")
-        if isinstance(val, str) and val.strip():
-            return val
-    val = trajectory.metadata.get("next_state")
-    if isinstance(val, str) and val.strip():
-        return val
-    return None
-
-
-def _rollout_temperature_from_meta(
-    rl_meta: dict[str, Any],
-    *,
-    fallback: float,
-) -> float:
-    raw = rl_meta.get("temperature", fallback)
-    if isinstance(raw, bool):
-        return float(fallback)
-    if isinstance(raw, (int, float)):
-        return float(raw)
-    return float(fallback)
+# NOTE: Module-level helpers moved to _rollout_helpers.py and imported above.
