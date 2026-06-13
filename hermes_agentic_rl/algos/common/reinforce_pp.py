@@ -18,6 +18,7 @@ Additionally, we add:
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Per-token advantage construction

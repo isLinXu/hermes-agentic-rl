@@ -151,11 +151,12 @@ def compute_gae_batched(
     if normalize:
         valid = mask.reshape(-1)
         advs_flat = advs.reshape(-1)
-        if int(valid.sum().item()) > 1:
+        # Use tensor comparison to stay on-device (avoids Python .item() round-trip).
+        if valid.sum() > 1:
             sel = advs_flat[valid]
             mean = sel.mean()
             std = sel.std(unbiased=False)
-            if float(std.item()) > eps:
+            if std > eps:
                 advs_flat = advs_flat.clone()
                 advs_flat[valid] = (sel - mean) / (std + eps)
                 advs = advs_flat.view(B, T)

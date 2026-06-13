@@ -20,6 +20,7 @@ from hermes_agentic_rl.algos.hybrid import HybridAlgo, HybridConfig
 from hermes_agentic_rl.algos.opd import OPDAlgo, OPDConfig
 from hermes_agentic_rl.algos.ppo import PPO, PPOConfig
 from hermes_agentic_rl.algos.rloo import RLOOAlgo, RLOOConfig
+from hermes_agentic_rl.algos.simpo import SimPOAlgo, SimPOConfig
 
 ALGO_REGISTRY: dict[str, type[BaseAlgo]] = {}
 
@@ -76,6 +77,7 @@ for _name, _algo in {
     "gspo": GSPO,
     "rloo": RLOOAlgo,
     "factored_grpo": FactoredGRPO,
+    "simpo": SimPOAlgo,
 }.items():
     register_algo(_name, _algo)
 
@@ -83,22 +85,24 @@ __all__ = [
     "ALGO_REGISTRY",
     "GRPO",
     "GSPO",
-    "HybridAlgo",
-    "OPDAlgo",
     "PPO",
-    "RLOOAlgo",
     "AlgoUpdateStats",
     "BaseAlgo",
     "FactoredConfig",
     "FactoredGRPO",
     "GRPOConfig",
     "GSPOConfig",
+    "HybridAlgo",
     "HybridConfig",
+    "OPDAlgo",
     "OPDConfig",
     "PPOConfig",
+    "RLOOAlgo",
     "RLOOConfig",
     "RolloutBatch",
     "RolloutRecord",
+    "SimPOAlgo",
+    "SimPOConfig",
     "get_algo",
     "list_algos",
     "register_algo",

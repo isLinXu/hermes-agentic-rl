@@ -14,6 +14,7 @@ def clipped_surrogate_loss_batched(
     clip_eps_high: float | None = None,
     loss_agg: Literal["mean_token", "sum_token", "dr_grpo"] = "mean_token",
     max_len_for_dr_grpo: int = 256,
+    kl_estimator: Literal["k1", "k2", "k3"] = "k3",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Batched PPO-clipped surrogate with mask (v0.8).
 
@@ -32,13 +33,20 @@ def clipped_surrogate_loss_batched(
             - ``sum_token``: per-rollout token sum, then mean over rollouts.
             - ``dr_grpo``: per-rollout token sum ÷ ``max_len_for_dr_grpo``,
               then mean over rollouts (Liu 2024, removes length bias).
+        kl_estimator: which KL estimator to use for ``approx_kl`` reporting:
+            - ``k1``: first-order approximation ``logr`` (biased).
+            - ``k2``: second-order ``0.5 * r²`` (symmetric, low variance).
+            - ``k3``: Schulman ``exp(-r) - 1 + r`` (always non-negative,
+              low variance, consistent with verl/TRL/DeepSeek default).
+            Must match the ``kl_estimator`` configured on the calling Algo so
+            that the reported ``approx_kl`` is comparable to the KL penalty
+            term and can be used reliably for early-stopping thresholds.
 
     Returns:
         (loss [scalar], stats{clip_frac, ratio_mean, approx_kl})
 
-    ``approx_kl`` is the rollout-averaged unbiased K2 estimate:
-    ``mean_B( mean_T( 0.5 * (logπ_new - logπ_old)**2 ) )``.
-    Useful for per-minibatch early stopping.
+    ``approx_kl`` is now computed using ``kl_estimator`` (default ``k3``),
+    matching the standard used in the GRPO/RLOO/PPO penalty terms.
     """
     B = new_logprobs.shape[0]
     if B == 0 or new_logprobs.numel() == 0:
@@ -85,9 +93,16 @@ def clipped_surrogate_loss_batched(
         n_tok = mask.sum().clamp(min=1)
         clip_frac = clipped_mask.to(ratio.dtype).sum() / n_tok
         ratio_mean = (ratio * mf).sum() / n_tok
-        # Approx KL (K2): 0.5 * (r)^2 averaged per-row then across rows.
-        r = (new_logprobs - old_logprobs) * mf
-        per_row_kl = (0.5 * r.pow(2)).sum(dim=-1) / tokens_per_row
+        # approx_kl uses the caller-selected estimator so it is consistent
+        # with the KL penalty term and reliable for early-stopping thresholds.
+        r_kl = (new_logprobs - old_logprobs) * mf
+        if kl_estimator == "k1":
+            per_row_kl = r_kl.sum(dim=-1) / tokens_per_row
+        elif kl_estimator == "k2":
+            per_row_kl = (0.5 * r_kl.pow(2)).sum(dim=-1) / tokens_per_row
+        else:  # k3 — Schulman, always non-negative, verl/TRL/DeepSeek standard
+            r_kl_c = r_kl.clamp(min=-20.0, max=20.0)
+            per_row_kl = (torch.exp(-r_kl_c) - 1.0 + r_kl_c).sum(dim=-1) / tokens_per_row
         approx_kl = per_row_kl.mean()
 
     return loss, {
@@ -191,8 +206,16 @@ def clipped_surrogate_loss(
     with torch.no_grad():
         clipped = (torch.abs(ratio - 1.0) > clip_eps).float().mean().item()
         ratio_mean = ratio.mean().item()
+        # k3 KL estimator — consistent with batched variant and global default.
+        log_r = (new_logprobs - old_logprobs).clamp(min=-20.0, max=20.0)
+        approx_kl = float((torch.exp(-log_r) - 1.0 + log_r).mean().item())
 
-    return loss, {"clip_frac": float(clipped), "ratio_mean": float(ratio_mean)}
+    return loss, {
+        "clip_frac": float(clipped),
+        "ratio_mean": float(ratio_mean),
+        "approx_kl": approx_kl,
+        "n_tokens": int(new_logprobs.numel()),
+    }
 
 
 def clipped_value_loss(

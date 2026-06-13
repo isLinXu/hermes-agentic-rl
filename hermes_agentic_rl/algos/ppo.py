@@ -32,6 +32,11 @@ from hermes_agentic_rl.algos.base import (
     BaseAlgo,
     RolloutBatch,
 )
+from hermes_agentic_rl.algos.common.batch_prepare import (
+    compute_kl_penalty,
+    mean_advantage_from_tensors,
+    mean_reward_from_records,
+)
 from hermes_agentic_rl.algos.common.gae import compute_gae_batched
 from hermes_agentic_rl.algos.common.loss import (
     clipped_surrogate_loss_batched,
@@ -54,7 +59,7 @@ class PPOConfig:
     normalize_advantage: bool = True
     loss_agg: Literal["mean_token", "sum_token", "dr_grpo"] = "mean_token"
     max_len_for_dr_grpo: int = 256
-    kl_estimator: Literal["k1", "k2", "k3"] = "k1"
+    kl_estimator: Literal["k1", "k2", "k3"] = "k3"
     whiten_advantage: bool = False
     advantage_clip: float = 3.0
 
@@ -182,6 +187,7 @@ class PPO(BaseAlgo):
             clip_eps_high=cfg.clip_eps_high,
             loss_agg=cfg.loss_agg,
             max_len_for_dr_grpo=cfg.max_len_for_dr_grpo,
+            kl_estimator=cfg.kl_estimator,
         )
         vf_loss, vf_stats = clipped_value_loss_batched(
             values_new, old_values, returns, mask,
@@ -199,34 +205,20 @@ class PPO(BaseAlgo):
             total = total - cfg.entropy_coef * ent_scalar
             ent_val = float(ent_scalar.detach().item())
 
-        # 7) KL-to-reference.
+        # 7) KL-to-reference — uses shared compute_kl_penalty.
         kl_val = 0.0
-        if ref_policy is not None and cfg.kl_coef > 0:
-            with torch.no_grad():
-                ref_logp, ref_mask = ref_policy.score_batch(
-                    prompt_ids_list,
-                    response_ids_list,
-                    temperature=score_temperature,
-                )
-            common_T = min(new_logp.shape[1], ref_logp.shape[1])
-            r_kl = (new_logp[:, :common_T] - ref_logp[:, :common_T]) * mask[:, :common_T].to(dtype)
-            if cfg.kl_estimator == "k1":
-                kl_per_tok = r_kl
-            elif cfg.kl_estimator == "k2":
-                kl_per_tok = 0.5 * r_kl.pow(2)
-            else:
-                r_c = r_kl.clamp(min=-20.0, max=20.0)
-                kl_per_tok = torch.exp(-r_c) - 1.0 + r_c
-            mf2 = mask[:, :common_T].to(dtype)
-            kl_per_row = (kl_per_tok * mf2).sum(dim=-1) / mf2.sum(dim=-1).clamp(min=1)
-            kl_scalar = kl_per_row.mean()
-            total = total + cfg.kl_coef * kl_scalar
-            kl_val = float(kl_scalar.detach().item())
-
-        mean_r = sum(r.reward for r in records) / max(1, len(records))
-        mean_a = float((advs * mask.to(dtype)).sum().item()) / max(
-            1, int(mask.sum().item())
+        kl_result = compute_kl_penalty(
+            new_logp, mask,
+            prompt_ids_list, response_ids_list,
+            score_temperature, ref_policy, cfg.kl_coef,
+            kl_estimator=cfg.kl_estimator,
         )
+        if kl_result is not None:
+            total = total + cfg.kl_coef * kl_result.kl_scalar
+            kl_val = kl_result.kl_val
+
+        mean_r = mean_reward_from_records(records)
+        mean_a = mean_advantage_from_tensors(advs, mask)
 
         stats = AlgoUpdateStats(
             loss=float(total.detach().item()) if total.requires_grad else float(total.item()),

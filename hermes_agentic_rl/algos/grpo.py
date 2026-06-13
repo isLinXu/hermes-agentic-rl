@@ -41,6 +41,14 @@ from hermes_agentic_rl.algos.common.advantage import (
     dapo_group_advantage,
     group_normalize_advantage,
 )
+from hermes_agentic_rl.algos.common.batch_prepare import (
+    build_advantage_tensor,
+    compute_entropy_bonus,
+    compute_kl_penalty,
+    mean_advantage_from_tensors,
+    mean_reward_from_records,
+    stack_old_logprobs,
+)
 from hermes_agentic_rl.algos.common.loss import (
     clipped_surrogate_loss_batched,
 )
@@ -231,34 +239,10 @@ class GRPO(BaseAlgo):
         dtype = new_logp.dtype
 
         # 4) Stack old_logprobs → [B, T_max] (right-aligned within R_i, 0-padded).
-        #    We mirror the backend's "last R_i positions of the response"
-        #    convention: score_batch puts each record's response in [0, R_i).
-        old_logp = torch.zeros(B, T_max, dtype=dtype, device=device)
-        for i, (rec, _) in enumerate(records_with_adv):
-            olp = rec.old_logprobs
-            R_i = min(len(olp), int(mask[i].sum().item()))
-            if R_i > 0:
-                old_logp[i, :R_i] = torch.tensor(
-                    olp[-R_i:], dtype=dtype, device=device
-                )
+        old_logp = stack_old_logprobs(records_with_adv, B, T_max, dtype, device, mask)
 
         # 5) Build advantage tensor [B, T_max].
-        adv_tensor = torch.zeros(B, T_max, dtype=dtype, device=device)
-        has_per_token = any(len(a) > 1 for _, a in records_with_adv)
-        if has_per_token:
-            for i, (rec, adv_list) in enumerate(records_with_adv):
-                R_i = int(mask[i].sum().item())
-                if R_i == 0 or not adv_list:
-                    continue
-                vals = adv_list[-R_i:] if len(adv_list) >= R_i else adv_list
-                adv_tensor[i, :len(vals)] = torch.tensor(vals, dtype=dtype, device=device)
-        else:
-            # scalar advantage broadcast across response tokens
-            scalars = torch.tensor(
-                [float(a[0]) if a else 0.0 for _, a in records_with_adv],
-                dtype=dtype, device=device,
-            )  # [B]
-            adv_tensor = scalars.unsqueeze(-1) * mask.to(dtype)  # [B, T_max]
+        adv_tensor = build_advantage_tensor(records_with_adv, B, T_max, dtype, device, mask)
 
         # 5b) Off-policy correction (TIS) for stale rollouts. No-op when
         #     tis_rho_clip <= 0 (synchronous/BSP). Multiplies the advantage by
@@ -285,49 +269,30 @@ class GRPO(BaseAlgo):
             clip_eps_high=cfg.clip_eps_high,
             loss_agg=cfg.loss_agg,
             max_len_for_dr_grpo=cfg.max_len_for_dr_grpo,
+            kl_estimator=cfg.kl_estimator,
         )
         total = pol_loss
         kl_val = 0.0
 
-        # 7) KL-to-reference (batched).
-        if ref_policy is not None and cfg.kl_coef > 0:
-            with torch.no_grad():
-                ref_logp, ref_mask = ref_policy.score_batch(
-                    prompt_ids_list,
-                    response_ids_list,
-                    temperature=score_temperature,
-                )
-            # Align widths
-            common_T = min(new_logp.shape[1], ref_logp.shape[1])
-            r = (new_logp[:, :common_T] - ref_logp[:, :common_T]) * mask[:, :common_T].to(dtype)
-            # estimator selection
-            if cfg.kl_estimator == "k1":
-                kl_per_tok = r
-            elif cfg.kl_estimator == "k2":
-                kl_per_tok = 0.5 * r.pow(2)
-            else:  # k3
-                r_c = r.clamp(min=-20.0, max=20.0)
-                kl_per_tok = torch.exp(-r_c) - 1.0 + r_c
-            mf = mask[:, :common_T].to(dtype)
-            tokens_per_row = mf.sum(dim=-1).clamp(min=1)
-            kl_per_row = (kl_per_tok * mf).sum(dim=-1) / tokens_per_row
-            kl_scalar = kl_per_row.mean()
-            total = total + cfg.kl_coef * kl_scalar
-            kl_val = float(kl_scalar.detach().item())
+        # 7) KL-to-reference (batched). Uses shared compute_kl_penalty
+        #    so the estimator path is consistent with RLOO/OPD/PPO.
+        kl_result = compute_kl_penalty(
+            new_logp, mask,
+            prompt_ids_list, response_ids_list,
+            score_temperature, ref_policy, cfg.kl_coef,
+            kl_estimator=cfg.kl_estimator,
+        )
+        if kl_result is not None:
+            total = total + cfg.kl_coef * kl_result.kl_scalar
+            kl_val = kl_result.kl_val
 
         # 8) Entropy bonus (-logπ proxy).
-        ent_val = 0.0
-        if cfg.entropy_coef > 0:
-            mf = mask.to(dtype)
-            ent_per_row = -(new_logp * mf).sum(dim=-1) / mf.sum(dim=-1).clamp(min=1)
-            ent_scalar = ent_per_row.mean()
+        ent_val, ent_scalar = compute_entropy_bonus(new_logp, mask, cfg.entropy_coef)
+        if ent_scalar is not None:
             total = total - cfg.entropy_coef * ent_scalar
-            ent_val = float(ent_scalar.detach().item())
 
-        mean_r = sum(r.reward for r in all_records) / max(1, len(all_records))
-        mean_a = float((adv_tensor * mask.to(dtype)).sum().item()) / max(
-            1, int(mask.sum().item())
-        )
+        mean_r = mean_reward_from_records(all_records)
+        mean_a = mean_advantage_from_tensors(adv_tensor, mask)
 
         stats = AlgoUpdateStats(
             loss=float(total.detach().item()) if total.requires_grad else float(total.item()),
@@ -350,29 +315,6 @@ class GRPO(BaseAlgo):
             },
         )
         return total, stats
-
-    def _expand_per_token(
-        self,
-        records_with_adv: list[tuple[RolloutRecord, list[float]]],
-    ) -> list[tuple[RolloutRecord, list[float]]]:
-        """Expand scalar advantages into per-token advantages via REINFORCE++."""
-        cfg = self.cfg
-        expanded: list[tuple[RolloutRecord, list[float]]] = []
-        for rec, adv_list in records_with_adv:
-            if len(rec.response_ids) == 0 or len(adv_list) == 0:
-                expanded.append((rec, adv_list))
-                continue
-            reward = adv_list[0]
-            per_tok = reinforce_plusplus_advantage(
-                response_ids=rec.response_ids,
-                old_logprobs=rec.old_logprobs,
-                reward=reward,
-                answer_start_id=cfg.answer_start_token_id,
-                gamma=cfg.reinforce_gamma,
-                eps=cfg.advantage_eps,
-            )
-            expanded.append((rec, per_tok))
-        return expanded
 
     def _expand_per_token(
         self,

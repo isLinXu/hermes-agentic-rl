@@ -40,7 +40,14 @@ from hermes_agentic_rl.algos.base import (
     RolloutBatch,
     RolloutRecord,
 )
-from hermes_agentic_rl.algos.common.kl import kl_from_logprobs_batched
+from hermes_agentic_rl.algos.common.batch_prepare import (
+    build_advantage_tensor,
+    compute_entropy_bonus,
+    compute_kl_penalty,
+    mean_advantage_from_tensors,
+    mean_reward_from_records,
+    stack_old_logprobs,
+)
 from hermes_agentic_rl.algos.common.loss import clipped_surrogate_loss_batched
 from hermes_agentic_rl.algos.common.reinforce_pp import expand_per_token_advantage
 from hermes_agentic_rl.algos.common.temperature import rollout_score_temperature
@@ -81,10 +88,7 @@ def rloo_advantage(
     if normalize:
         mean_a = sum(advs) / n
         std_a = (sum((a - mean_a) ** 2 for a in advs) / n) ** 0.5
-        if std_a > eps:
-            advs = [(a - mean_a) / (std_a + eps) for a in advs]
-        else:
-            advs = [0.0] * n
+        advs = [(a - mean_a) / (std_a + eps) for a in advs] if std_a > eps else [0.0] * n
 
     return advs
 
@@ -190,28 +194,8 @@ class RLOOAlgo(BaseAlgo):
         device, dtype = new_logp.device, new_logp.dtype
 
         # 3) Stack old logprobs and advantage tensor.
-        old_logp = torch.zeros(B, T_max, dtype=dtype, device=device)
-        for i, (rec, _) in enumerate(records_with_adv):
-            olp = rec.old_logprobs
-            R_i = min(len(olp), int(mask[i].sum().item()))
-            if R_i > 0:
-                old_logp[i, :R_i] = torch.tensor(olp[-R_i:], dtype=dtype, device=device)
-
-        has_per_token = any(len(a) > 1 for _, a in records_with_adv)
-        if has_per_token:
-            adv_tensor = torch.zeros(B, T_max, dtype=dtype, device=device)
-            for i, (rec, adv_list) in enumerate(records_with_adv):
-                R_i = int(mask[i].sum().item())
-                if R_i == 0 or not adv_list:
-                    continue
-                vals = adv_list[-R_i:] if len(adv_list) >= R_i else adv_list
-                adv_tensor[i, :len(vals)] = torch.tensor(vals, dtype=dtype, device=device)
-        else:
-            scalars = torch.tensor(
-                [float(a[0]) if a else 0.0 for _, a in records_with_adv],
-                dtype=dtype, device=device,
-            )
-            adv_tensor = scalars.unsqueeze(-1) * mask.to(dtype)  # [B, T_max]
+        old_logp = stack_old_logprobs(records_with_adv, B, T_max, dtype, device, mask)
+        adv_tensor = build_advantage_tensor(records_with_adv, B, T_max, dtype, device, mask)
 
         # 4) Clipped surrogate (asymmetric clip).
         pol_loss, loss_stats = clipped_surrogate_loss_batched(
@@ -220,35 +204,29 @@ class RLOOAlgo(BaseAlgo):
             clip_eps_high=cfg.clip_eps_high,
             loss_agg=cfg.loss_agg,
             max_len_for_dr_grpo=cfg.max_len_for_dr_grpo,
+            kl_estimator=cfg.kl_estimator,
         )
         total = pol_loss
         kl_val = 0.0
 
-        # 5) KL-to-reference — uses shared kl_from_logprobs_batched.
-        if ref_policy is not None and cfg.kl_coef > 0:
-            with torch.no_grad():
-                ref_logp, _ = ref_policy.score_batch(
-                    prompt_ids_list, response_ids_list, temperature=score_temperature,
-                )
-            kl_scalar = kl_from_logprobs_batched(
-                new_logp, ref_logp, mask, estimator=cfg.kl_estimator
-            )
-            total = total + cfg.kl_coef * kl_scalar
-            kl_val = float(kl_scalar.detach().item())
+        # 5) KL-to-reference — uses shared compute_kl_penalty.
+        kl_result = compute_kl_penalty(
+            new_logp, mask,
+            prompt_ids_list, response_ids_list,
+            score_temperature, ref_policy, cfg.kl_coef,
+            kl_estimator=cfg.kl_estimator,
+        )
+        if kl_result is not None:
+            total = total + cfg.kl_coef * kl_result.kl_scalar
+            kl_val = kl_result.kl_val
 
         # 6) Entropy bonus.
-        ent_val = 0.0
-        if cfg.entropy_coef > 0:
-            mf = mask.to(dtype)
-            ent_per_row = -(new_logp * mf).sum(-1) / mf.sum(-1).clamp(min=1)
-            ent_scalar = ent_per_row.mean()
+        ent_val, ent_scalar = compute_entropy_bonus(new_logp, mask, cfg.entropy_coef)
+        if ent_scalar is not None:
             total = total - cfg.entropy_coef * ent_scalar
-            ent_val = float(ent_scalar.detach().item())
 
-        mean_r = sum(r.reward for r in all_records) / max(1, len(all_records))
-        mean_a = float((adv_tensor * mask.to(dtype)).sum().item()) / max(
-            1, int(mask.sum().item())
-        )
+        mean_r = mean_reward_from_records(all_records)
+        mean_a = mean_advantage_from_tensors(adv_tensor, mask)
 
         stats = AlgoUpdateStats(
             loss=float(total.detach().item()) if total.requires_grad else float(total.item()),

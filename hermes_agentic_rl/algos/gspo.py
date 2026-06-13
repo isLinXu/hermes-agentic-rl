@@ -29,7 +29,10 @@ from hermes_agentic_rl.algos.common.advantage import (
     dapo_group_advantage,
     group_normalize_advantage,
 )
-from hermes_agentic_rl.algos.common.kl import kl_from_logprobs_batched
+from hermes_agentic_rl.algos.common.batch_prepare import (
+    compute_entropy_bonus,
+    compute_kl_penalty,
+)
 from hermes_agentic_rl.algos.common.reinforce_pp import (
     batch_normalize_advantage,
     whitened_advantage,
@@ -188,28 +191,24 @@ class GSPO(BaseAlgo):
         clip_frac = float(
             (ratio_detached.ne(clipped_detached)).to(torch.float32).mean().item()
         )
-        approx_kl = float((0.5 * log_ratio.detach().pow(2)).mean().item())
+        # k3 estimator — consistent with GRPO/RLOO/OPD/PPO global default.
+        log_r = log_ratio.detach().clamp(min=-20.0, max=20.0)
+        approx_kl = float((torch.exp(-log_r) - 1.0 + log_r).mean().item())
 
         kl_val = 0.0
-        if ref_policy is not None and cfg.kl_coef > 0:
-            with torch.no_grad():
-                ref_logp, _ref_mask = ref_policy.score_batch(
-                    prompt_ids_list,
-                    response_ids_list,
-                    temperature=score_temperature,
-                )
-            kl_scalar = kl_from_logprobs_batched(
-                new_logp, ref_logp, mask, estimator=cfg.kl_estimator
-            )
-            total = total + cfg.kl_coef * kl_scalar
-            kl_val = float(kl_scalar.detach().item())
+        kl_result = compute_kl_penalty(
+            new_logp, mask,
+            prompt_ids_list, response_ids_list,
+            score_temperature, ref_policy, cfg.kl_coef,
+            kl_estimator=cfg.kl_estimator,
+        )
+        if kl_result is not None:
+            total = total + cfg.kl_coef * kl_result.kl_scalar
+            kl_val = kl_result.kl_val
 
-        ent_val = 0.0
-        if cfg.entropy_coef > 0:
-            ent_per_row = -(new_logp * mask_f).sum(dim=-1) / mask_f.sum(dim=-1).clamp(min=1)
-            ent_scalar = ent_per_row.mean()
+        ent_val, ent_scalar = compute_entropy_bonus(new_logp, mask, cfg.entropy_coef)
+        if ent_scalar is not None:
             total = total - cfg.entropy_coef * ent_scalar
-            ent_val = float(ent_scalar.detach().item())
 
         stats = AlgoUpdateStats(
             loss=float(total.detach().item()) if total.requires_grad else float(total.item()),
