@@ -1,0 +1,38 @@
+# Local development stack for hermes-agentic-rl.
+#
+# Usage:
+#   docker compose run --rm dev pytest tests/test_mock_backend_core.py -q
+#   docker compose run --rm dev make smoke
+#   docker compose run --rm dev bash
+
+services:
+  dev:
+    build:
+      context: .
+      target: runtime
+    image: hermes-agentic-rl:dev
+    working_dir: /opt/hermes-agentic-rl
+    volumes:
+      - .:/opt/hermes-agentic-rl
+    environment:
+      PYTHONPATH: /opt/hermes-agentic-rl
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    command: ["python", "-m", "hermes_agentic_rl.cli.main", "--help"]
+
+  smoke:
+    build:
+      context: .
+      target: runtime
+    image: hermes-agentic-rl:dev
+    working_dir: /opt/hermes-agentic-rl
+    volumes:
+      - .:/opt/hermes-agentic-rl
+    command:
+      - python
+      - -m
+      - hermes_agentic_rl.cli.main
+      - train-rl
+      - --config
+      - configs/echo_grpo_mvp.yaml
+      - --output
+      - /tmp/smoke_out

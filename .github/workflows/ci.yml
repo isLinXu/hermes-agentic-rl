@@ -97,6 +97,11 @@ jobs:
           --cov-report=term-missing
           --cov-report=xml
 
+      - name: Run algorithm micro-benchmarks
+        run: >
+          python -m pytest tests/benchmarks/ -m benchmark -q
+          --benchmark-disable
+
       - name: Run eval-gate smoke
         run: python scripts/ci_eval_gate_smoke.py
 

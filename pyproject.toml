@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-agentic-rl"
-version = "0.10.0"
+version = "0.11.0"
 description = "Agentic RL framework for hermes-agent (GRPO + PPO + multi-turn + curriculum + dashboard + resumable checkpoints + K3 KL + pluggable metrics)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,6 +17,8 @@ rl = ["torch>=2.1"]
 data = ["datasets>=2.19", "pyarrow>=14"]
 # Observability stack (TensorBoard + W&B).
 metrics = ["tensorboard>=2.14", "wandb>=0.17"]
+# Typed YAML validation (Pydantic v2).
+config = ["pydantic>=2.7,<3"]
 # HF backend (AutoModelForCausalLM) — optional.
 hf = ["torch>=2.1", "transformers>=4.40"]
 # Hermes integration is pulled in separately by the user.
@@ -24,7 +26,9 @@ test = [
     "pytest>=7.4",
     "pytest-cov>=6.0",
     "pytest-asyncio>=0.24",
+    "pytest-benchmark>=4.0",
     "coverage[toml]>=7.4",
+    "pydantic>=2.7,<3",
 ]
 # Documentation build stack. Keep upper bounds so CI docs do not unexpectedly
 # jump across major Sphinx/MyST compatibility boundaries.
@@ -34,7 +38,9 @@ dev = [
     "pytest>=7.4",
     "pytest-cov>=6.0",
     "pytest-asyncio>=0.24",
+    "pytest-benchmark>=4.0",
     "coverage[toml]>=7.4",
+    "pydantic>=2.7,<3",
     "ruff>=0.15,<1",
     "mypy==1.11.2",
     "types-PyYAML>=6.0.12",
@@ -68,6 +74,7 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: exercises multiple subsystems or local external fixtures",
     "slow: longer-running tests that are skipped in fast local loops",
+    "benchmark: throughput / latency micro-benchmarks (pytest-benchmark)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -146,6 +153,8 @@ ignore = [
 "tests/**" = ["F401", "E402"]
 # __init__.py: re-export, unused-import is intentional.
 "**/__init__.py" = ["F401"]
+# Benchmarks: need Python 3.9 compatibility (strict zip and datetime.UTC are 3.10+/3.11+)
+"benchmarks/**" = ["B905", "UP017"]
 
 [tool.ruff.format]
 quote-style = "double"
