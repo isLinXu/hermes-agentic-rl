@@ -130,14 +130,14 @@ def _build_hermes_api_server_cls() -> type:
     ReasoningConfig = mods["ReasoningConfig"]
 
     # pull in OpenAI types (atroposlib depends on openai, so these will exist)
-    from openai.types.chat.chat_completion import (
+    from openai.types.chat.chat_completion import (  # type: ignore[attr-defined]
         ChatCompletion,
         ChatCompletionMessage,
     )
     from openai.types.chat.chat_completion import (
         Choice as ChatChoice,
     )
-    from openai.types.completion import Completion, CompletionChoice
+    from openai.types.completion import Completion, CompletionChoice  # type: ignore[attr-defined]
     from openai.types.completion_usage import CompletionUsage
 
     class HermesAPIServer(APIServer):  # type: ignore[misc,valid-type]
@@ -249,9 +249,8 @@ def _build_hermes_api_server_cls() -> type:
             backend_vocab = int(getattr(self.backend.tokenizer, "vocab_size", 0))
             hf_vocab = int(self.hf_tokenizer.vocab_size)
             # Conservative: require exact vocab_size match AND id in range.
-            direct = (
-                backend_vocab == hf_vocab
-                and all(0 <= i < backend_vocab for i in prompt_ids[:32])
+            direct = backend_vocab == hf_vocab and all(
+                0 <= i < backend_vocab for i in prompt_ids[:32]
             )
 
             if prompt_text is None:
@@ -267,9 +266,10 @@ def _build_hermes_api_server_cls() -> type:
                 if direct:
                     ids_in = list(prompt_ids)
                 else:
-                    ids_in = [self.backend.tokenizer.bos_id] + list(
-                        self.backend.tokenizer.encode(prompt_text)
-                    )
+                    ids_in = [
+                        self.backend.tokenizer.bos_id,
+                        *self.backend.tokenizer.encode(prompt_text),
+                    ]
                 gen = self.backend.generate(
                     prompt_ids=ids_in,
                     max_new_tokens=max_new,
@@ -287,9 +287,7 @@ def _build_hermes_api_server_cls() -> type:
                         "finish": finish,
                     }
                 # Bridge: re-encode in HF vocab for atropos consumers.
-                hf_tokens = list(
-                    self.hf_tokenizer.encode(text, add_special_tokens=False)
-                )
+                hf_tokens = list(self.hf_tokenizer.encode(text, add_special_tokens=False))
                 if not hf_tokens:
                     hf_tokens = [self.hf_tokenizer.eos_token_id or 0]
                 # Evenly spread the backend's total logprob across HF tokens.
@@ -323,7 +321,7 @@ def _build_hermes_api_server_cls() -> type:
             prompt_ids = self._messages_to_prompt_ids(messages)
             # Cheap textual fallback for the bridge path.
             prompt_text = "\n".join(
-                f"[{m.get('role','user')}] {m.get('content','')}" for m in messages
+                f"[{m.get('role', 'user')}] {m.get('content', '')}" for m in messages
             )
             gens = await self._generate_group(
                 prompt_ids, n, max_tokens, temperature, seed=seed, prompt_text=prompt_text
@@ -366,9 +364,7 @@ def _build_hermes_api_server_cls() -> type:
                 prompt_text = None
             else:
                 prompt_text = str(prompt)
-                prompt_ids = list(
-                    self.hf_tokenizer.encode(prompt_text, add_special_tokens=False)
-                )
+                prompt_ids = list(self.hf_tokenizer.encode(prompt_text, add_special_tokens=False))
             gens = await self._generate_group(
                 prompt_ids, n, max_tokens, temperature, seed=seed, prompt_text=prompt_text
             )
@@ -408,9 +404,7 @@ def _build_hermes_api_server_cls() -> type:
                 prompt_text = None
             else:
                 prompt_text = str(prompt)
-                prompt_ids = list(
-                    self.hf_tokenizer.encode(prompt_text, add_special_tokens=False)
-                )
+                prompt_ids = list(self.hf_tokenizer.encode(prompt_text, add_special_tokens=False))
             gens = await self._generate_group(
                 prompt_ids, n, max_tokens, temperature, seed=seed, prompt_text=prompt_text
             )
@@ -448,13 +442,29 @@ class _HFTokenizerToHermes(TokenizerProtocol):
 
     def __init__(self, hf_tok: Any) -> None:
         self._tok = hf_tok
-        self.vocab_size = int(getattr(hf_tok, "vocab_size", len(hf_tok)))
+        self._vocab_size = int(getattr(hf_tok, "vocab_size", len(hf_tok)))
         pad = hf_tok.pad_token_id
         eos = hf_tok.eos_token_id
         bos = hf_tok.bos_token_id
-        self.pad_id = int(pad if pad is not None else (eos if eos is not None else 0))
-        self.eos_id = int(eos) if eos is not None else self.pad_id
-        self.bos_id = int(bos) if bos is not None else self.pad_id
+        self._pad_id = int(pad if pad is not None else (eos if eos is not None else 0))
+        self._eos_id = int(eos) if eos is not None else self._pad_id
+        self._bos_id = int(bos) if bos is not None else self._pad_id
+
+    @property
+    def vocab_size(self) -> int:
+        return self._vocab_size
+
+    @property
+    def pad_id(self) -> int:
+        return self._pad_id
+
+    @property
+    def eos_id(self) -> int:
+        return self._eos_id
+
+    @property
+    def bos_id(self) -> int:
+        return self._bos_id
 
     def encode(self, text: str, add_eos: bool = False) -> list[int]:
         ids = list(self._tok.encode(text, add_special_tokens=False))
@@ -524,7 +534,7 @@ class AtroposEnvAdapter(BaseEnv):
 
             if env_config is None and env_cls is not None:
                 # Use whatever the env's default config says
-                env_config, _sc = env_cls.config_init()
+                env_config, _sc = env_cls.config_init()  # type: ignore[attr-defined]
             tok_name = getattr(env_config, "tokenizer_name", None) or "gpt2"
             hf_tok = AutoTokenizer.from_pretrained(tok_name)
             if hf_tok.pad_token_id is None:
@@ -535,6 +545,7 @@ class AtroposEnvAdapter(BaseEnv):
         if env_instance is not None:
             self.atropos_env = env_instance
         else:
+            assert env_cls is not None
             # We must control the server_configs so that atropos's
             # __init__ doesn't blow up trying to hit a real HTTP endpoint.
             api_cfg = mods["APIServerConfig"](

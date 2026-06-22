@@ -97,6 +97,7 @@ from hermes_agentic_rl.trainers.profiling import (
     format_json_record,
 )
 from hermes_agentic_rl.trainers.train_stats import TrainStats as _TrainStats
+from hermes_agentic_rl.utils.coerce import coerce_float
 
 
 class AgentLoopFactory(Protocol):
@@ -203,6 +204,7 @@ class OnPolicyTrainer:
     """
 
     algo_name: str = "on_policy"
+    _reward_shaping_fn: Callable[[list[RolloutRecord]], list[RolloutRecord]] | None = None
 
     def __init__(
         self,
@@ -608,19 +610,14 @@ class OnPolicyTrainer:
             if isinstance(custom_stages, list) and custom_stages:
                 from hermes_agentic_rl.curriculum import CurriculumStage
 
-                stages = [
-                    CurriculumStage(**s) if isinstance(s, dict) else s
-                    for s in custom_stages
-                ]
+                stages = [CurriculumStage(**s) if isinstance(s, dict) else s for s in custom_stages]
             sched_cfg = CurriculumSchedulerConfig(
                 auto_advance=bool(curriculum_cfg.get("auto_advance", True)),
                 min_iters_per_stage=int(curriculum_cfg.get("min_iters_per_stage", 10)),
                 allow_regression=bool(curriculum_cfg.get("allow_regression", False)),
                 regression_factor=float(curriculum_cfg.get("regression_factor", 0.5)),
             )
-            self._curriculum_scheduler = CurriculumScheduler(
-                stages=stages, cfg=sched_cfg
-            )
+            self._curriculum_scheduler = CurriculumScheduler(stages=stages, cfg=sched_cfg)
 
         self._maybe_resume()
 
@@ -780,14 +777,24 @@ class OnPolicyTrainer:
         self._seed_counter += 1
         return self.cfg.seed + self._seed_counter
 
-    async def _collect_group(self, item: dict[str, Any]) -> list[RolloutRecord]:
+    async def _collect_group(
+        self,
+        item: dict[str, Any],
+        *,
+        temperature: float | None = None,
+        group_size: int | None = None,
+    ) -> list[RolloutRecord]:
         if self._batch_rollout_generator is not None:
-            return await self._collect_group_batched(item)
+            return await self._collect_group_batched(
+                item,
+                temperature=temperature,
+                group_size=group_size,
+            )
 
         instruction = self.env.format_prompt(item)
         records: list[RolloutRecord] = []
         group_id = str(item.get("task_id", "group"))
-        for _g in range(self.cfg.group_size):
+        for _g in range(group_size if group_size is not None else self.cfg.group_size):
             loop = self.agent_loop_factory(backend=self.policy, seed=self._next_seed())
             trajectory: Trajectory = await RolloutManager(loop).collect(item, instruction)
             summary = await self.reward_manager.evaluate(item, trajectory, tool_context=None)
@@ -805,10 +812,10 @@ class OnPolicyTrainer:
             dense_meta = _rl_dense_reward_metadata(rl_meta)
             rollout_temperature = _rollout_temperature_from_meta(
                 rl_meta,
-                fallback=self.cfg.temperature,
+                fallback=temperature if temperature is not None else self.cfg.temperature,
             )
 
-            base_meta = {
+            base_meta: dict[str, Any] = {
                 "final_output": trajectory.final_output,
                 "reward_components": [
                     _reward_component_payload(component) for component in summary.components
@@ -881,7 +888,10 @@ class OnPolicyTrainer:
                             prompt_ids=list(turn["prompt_prefix_ids"]),
                             response_ids=list(turn["response_ids"]),
                             old_logprobs=list(turn["old_logprobs"]),
-                            reward=float(credit_meta.get("reward", summary.final_score)),
+                            reward=coerce_float(
+                                credit_meta.get("reward"),
+                                default=float(summary.final_score),
+                            ),
                             group_id=turn_group_id,
                             metadata={
                                 **base_meta,
@@ -912,14 +922,22 @@ class OnPolicyTrainer:
                 )
         return records
 
-    async def _collect_group_batched(self, item: dict[str, Any]) -> list[RolloutRecord]:
+    async def _collect_group_batched(
+        self,
+        item: dict[str, Any],
+        *,
+        temperature: float | None = None,
+        group_size: int | None = None,
+    ) -> list[RolloutRecord]:
         instruction = self.env.format_prompt(item)
         encoder = PromptStateEncoder(self.policy.tokenizer)
         prompt_ids = list(encoder.encode({"instruction": instruction}).prompt_ids)
         if self._batch_rollout_generator is None:
             raise RuntimeError("batched rollout collection requires a batch rollout generator")
+        _gs = group_size if group_size is not None else self.cfg.group_size
+        _temp = temperature if temperature is not None else self.cfg.temperature
         outputs = self._batch_rollout_generator.generate(
-            [prompt_ids for _ in range(self.cfg.group_size)],
+            [prompt_ids for _ in range(_gs)],
             seed=self._next_seed(),
         )
 
@@ -934,7 +952,7 @@ class OnPolicyTrainer:
                 prompt_ids=prompt_ids,
                 response_ids=list(gen.response_ids),
                 old_logprobs=list(gen.logprobs),
-                temperature=self.cfg.temperature,
+                temperature=_temp,
                 finished=gen.finished,
             )
             summary = await self.reward_manager.evaluate(item, trajectory, tool_context=None)
@@ -947,7 +965,7 @@ class OnPolicyTrainer:
             rl_meta = _extract_rl(trajectory) or {}
             dense_meta = _rl_dense_reward_metadata(rl_meta)
             opd_hint = rl_meta.get("opd_hint")
-            opd_meta = (
+            opd_meta: dict[str, Any] = (
                 {"opd_hint": opd_hint} if isinstance(opd_hint, str) and opd_hint.strip() else {}
             )
             next_state = _extract_next_state(trajectory)
@@ -981,7 +999,7 @@ class OnPolicyTrainer:
                         "final_output_chars": len(trajectory.final_output or ""),
                         "prompt_tokens": len(prompt_ids),
                         "response_tokens": len(gen.response_ids),
-                        "rollout_temperature": float(self.cfg.temperature),
+                        "rollout_temperature": float(_temp),
                         "reward_summary_metadata": dict(summary.metadata),
                         **dense_meta,
                     },
@@ -1178,7 +1196,7 @@ class OnPolicyTrainer:
 
         # Apply reward shaping (if configured via subclass constructor).
         with self._profiler.measure("reward.shape"):
-            if getattr(self, "_reward_shaping_fn", None) is not None:
+            if self._reward_shaping_fn is not None:
                 batch_records = list(self._reward_shaping_fn(batch_records))
 
         # OPD in-trainer hint extraction: recover directive hints from the
@@ -1606,7 +1624,9 @@ class OnPolicyTrainer:
             ),
             # Curriculum scheduler state for resuming stage progression.
             curriculum_state=(
-                self._curriculum_scheduler.state_dict() if self._curriculum_scheduler is not None else None
+                self._curriculum_scheduler.state_dict()
+                if self._curriculum_scheduler is not None
+                else None
             ),
         )
         use_async = (
@@ -1616,7 +1636,9 @@ class OnPolicyTrainer:
             and manager is None
         )
         if use_async:
-            self._async_ckpt_saver.submit(target_mgr, snapshot_state_to_cpu(state))
+            saver = self._async_ckpt_saver
+            assert saver is not None
+            saver.submit(target_mgr, snapshot_state_to_cpu(state))
         else:
             target_mgr.save(state)
 
@@ -1828,16 +1850,23 @@ class OnPolicyTrainer:
         n_eval = max(1, int(getattr(self.cfg, "eval_prompts", 4)))
         eval_temp = float(getattr(self.cfg, "eval_temperature", 0.0))
 
-        try:
-            eval_records = asyncio.run(
-                self._collect_group(
-                    n_items=n_eval,
-                    temperature=eval_temp,
-                    group_size=1,  # greedy → 1 sample per prompt
+        eval_records: list[RolloutRecord] = []
+        for _ in range(n_eval):
+            try:
+                item = asyncio.run(self.env.get_next_item())
+            except StopIteration:
+                break
+            try:
+                records = asyncio.run(
+                    self._collect_group(
+                        item,
+                        temperature=eval_temp,
+                        group_size=1,
+                    )
                 )
-            )
-        except Exception:
-            return None
+                eval_records.extend(records)
+            except Exception:
+                continue
 
         if not eval_records:
             return None

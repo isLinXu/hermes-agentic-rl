@@ -107,7 +107,7 @@ def cached_judge(
     jid = judge_id or getattr(judge_fn, "__qualname__", repr(judge_fn))
 
     async def _wrapped(response: str, next_state: str) -> Any:
-        key = cache.make_key(jid, response, next_state)
+        key = cache.make_key(str(jid), response, next_state)
         found, value = cache.get(key)
         if found:
             return value

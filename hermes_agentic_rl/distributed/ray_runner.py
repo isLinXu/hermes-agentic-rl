@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hermes_agentic_rl.distributed.mp_pool import RolloutTask
+from hermes_agentic_rl.utils.coerce import coerce_float
 
 
 class RayUnavailableError(RuntimeError):
@@ -40,6 +41,7 @@ class RayUnavailableError(RuntimeError):
 # ---------------------------------------------------------------------------
 # Ray worker actor
 # ---------------------------------------------------------------------------
+
 
 def _make_ray_actor_cls() -> Any:
     """Lazily create the Ray actor class to avoid import-time Ray dependency."""
@@ -64,8 +66,8 @@ def _make_ray_actor_cls() -> Any:
         ) -> None:
             self.worker_id = worker_id
             self.build_ctx = build_ctx
-            self._backend, self._env, self._reward_manager, self._agent_loop_factory = (
-                builder_fn(build_ctx)
+            self._backend, self._env, self._reward_manager, self._agent_loop_factory = builder_fn(
+                build_ctx
             )
             self._loop = asyncio.new_event_loop()
 
@@ -74,6 +76,7 @@ def _make_ray_actor_cls() -> Any:
             import io
 
             import torch
+
             buf = io.BytesIO(state_dict_bytes)
             state_dict = torch.load(buf, map_location="cpu", weights_only=True)
             if hasattr(self._backend, "model") and self._backend.model is not None:
@@ -97,9 +100,7 @@ def _make_ray_actor_cls() -> Any:
             from hermes_agentic_rl.core.rollout_manager import RolloutManager
             from hermes_agentic_rl.trainers.multi_turn_credit import assign_multi_turn_rewards
 
-            loop_obj = self._agent_loop_factory(
-                backend=self._backend, seed=task.seed
-            )
+            loop_obj = self._agent_loop_factory(backend=self._backend, seed=task.seed)
             traj = await RolloutManager(loop_obj).collect(task.item, task.instruction)
             summary = await self._reward_manager.evaluate(task.item, traj, tool_context=None)
 
@@ -174,7 +175,10 @@ def _make_ray_actor_cls() -> Any:
                             "response_ids": list(turn["response_ids"]),
                             "old_logprobs": list(turn["old_logprobs"]),
                             "old_seq_logprob": float(sum(turn["old_logprobs"])),
-                            "reward": float(credit_meta.get("reward", summary.final_score)),
+                            "reward": coerce_float(
+                                credit_meta.get("reward"),
+                                default=float(summary.final_score),
+                            ),
                             "group_id": turn_group_id,
                             "metadata": {
                                 **base_meta,
@@ -220,7 +224,7 @@ def _make_ray_actor_cls() -> Any:
 class RayRolloutPoolConfig:
     n_workers: int = 4
     num_cpus_per_worker: float = 1.0
-    num_gpus_per_worker: float = 0.0   # >0 for GPU rollout (e.g. vLLM workers)
+    num_gpus_per_worker: float = 0.0  # >0 for GPU rollout (e.g. vLLM workers)
     ray_init_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
@@ -283,11 +287,13 @@ class RayRolloutPool:
         import io
 
         import torch
+
         buf = io.BytesIO()
         torch.save(state_dict, buf)
         weights_bytes = buf.getvalue()
 
         import ray
+
         refs = [actor.load_weights.remote(weights_bytes) for actor in self._actors]
         ray.get(refs)
 
@@ -307,6 +313,7 @@ class RayRolloutPool:
     def drain(self, expected: int) -> list[dict[str, Any]]:
         """Gather submitted task results in submission order."""
         import ray
+
         refs = self._pending_refs[:expected]
         self._pending_refs = self._pending_refs[expected:]
         results = ray.get(refs)
@@ -314,8 +321,7 @@ class RayRolloutPool:
         for result in out:
             if "error" in result:
                 raise RuntimeError(
-                    f"ray rollout worker {result.get('worker_id')} crashed: "
-                    f"{result.get('error')}"
+                    f"ray rollout worker {result.get('worker_id')} crashed: {result.get('error')}"
                 )
         out.sort(key=lambda r: r["task_seq"])
         return out
@@ -330,6 +336,7 @@ class RayRolloutPool:
         if not self._started:
             return
         import ray
+
         for actor in self._actors:
             ray.kill(actor)
         self._actors = []

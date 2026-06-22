@@ -115,12 +115,12 @@ class HFCausalLMBackend(LLMBackend):
         extra_kw = dict(self.cfg.extra_model_kwargs)
         if self.cfg.flash_attention:
             extra_kw["attn_implementation"] = "flash_attention_2"
-        self.model = AutoModelForCausalLM.from_pretrained(
+        self.model = AutoModelForCausalLM.from_pretrained(  # type: ignore[call-arg]
             self.cfg.model_name_or_path,
             torch_dtype=dtype,
             trust_remote_code=self.cfg.trust_remote_code,
             **extra_kw,
-        ).to(self.cfg.device)
+        ).to(device=torch.device(self.cfg.device))
         self._gradient_checkpointing_enabled = False
         self._gradient_checkpointing_prev_use_cache: Any = None
 

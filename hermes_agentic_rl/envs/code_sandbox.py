@@ -59,7 +59,7 @@ class ExecResult:
 @dataclass(slots=True)
 class LocalSandboxConfig:
     timeout_seconds: float = 10.0
-    max_output_bytes: int = 65536    # 64 KB stdout + stderr cap
+    max_output_bytes: int = 65536  # 64 KB stdout + stderr cap
     extra_env: dict[str, str] = field(default_factory=dict)
 
 
@@ -85,14 +85,13 @@ class LocalSandbox:
             f.write(code)
             fpath = f.name
         try:
-            return await asyncio.get_event_loop().run_in_executor(
-                None, self._run_sync, fpath
-            )
+            return await asyncio.get_event_loop().run_in_executor(None, self._run_sync, fpath)
         finally:
             Path(fpath).unlink(missing_ok=True)
 
     def _run_sync(self, fpath: str) -> ExecResult:
         import os
+
         env = dict(os.environ)
         env.update(self.cfg.extra_env)
         # Restrict PATH to only Python to limit damage
@@ -108,10 +107,14 @@ class LocalSandbox:
             elapsed = time.monotonic() - t0
             stdout = proc.stdout[: self.cfg.max_output_bytes].decode("utf-8", errors="replace")
             stderr = proc.stderr[: self.cfg.max_output_bytes].decode("utf-8", errors="replace")
-            return ExecResult(stdout=stdout, stderr=stderr, returncode=proc.returncode, elapsed=elapsed)
+            return ExecResult(
+                stdout=stdout, stderr=stderr, returncode=proc.returncode, elapsed=elapsed
+            )
         except subprocess.TimeoutExpired:
             elapsed = time.monotonic() - t0
-            return ExecResult(stdout="", stderr="TIMEOUT", returncode=-1, elapsed=elapsed, timed_out=True)
+            return ExecResult(
+                stdout="", stderr="TIMEOUT", returncode=-1, elapsed=elapsed, timed_out=True
+            )
         except Exception as exc:
             elapsed = time.monotonic() - t0
             return ExecResult(stdout="", stderr=str(exc), returncode=-2, elapsed=elapsed)
@@ -121,7 +124,12 @@ class LocalSandbox:
         t0 = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "pytest", test_pattern, "--tb=short", "-q",
+                sys.executable,
+                "-m",
+                "pytest",
+                test_pattern,
+                "--tb=short",
+                "-q",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=repo_path,
@@ -132,15 +140,25 @@ class LocalSandbox:
                 )
             except TimeoutError:
                 proc.kill()
-                return ExecResult(stdout="", stderr="TIMEOUT", returncode=-1,
-                                  elapsed=time.monotonic() - t0, timed_out=True)
+                return ExecResult(
+                    stdout="",
+                    stderr="TIMEOUT",
+                    returncode=-1,
+                    elapsed=time.monotonic() - t0,
+                    timed_out=True,
+                )
             stdout = stdout_b[: self.cfg.max_output_bytes].decode("utf-8", errors="replace")
             stderr = stderr_b[: self.cfg.max_output_bytes].decode("utf-8", errors="replace")
-            return ExecResult(stdout=stdout, stderr=stderr,
-                              returncode=proc.returncode or 0, elapsed=time.monotonic() - t0)
+            return ExecResult(
+                stdout=stdout,
+                stderr=stderr,
+                returncode=proc.returncode or 0,
+                elapsed=time.monotonic() - t0,
+            )
         except Exception as exc:
-            return ExecResult(stdout="", stderr=str(exc), returncode=-2,
-                              elapsed=time.monotonic() - t0)
+            return ExecResult(
+                stdout="", stderr=str(exc), returncode=-2, elapsed=time.monotonic() - t0
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +170,7 @@ class LocalSandbox:
 class DockerSandboxConfig:
     image: str = "python:3.11-slim"
     timeout_seconds: float = 60.0
-    max_output_bytes: int = 262144   # 256 KB
+    max_output_bytes: int = 262144  # 256 KB
     network_disabled: bool = True
     memory_limit: str = "512m"
     cpus: float = 1.0
@@ -179,13 +197,16 @@ class DockerSandbox:
             code_path = Path(tmpdir) / "run.py"
             code_path.write_text(code, encoding="utf-8")
             cmd = [
-                "docker", "run", "--rm",
+                "docker",
+                "run",
+                "--rm",
                 "--network=none" if self.cfg.network_disabled else "",
                 f"--memory={self.cfg.memory_limit}",
                 f"--cpus={self.cfg.cpus}",
                 f"-v{tmpdir}:{tmpdir}:ro",
                 self.cfg.image,
-                "python3", str(code_path),
+                "python3",
+                str(code_path),
             ]
             cmd = [c for c in cmd if c]  # strip empty strings
             return await self._exec(cmd)
@@ -204,15 +225,25 @@ class DockerSandbox:
                 )
             except TimeoutError:
                 proc.kill()
-                return ExecResult(stdout="", stderr="TIMEOUT", returncode=-1,
-                                  elapsed=time.monotonic() - t0, timed_out=True)
+                return ExecResult(
+                    stdout="",
+                    stderr="TIMEOUT",
+                    returncode=-1,
+                    elapsed=time.monotonic() - t0,
+                    timed_out=True,
+                )
             stdout = stdout_b[: self.cfg.max_output_bytes].decode("utf-8", errors="replace")
             stderr = stderr_b[: self.cfg.max_output_bytes].decode("utf-8", errors="replace")
-            return ExecResult(stdout=stdout, stderr=stderr,
-                              returncode=proc.returncode or 0, elapsed=time.monotonic() - t0)
+            return ExecResult(
+                stdout=stdout,
+                stderr=stderr,
+                returncode=proc.returncode or 0,
+                elapsed=time.monotonic() - t0,
+            )
         except Exception as exc:
-            return ExecResult(stdout="", stderr=str(exc), returncode=-2,
-                              elapsed=time.monotonic() - t0)
+            return ExecResult(
+                stdout="", stderr=str(exc), returncode=-2, elapsed=time.monotonic() - t0
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -225,9 +256,9 @@ class CodeFixItem:
     """One SWE-bench style task."""
 
     task_id: str
-    repo_path: str           # path to a local git-clean copy of the repo
-    failing_tests: list[str] # list of pytest node IDs for the failing tests
-    issue_description: str   # natural language description of the bug
+    repo_path: str  # path to a local git-clean copy of the repo
+    failing_tests: list[str]  # list of pytest node IDs for the failing tests
+    issue_description: str  # natural language description of the bug
     gold_patch: str | None = None  # reference solution (for eval only)
 
 
@@ -287,9 +318,7 @@ class CodeFixEnv(BaseEnv):
                     LocalSandboxConfig(timeout_seconds=self.cfg.test_timeout)
                 )
         else:
-            self._sandbox = LocalSandbox(
-                LocalSandboxConfig(timeout_seconds=self.cfg.test_timeout)
-            )
+            self._sandbox = LocalSandbox(LocalSandboxConfig(timeout_seconds=self.cfg.test_timeout))
 
     async def setup(self) -> None:
         pass
@@ -346,10 +375,12 @@ class CodeFixEnv(BaseEnv):
         fix_item: CodeFixItem | None = item.get("_fix_item")
         if fix_item is None or fix_item.gold_patch is None:
             return []
-        return [SupervisedSample(
-            instruction=self._make_prompt(fix_item),
-            response=f"```diff\n{fix_item.gold_patch}\n```",
-        )]
+        return [
+            SupervisedSample(
+                instruction=self._make_prompt(fix_item),
+                response=f"```diff\n{fix_item.gold_patch}\n```",
+            )
+        ]
 
     # ── Patch extraction ────────────────────────────────────────────────
 
@@ -357,13 +388,14 @@ class CodeFixEnv(BaseEnv):
     def _extract_patch(text: str) -> str | None:
         """Extract unified diff from response text."""
         import re
+
         m = re.search(r"```diff\s*(.*?)```", text, re.DOTALL)
         if m:
             return m.group(1).strip()
         # Bare diff without code block
         m2 = re.search(r"^--- a/", text, re.MULTILINE)
         if m2:
-            return text[m2.start():].strip()
+            return text[m2.start() :].strip()
         return None
 
     # ── Patch application ───────────────────────────────────────────────
@@ -378,8 +410,9 @@ class CodeFixEnv(BaseEnv):
                 None,
                 lambda: subprocess.run(
                     ["patch", "-p1", "--dry-run", "-i", patch_file],
-                    capture_output=True, cwd=repo_path,
-                )
+                    capture_output=True,
+                    cwd=repo_path,
+                ),
             )
             if result.returncode != 0:
                 return False
@@ -388,8 +421,9 @@ class CodeFixEnv(BaseEnv):
                 None,
                 lambda: subprocess.run(
                     ["patch", "-p1", "-i", patch_file],
-                    capture_output=True, cwd=repo_path,
-                )
+                    capture_output=True,
+                    cwd=repo_path,
+                ),
             )
             return True
         except FileNotFoundError:
@@ -427,36 +461,46 @@ class CodeFixEnv(BaseEnv):
         format_score = self.cfg.format_reward_weight if patch else 0.0
 
         if patch is None:
-            return [RewardResult(
-                name="code_fix",
-                score=format_score,
-                weight=1.0,
-                reason="no_patch_found",
-            )]
+            return [
+                RewardResult(
+                    name="code_fix",
+                    score=format_score,
+                    weight=1.0,
+                    reason="no_patch_found",
+                )
+            ]
 
         # Apply patch
         applied = await self._apply_patch(fix_item.repo_path, patch)
         if not applied:
             await self._reset_repo(fix_item.repo_path)
-            return [RewardResult(
-                name="code_fix",
-                score=format_score * 0.5,
-                weight=1.0,
-                reason="patch_apply_failed",
-            )]
+            return [
+                RewardResult(
+                    name="code_fix",
+                    score=format_score * 0.5,
+                    weight=1.0,
+                    reason="patch_apply_failed",
+                )
+            ]
 
         # Run failing tests
         pass_count = 0
         total = len(fix_item.failing_tests)
         for test_id in fix_item.failing_tests:
             try:
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: subprocess.run(
-                        [sys.executable, "-m", "pytest", test_id, "-q", "--tb=no"],
-                        capture_output=True, timeout=self.cfg.test_timeout,
+
+                def _run_pytest(test_path: str) -> subprocess.CompletedProcess[bytes]:
+                    return subprocess.run(
+                        [sys.executable, "-m", "pytest", test_path, "-q", "--tb=no"],
+                        capture_output=True,
+                        timeout=self.cfg.test_timeout,
                         cwd=fix_item.repo_path,
                     )
+
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    _run_pytest,
+                    test_id,
                 )
                 if result.returncode == 0:
                     pass_count += 1
@@ -469,9 +513,11 @@ class CodeFixEnv(BaseEnv):
         pass_reward = self.cfg.pass_reward_weight * pass_frac
         score = format_score + pass_reward
 
-        return [RewardResult(
-            name="code_fix",
-            score=min(1.0, score),
-            weight=1.0,
-            reason=f"tests={pass_count}/{total} patch_ok=True",
-        )]
+        return [
+            RewardResult(
+                name="code_fix",
+                score=min(1.0, score),
+                weight=1.0,
+                reason=f"tests={pass_count}/{total} patch_ok=True",
+            )
+        ]

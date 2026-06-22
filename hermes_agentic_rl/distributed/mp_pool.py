@@ -41,6 +41,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from hermes_agentic_rl.utils.coerce import coerce_float
+
 BuilderFn = Callable[[dict[str, Any]], tuple[Any, Any, Any, Any]]
 """Signature: builder_fn(build_ctx) -> (backend, env, reward_manager, agent_loop_factory)."""
 
@@ -57,7 +59,7 @@ class RolloutTask:
 @dataclass(slots=True)
 class MPRolloutPoolConfig:
     n_workers: int = 2
-    ctx_method: str = "spawn"   # "fork" is faster but unsafe with torch on macOS
+    ctx_method: str = "spawn"  # "fork" is faster but unsafe with torch on macOS
     task_timeout: float = 120.0
     build_ctx: dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -117,7 +119,7 @@ def _worker_main(
         except Exception:
             break
         if msg is None:
-            break   # shutdown sentinel
+            break  # shutdown sentinel
         kind, payload = msg
         if kind == "task":
             task: RolloutTask = payload
@@ -125,7 +127,13 @@ def _worker_main(
             try:
                 loop = agent_loop_factory(backend=backend, seed=task.seed)
 
-                async def _run(task_item=task.item, task_instruction=task.instruction, task_loop=loop):
+                async def _run(
+                    task_item=task.item,
+                    task_instruction=task.instruction,
+                    task_loop=loop,
+                    _task_task_id=task.task_id,
+                    _task_task_seq=task.task_seq,
+                ):
                     traj = await RolloutManager(task_loop).collect(task_item, task_instruction)
                     summary = await reward_manager.evaluate(task_item, traj, tool_context=None)
                     from hermes_agentic_rl.trainers.multi_turn_credit import (
@@ -134,13 +142,11 @@ def _worker_main(
 
                     runtime_block = traj.metadata.get("runtime") or {}
                     rl_meta = (
-                        runtime_block.get("rl")
-                        if isinstance(runtime_block, dict)
-                        else None
+                        runtime_block.get("rl") if isinstance(runtime_block, dict) else None
                     ) or traj.metadata.get("rl")
                     if rl_meta is None:
                         raise RuntimeError("agent loop missing rl metadata")
-                    prompt_group_id = str(task.item.get("task_id", task.task_id or "group"))
+                    prompt_group_id = str(task_item.get("task_id", _task_task_id or "group"))
                     records: list[dict[str, Any]] = []
                     base_meta = {
                         "final_output": traj.final_output,
@@ -153,7 +159,7 @@ def _worker_main(
                     if turns:
                         teacher_samples = []
                         try:
-                            teacher_samples = _env_unused.build_supervised_samples(task.item)
+                            teacher_samples = _env_unused.build_supervised_samples(task_item)
                         except Exception:
                             teacher_samples = []
                         teacher_responses: list[str | None] | None = None
@@ -167,7 +173,9 @@ def _worker_main(
                                     explicit = True
                             if not explicit:
                                 if len(teacher_samples) == len(turns):
-                                    teacher_responses = [str(sample.response) for sample in teacher_samples]
+                                    teacher_responses = [
+                                        str(sample.response) for sample in teacher_samples
+                                    ]
                                 elif len(turns) == 1 and teacher_samples:
                                     teacher_responses = [str(teacher_samples[0].response)]
                             if teacher_responses is not None and all(
@@ -205,7 +213,10 @@ def _worker_main(
                                     "prompt_ids": list(turn["prompt_prefix_ids"]),
                                     "response_ids": list(turn["response_ids"]),
                                     "old_logprobs": list(turn["old_logprobs"]),
-                                    "reward": float(credit_meta.get("reward", summary.final_score)),
+                                    "reward": coerce_float(
+                                        credit_meta.get("reward"),
+                                        default=float(summary.final_score),
+                                    ),
                                     "group_id": turn_group_id,
                                     "metadata": {
                                         **base_meta,
@@ -229,7 +240,7 @@ def _worker_main(
                             }
                         )
                     return {
-                        "task_seq": task.task_seq,
+                        "task_seq": _task_task_seq,
                         "worker_id": worker_id,
                         "records": records,
                         "final_score": float(summary.final_score),

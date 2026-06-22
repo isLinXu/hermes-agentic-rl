@@ -39,7 +39,6 @@ from hermes_agentic_rl.collectors.conversation_collector import (
 from hermes_agentic_rl.collectors.replay_mining import mine_session_turn_sample
 from hermes_agentic_rl.collectors.skill_export import export_skill_candidates
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -72,9 +71,7 @@ def distill_skills(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # [1] Load + auto-mine into the record shape the exporter expects.
-    records, mining_stats = _load_and_mine_traces(
-        trace_paths, mining_config=mining_config
-    )
+    records, mining_stats = _load_and_mine_traces(trace_paths, mining_config=mining_config)
 
     # Persist the intermediate mined replay so the run is reproducible /
     # debuggable and so power users can re-run the exporter alone.
@@ -93,9 +90,7 @@ def distill_skills(
 
     # [3] Render the human-readable report.
     report_path = out_dir / "DISTILL_REPORT.md"
-    report_path.write_text(
-        _render_report(summary, status_filter=status_filter), encoding="utf-8"
-    )
+    report_path.write_text(_render_report(summary, status_filter=status_filter), encoding="utf-8")
     summary["report_path"] = str(report_path)
     return summary
 
@@ -166,9 +161,7 @@ def _load_one(path: str | Path) -> list[dict[str, Any]]:
     payload = json.loads(text)
     if isinstance(payload, list):
         # Either a list of session dicts, or a bare list of messages.
-        if payload and all(
-            isinstance(m, dict) and "role" in m for m in payload
-        ):
+        if payload and all(isinstance(m, dict) and "role" in m for m in payload):
             return [{"messages": payload}]
         return [item for item in payload if isinstance(item, dict)]
     if isinstance(payload, dict):
@@ -200,15 +193,11 @@ def _mine_session(
     if not isinstance(turn_rewards, list):
         turn_rewards = None
 
-    samples = collect_session_turn_samples(
-        messages, session_id=session_id, task_id=task_id
-    )
+    samples = collect_session_turn_samples(messages, session_id=session_id, task_id=task_id)
 
     out: list[dict[str, Any]] = []
     for sample in samples:
-        reward = _turn_reward(
-            sample.turn_index, turn_rewards, session_reward
-        )
+        reward = _turn_reward(sample.turn_index, turn_rewards, session_reward)
         mining = mine_session_turn_sample(
             sample, reward=reward, metadata=sample.metadata, config=mining_config
         )
@@ -239,7 +228,7 @@ def _turn_reward(
     session_reward: float | None,
 ) -> float:
     if turn_rewards is not None and 0 <= turn_index < len(turn_rewards):
-        return _coerce_float(turn_rewards[turn_index], default=0.0)
+        return _coerce_float(turn_rewards[turn_index], default=0.0) or 0.0
     if session_reward is not None:
         return session_reward
     return 0.0
@@ -311,11 +300,7 @@ def _render_report(summary: dict[str, Any], *, status_filter: str | None) -> str
     else:
         shown = skills
         if status_filter:
-            shown = [
-                s
-                for s in skills
-                if str(s.get("quality", {}).get("status")) == status_filter
-            ]
+            shown = [s for s in skills if str(s.get("quality", {}).get("status")) == status_filter]
             lines.append(f"_Filtered to status = `{status_filter}`._")
             lines.append("")
         lines += [

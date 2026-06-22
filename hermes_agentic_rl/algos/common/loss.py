@@ -138,7 +138,9 @@ def clipped_value_loss_batched(
 
     with torch.no_grad():
         n_tok = mask.sum().clamp(min=1)
-        clip_frac = (((values_new - values_old).abs() > clip_eps) & mask).to(values_new.dtype).sum() / n_tok
+        clip_frac = (((values_new - values_old).abs() > clip_eps) & mask).to(
+            values_new.dtype
+        ).sum() / n_tok
         v_mean = (values_new * mf).sum() / n_tok
     return loss, {
         "value_clip_frac": float(clip_frac.item()),
@@ -183,6 +185,7 @@ def clipped_surrogate_loss(
         return zero, {"clip_frac": 0.0, "ratio_mean": 1.0}
 
     ratio = torch.exp(new_logprobs - old_logprobs)
+    adv: float | torch.Tensor
     if isinstance(advantage, torch.Tensor):
         adv = advantage.to(dtype=new_logprobs.dtype, device=new_logprobs.device).detach()
         if adv.numel() != new_logprobs.numel():

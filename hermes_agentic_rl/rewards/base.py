@@ -10,6 +10,10 @@ class BaseReward(ABC):
     name: str
 
     @abstractmethod
+    def __init__(self, **kwargs: Any) -> None:
+        pass
+
+    @abstractmethod
     async def evaluate(
         self,
         item: dict[str, Any],

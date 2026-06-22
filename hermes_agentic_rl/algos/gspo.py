@@ -111,9 +111,7 @@ class GSPO(BaseAlgo):
 
         prompt_ids_list = [rec.prompt_ids for rec, _adv in records_with_adv]
         response_ids_list = [rec.response_ids for rec, _adv in records_with_adv]
-        score_temperature = rollout_score_temperature(
-            [rec for rec, _adv in records_with_adv]
-        )
+        score_temperature = rollout_score_temperature([rec for rec, _adv in records_with_adv])
 
         # When a compound algorithm (HybridAlgo) has pre-computed
         # ``policy.score_batch`` for the same records and at a matching
@@ -125,11 +123,13 @@ class GSPO(BaseAlgo):
         if (
             batch.has_shared_logprobs_for(cache_records)
             and batch.shared_logprobs_temperature is not None
-            and abs(float(batch.shared_logprobs_temperature) - float(score_temperature))
-            < 1e-9
+            and abs(float(batch.shared_logprobs_temperature) - float(score_temperature)) < 1e-9
         ):
+            shared_cache = batch.shared_new_logprobs
+            assert shared_cache is not None
             new_logp, mask = stack_cached_logprobs(
-                batch.shared_new_logprobs, cache_records  # type: ignore[arg-type]
+                shared_cache,
+                cache_records,  # type: ignore[arg-type]
             )
             used_cache = True
         else:
@@ -173,9 +173,7 @@ class GSPO(BaseAlgo):
         )
 
         log_ratio = seq_logp_new - seq_logp_old
-        ratio = torch.exp(
-            log_ratio.clamp(min=-cfg.log_ratio_clip, max=cfg.log_ratio_clip)
-        )
+        ratio = torch.exp(log_ratio.clamp(min=-cfg.log_ratio_clip, max=cfg.log_ratio_clip))
         low = math.log(max(1e-8, 1.0 - cfg.clip_eps))
         high = math.log(max(1e-8, 1.0 + cfg.clip_eps_high))
         clipped_ratio = torch.exp(log_ratio.clamp(min=low, max=high))
@@ -188,18 +186,20 @@ class GSPO(BaseAlgo):
 
         ratio_detached = ratio.detach()
         clipped_detached = clipped_ratio.detach()
-        clip_frac = float(
-            (ratio_detached.ne(clipped_detached)).to(torch.float32).mean().item()
-        )
+        clip_frac = float((ratio_detached.ne(clipped_detached)).to(torch.float32).mean().item())
         # k3 estimator — consistent with GRPO/RLOO/OPD/PPO global default.
         log_r = log_ratio.detach().clamp(min=-20.0, max=20.0)
         approx_kl = float((torch.exp(-log_r) - 1.0 + log_r).mean().item())
 
         kl_val = 0.0
         kl_result = compute_kl_penalty(
-            new_logp, mask,
-            prompt_ids_list, response_ids_list,
-            score_temperature, ref_policy, cfg.kl_coef,
+            new_logp,
+            mask,
+            prompt_ids_list,
+            response_ids_list,
+            score_temperature,
+            ref_policy,
+            cfg.kl_coef,
             kl_estimator=cfg.kl_estimator,
         )
         if kl_result is not None:
@@ -251,14 +251,14 @@ def _records_with_advantages(
         out = []
         filtered = 0
         for _gid, recs in RolloutBatch(records).by_group().items():
-            advs = dapo_group_advantage(
+            dapo_advs = dapo_group_advantage(
                 [rec.reward for rec in recs],
                 eps=cfg.advantage_eps,
             )
-            if advs is None:
+            if dapo_advs is None:
                 filtered += len(recs)
                 continue
-            out.extend((rec, float(adv)) for rec, adv in zip(recs, advs, strict=False))
+            out.extend((rec, float(adv)) for rec, adv in zip(recs, dapo_advs, strict=False))
         return _restore_record_order(records, out), filtered
 
     if cfg.advantage_norm == "batch":
