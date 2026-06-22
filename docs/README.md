@@ -9,6 +9,7 @@
 | [self-evolution-export.md](self-evolution-export.md) | Export Hermes session traces into self-evolution-friendly eval datasets |
 | [training_loop.md](training_loop.md) | Full `OnPolicyTrainer` lifecycle: rollout → reward → loss → step |
 | [configuration.md](configuration.md) | YAML schema reference for `train-rl` |
+| [ROADMAP.md](ROADMAP.md) | v1.0 API stability boundary and release phases |
 | [adr/](adr/) | Architecture Decision Records (one file per high-impact decision) |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Dev setup, coding conventions, PR flow |
 
