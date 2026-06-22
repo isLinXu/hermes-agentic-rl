@@ -62,10 +62,11 @@ class HybridConfig:
     grpo:  GRPO sub-config (advantage normalisation, clipping, KL).
     opd:   OPD  sub-config (hint-adv clip, asymmetric clip, KL).
     """
-    w_rl:  float = 1.0
+
+    w_rl: float = 1.0
     w_opd: float = 1.0
-    grpo: GRPOConfig = None   # type: ignore[assignment]
-    opd:  OPDConfig  = None   # type: ignore[assignment]
+    grpo: GRPOConfig = None  # type: ignore[assignment]
+    opd: OPDConfig = None  # type: ignore[assignment]
     # When True, a cache-temperature mismatch (rollout temperature != 1.0 so
     # the OPD branch cannot consume the shared forward) raises instead of
     # silently re-forwarding. Useful in large runs where the warning is
@@ -105,7 +106,7 @@ class HybridAlgo(BaseAlgo):
     def __init__(self, cfg: HybridConfig | None = None) -> None:
         self.cfg = cfg or HybridConfig()
         self._grpo = GRPO(self.cfg.grpo)
-        self._opd  = OPDAlgo(self.cfg.opd)
+        self._opd = OPDAlgo(self.cfg.opd)
 
     def compute_loss(
         self,
@@ -118,8 +119,13 @@ class HybridAlgo(BaseAlgo):
         if not records:
             zero = torch.zeros((), dtype=torch.float32)
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
+                mean_reward=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
                 n_records=0,
                 extra={"algo": "hybrid", "n_grpo": 0, "n_opd": 0},
             )
@@ -131,13 +137,13 @@ class HybridAlgo(BaseAlgo):
         # ``hybrid_double_forward_records`` so downstream callers can decide
         # whether the configuration is worth the extra compute.
         grpo_records: list[RolloutRecord] = []
-        opd_records:  list[RolloutRecord] = []
+        opd_records: list[RolloutRecord] = []
         both_records: list[RolloutRecord] = []
         for rec in records:
             has_reward = rec.reward != 0.0 or "reward" in rec.metadata
-            has_hints  = bool(rec.metadata.get("teacher_logprobs"))
+            has_hints = bool(rec.metadata.get("teacher_logprobs"))
             grpo_take = has_reward and cfg.w_rl > 0
-            opd_take  = has_hints  and cfg.w_opd > 0
+            opd_take = has_hints and cfg.w_opd > 0
             if grpo_take:
                 grpo_records.append(rec)
             if opd_take:
@@ -147,7 +153,7 @@ class HybridAlgo(BaseAlgo):
 
         total_loss = torch.zeros((), dtype=torch.float32)
         grpo_stats: AlgoUpdateStats | None = None
-        opd_stats:  AlgoUpdateStats | None = None
+        opd_stats: AlgoUpdateStats | None = None
 
         # ── v0.9.2: shared forward pass ──────────────────────────────────
         # When BOTH branches consume one or more of the same records, run
@@ -177,9 +183,7 @@ class HybridAlgo(BaseAlgo):
                 seen.add(id(rec))
                 union_records.append(rec)
             if union_records:
-                cache_temperature = float(
-                    _rollout_score_temperature(union_records)
-                )
+                cache_temperature = float(_rollout_score_temperature(union_records))
                 new_logp, mask = policy.score_batch(
                     [r.prompt_ids for r in union_records],
                     [r.response_ids for r in union_records],
@@ -197,10 +201,7 @@ class HybridAlgo(BaseAlgo):
                 # misleading. Surface the miss explicitly so users can
                 # either accept the second forward or align the rollout
                 # temperature.
-                if (
-                    opd_records
-                    and abs(cache_temperature - 1.0) > 1e-9
-                ):
+                if opd_records and abs(cache_temperature - 1.0) > 1e-9:
                     opd_cache_skipped = True
                     msg = (
                         "HybridAlgo: OPD branch cannot consume the shared "
@@ -210,9 +211,7 @@ class HybridAlgo(BaseAlgo):
                         "remove the extra forward, or accept the cost."
                     )
                     if cfg.strict_cache_temperature:
-                        raise ValueError(
-                            msg + " (strict_cache_temperature=True)"
-                        )
+                        raise ValueError(msg + " (strict_cache_temperature=True)")
                     import warnings as _warnings
 
                     _warnings.warn(msg, stacklevel=2)
@@ -224,9 +223,7 @@ class HybridAlgo(BaseAlgo):
                 shared_new_logprobs=cache_dict,
                 shared_logprobs_temperature=cache_temperature,
             )
-            g_loss, grpo_stats = self._grpo.compute_loss(
-                policy, ref_policy, grpo_batch
-            )
+            g_loss, grpo_stats = self._grpo.compute_loss(policy, ref_policy, grpo_batch)
             total_loss = total_loss + cfg.w_rl * g_loss
 
         # ── OPD branch ───────────────────────────────────────────────────
@@ -236,9 +233,7 @@ class HybridAlgo(BaseAlgo):
                 shared_new_logprobs=cache_dict,
                 shared_logprobs_temperature=cache_temperature,
             )
-            o_loss, opd_stats = self._opd.compute_loss(
-                policy, ref_policy, opd_batch
-            )
+            o_loss, opd_stats = self._opd.compute_loss(policy, ref_policy, opd_batch)
             total_loss = total_loss + cfg.w_opd * o_loss
 
         # ── Aggregate stats ──────────────────────────────────────────────
@@ -286,12 +281,12 @@ class HybridAlgo(BaseAlgo):
                     float(cache_temperature) if cache_temperature is not None else 0.0
                 ),
                 "grpo_loss": float(grpo_stats.loss) if grpo_stats else 0.0,
-                "opd_loss":  float(opd_stats.loss)  if opd_stats  else 0.0,
+                "opd_loss": float(opd_stats.loss) if opd_stats else 0.0,
                 # Branch-level KL so the AdaptiveKLController feedback can be
                 # disentangled per branch (the aggregate ``kl`` above is a
                 # weighted blend that hides per-branch divergence).
                 "grpo_kl": float(grpo_stats.kl) if grpo_stats else 0.0,
-                "opd_kl":  float(opd_stats.kl)  if opd_stats  else 0.0,
+                "opd_kl": float(opd_stats.kl) if opd_stats else 0.0,
             },
         )
         return total_loss, stats

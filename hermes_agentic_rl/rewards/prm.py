@@ -89,11 +89,7 @@ class ProcessRewardModel(nn.Module):
         else:
             model = getattr(backend, "model", None)
             cfg = getattr(model, "config", None)
-            hidden = int(
-                getattr(cfg, "hidden_size", 0)
-                or getattr(cfg, "n_embd", 0)
-                or 0
-            )
+            hidden = int(getattr(cfg, "hidden_size", 0) or getattr(cfg, "n_embd", 0) or 0)
             if hidden == 0:
                 raise RuntimeError(
                     "ProcessRewardModel: cannot infer hidden_size from backend. "
@@ -177,8 +173,8 @@ class PRMStepSample:
     """One training example: (prompt, prefix, label)."""
 
     prompt_ids: list[int]
-    prefix_ids: list[int]   # prompt + steps 0..t
-    label: float            # 1.0 = good step, 0.0 = bad step
+    prefix_ids: list[int]  # prompt + steps 0..t
+    label: float  # 1.0 = good step, 0.0 = bad step
 
 
 class PRMTrainer:
@@ -196,9 +192,9 @@ class PRMTrainer:
         if not params:
             raise RuntimeError("ProcessRewardModel has no trainable parameters")
         self.optim = torch.optim.AdamW(params, lr=self.cfg.lr)
-        self.logger = logger or (lambda r: print(
-            f"[prm] step={r['step']} loss={r['loss']:.4f} acc={r['acc']:.3f}"
-        ))
+        self.logger = logger or (
+            lambda r: print(f"[prm] step={r['step']} loss={r['loss']:.4f} acc={r['acc']:.3f}")
+        )
 
     def train(self, samples: list[PRMStepSample]) -> dict[str, Any]:
         if not samples:
@@ -209,7 +205,7 @@ class PRMTrainer:
             self.prm.train()
             batch_size = max(1, self.cfg.batch_size)
             for start in range(0, len(samples), batch_size):
-                batch = samples[start: start + batch_size]
+                batch = samples[start : start + batch_size]
                 self.optim.zero_grad()
                 scores: list[torch.Tensor] = []
                 labels: list[float] = []
@@ -266,7 +262,7 @@ class PRMComponent:
         self,
         prm: ProcessRewardModel,
         weight: float = 1.0,
-        agg: str = "mean",   # mean | min | last | sum
+        agg: str = "mean",  # mean | min | last | sum
         step_sep: str = STEP_SEPARATOR,
         write_token_rewards: bool = True,
     ) -> None:
@@ -286,17 +282,23 @@ class PRMComponent:
         runtime_block = trajectory.metadata.get("runtime") or {}
         rl_meta = runtime_block.get("rl") if isinstance(runtime_block, dict) else None
         if rl_meta is None:
-            return RewardResult(name=self.name, score=0.0, reason="no rl metadata", weight=self.weight)
+            return RewardResult(
+                name=self.name, score=0.0, reason="no rl metadata", weight=self.weight
+            )
 
         prompt_ids = list(rl_meta.get("prompt_ids") or [])
         response_ids = list(rl_meta.get("response_ids") or [])
         if not response_ids:
-            return RewardResult(name=self.name, score=0.0, reason="empty response", weight=self.weight)
+            return RewardResult(
+                name=self.name, score=0.0, reason="empty response", weight=self.weight
+            )
 
         response_text = trajectory.final_output or ""
         tokenizer = getattr(self.prm.backend, "tokenizer", None)
         if tokenizer is None:
-            return RewardResult(name=self.name, score=0.0, reason="no tokenizer", weight=self.weight)
+            return RewardResult(
+                name=self.name, score=0.0, reason="no tokenizer", weight=self.weight
+            )
 
         step_scores = self.prm.score_steps(
             prompt_ids, response_text, tokenizer, step_sep=self.step_sep

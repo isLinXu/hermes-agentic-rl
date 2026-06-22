@@ -98,9 +98,7 @@ def build_sim_tool_dataset(n: int = 16, *, seed: int = 0) -> list[dict[str, Any]
         items.append(
             {
                 "task_id": f"calc-{i}",
-                "instruction": (
-                    f"What is {a} {sym} {b}? Use calc tool, then answer as: answer=N"
-                ),
+                "instruction": (f"What is {a} {sym} {b}? Use calc tool, then answer as: answer=N"),
                 "expr": f"{a} {sym} {b}",
                 "target": target,
             }

@@ -49,7 +49,9 @@ def session_turn_sample_to_train_sample(
     reward: float | None = None,
     reward_summary: Any | None = None,
 ) -> TrainSample:
-    prompt_text = render_messages_for_training(sample.prompt_messages + [{"role": "assistant", "content": ""}])
+    prompt_text = render_messages_for_training(
+        [*sample.prompt_messages, {"role": "assistant", "content": ""}]
+    )
     response_content = sample.assistant_message.get("content", "")
     if not isinstance(response_content, str):
         response_content = str(response_content)

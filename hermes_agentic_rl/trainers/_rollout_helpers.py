@@ -178,14 +178,14 @@ def grad_l2_norm(params: list[torch.Tensor]) -> float:
         if grad is None:
             continue
         total += float((grad.detach().float() ** 2).sum().item())
-    return total ** 0.5
+    return total**0.5
 
 
 def param_l2_norm(params: list[torch.Tensor]) -> float:
     total = 0.0
     for param in params:
         total += float((param.detach().float() ** 2).sum().item())
-    return total ** 0.5
+    return total**0.5
 
 
 def config_to_dict(cfg: Any) -> dict[str, Any]:
@@ -332,9 +332,9 @@ def summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
         if isinstance(reward_meta, dict):
             for key, value in reward_meta.items():
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    reward_summary_numeric.setdefault(
-                        sanitize_metric_name(str(key)), []
-                    ).append(float(value))
+                    reward_summary_numeric.setdefault(sanitize_metric_name(str(key)), []).append(
+                        float(value)
+                    )
 
     if reward_component_scores:
         summary["reward_components"] = {}
@@ -348,9 +348,7 @@ def summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
     if reward_component_metadata:
         summary["reward_component_metadata"] = {
             component_name: {
-                key: series_stats(values)
-                for key, values in sorted(metadata.items())
-                if values
+                key: series_stats(values) for key, values in sorted(metadata.items()) if values
             }
             for component_name, metadata in sorted(reward_component_metadata.items())
         }

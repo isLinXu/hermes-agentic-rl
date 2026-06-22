@@ -70,7 +70,7 @@ class TrainerBridge:
                 if attempt < self.max_retries - 1:
                     self._retried += 1
                     delay = min(
-                        self.backoff_base * (2 ** attempt),
+                        self.backoff_base * (2**attempt),
                         self.backoff_max,
                     )
                     if delay > 0:

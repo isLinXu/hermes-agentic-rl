@@ -78,19 +78,28 @@ class PPO(BaseAlgo):
     ) -> tuple[torch.Tensor, AlgoUpdateStats]:
         if not policy.supports_value_head():
             raise RuntimeError(
-                "PPO requires a backend with a value head "
-                "(TinyBackendConfig(with_value_head=True))"
+                "PPO requires a backend with a value head (TinyBackendConfig(with_value_head=True))"
             )
         cfg = self.cfg
         records = batch.records
         if not records:
             zero = torch.zeros((), dtype=torch.float32)
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
+                mean_reward=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
                 n_records=0,
-                extra={"algo": "ppo", "n_updated": 0, "value_loss": 0.0,
-                       "value_clip_frac": 0.0, "approx_kl": 0.0},
+                extra={
+                    "algo": "ppo",
+                    "n_updated": 0,
+                    "value_loss": 0.0,
+                    "value_clip_frac": 0.0,
+                    "approx_kl": 0.0,
+                },
             )
 
         prompt_ids_list = [r.prompt_ids for r in records]
@@ -107,12 +116,21 @@ class PPO(BaseAlgo):
         if B == 0 or T_max == 0:
             zero = new_logp.new_zeros(())
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
                 mean_reward=float(sum(r.reward for r in records) / max(1, len(records))),
-                mean_advantage=0.0, clip_frac=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
                 n_records=len(records),
-                extra={"algo": "ppo", "n_updated": 0, "value_loss": 0.0,
-                       "value_clip_frac": 0.0, "approx_kl": 0.0},
+                extra={
+                    "algo": "ppo",
+                    "n_updated": 0,
+                    "value_loss": 0.0,
+                    "value_clip_frac": 0.0,
+                    "approx_kl": 0.0,
+                },
             )
 
         device = new_logp.device
@@ -130,20 +148,20 @@ class PPO(BaseAlgo):
                 continue
             olp = rec.old_logprobs[-R_i:] if rec.old_logprobs else []
             if olp:
-                old_logp[i, :len(olp)] = torch.tensor(olp, dtype=dtype, device=device)
+                old_logp[i, : len(olp)] = torch.tensor(olp, dtype=dtype, device=device)
 
             # old_values: prefer metadata-frozen snapshot (set by
             # PPOTrainer._prepare_update_batch at rollout time).
             ov_raw = rec.metadata.get("_ppo_old_values")
             if isinstance(ov_raw, list) and ov_raw:
                 ov = ov_raw[-R_i:]
-                old_values[i, :len(ov)] = torch.tensor(ov, dtype=dtype, device=device)
+                old_values[i, : len(ov)] = torch.tensor(ov, dtype=dtype, device=device)
                 old_values_present = True
 
             tr = rec.metadata.get("token_rewards")
             if isinstance(tr, list) and tr:
                 trs = list(tr)[-R_i:]
-                token_rewards[i, :len(trs)] = torch.tensor(trs, dtype=dtype, device=device)
+                token_rewards[i, : len(trs)] = torch.tensor(trs, dtype=dtype, device=device)
             else:
                 # sparse terminal reward at position R_i-1
                 token_rewards[i, R_i - 1] = float(rec.reward)
@@ -156,8 +174,12 @@ class PPO(BaseAlgo):
 
         # 3) Batched GAE.
         advs_raw, returns = compute_gae_batched(
-            token_rewards, old_values, mask,
-            gamma=cfg.gamma, lam=cfg.lam, normalize=False,
+            token_rewards,
+            old_values,
+            mask,
+            gamma=cfg.gamma,
+            lam=cfg.lam,
+            normalize=False,
         )
 
         # 4) Advantage normalization + optional whitening.
@@ -171,9 +193,7 @@ class PPO(BaseAlgo):
                 flat = flat.clone()
                 flat[valid] = (sel - mean) / (std + 1e-8)
                 if cfg.whiten_advantage and cfg.advantage_clip > 0:
-                    flat[valid] = flat[valid].clamp(
-                        -cfg.advantage_clip, cfg.advantage_clip
-                    )
+                    flat[valid] = flat[valid].clamp(-cfg.advantage_clip, cfg.advantage_clip)
                 advs = flat.view(B, T_max)
             else:
                 advs = advs_raw
@@ -182,7 +202,10 @@ class PPO(BaseAlgo):
 
         # 5) Batched policy + value losses.
         pol_loss, pol_stats = clipped_surrogate_loss_batched(
-            new_logp, old_logp, advs, mask,
+            new_logp,
+            old_logp,
+            advs,
+            mask,
             clip_eps=cfg.clip_eps,
             clip_eps_high=cfg.clip_eps_high,
             loss_agg=cfg.loss_agg,
@@ -190,7 +213,10 @@ class PPO(BaseAlgo):
             kl_estimator=cfg.kl_estimator,
         )
         vf_loss, vf_stats = clipped_value_loss_batched(
-            values_new, old_values, returns, mask,
+            values_new,
+            old_values,
+            returns,
+            mask,
             clip_eps=cfg.vf_clip_eps,
         )
 
@@ -208,9 +234,13 @@ class PPO(BaseAlgo):
         # 7) KL-to-reference — uses shared compute_kl_penalty.
         kl_val = 0.0
         kl_result = compute_kl_penalty(
-            new_logp, mask,
-            prompt_ids_list, response_ids_list,
-            score_temperature, ref_policy, cfg.kl_coef,
+            new_logp,
+            mask,
+            prompt_ids_list,
+            response_ids_list,
+            score_temperature,
+            ref_policy,
+            cfg.kl_coef,
             kl_estimator=cfg.kl_estimator,
         )
         if kl_result is not None:

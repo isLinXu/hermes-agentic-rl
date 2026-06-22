@@ -70,9 +70,7 @@ class QueueStats:
     @property
     def mean_staleness(self) -> float:
         return (
-            float(self.staleness_sum) / float(self.staleness_count)
-            if self.staleness_count
-            else 0.0
+            float(self.staleness_sum) / float(self.staleness_count) if self.staleness_count else 0.0
         )
 
     def as_dict(self) -> dict[str, float]:
@@ -134,9 +132,7 @@ class ExperienceQueue(Generic[T]):
                     pass
         with self._lock:
             self.stats.produced += 1
-            self.stats.max_depth_seen = max(
-                self.stats.max_depth_seen, self._q.qsize()
-            )
+            self.stats.max_depth_seen = max(self.stats.max_depth_seen, self._q.qsize())
 
     # -- consumer side ----------------------------------------------------
 

@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>hermes-agentic-rl live dashboard</title>
+<style>
+  body { font-family: -apple-system, sans-serif; margin: 24px; }
+  h1 { font-size: 18px; margin: 0 0 16px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel { border: 1px solid #ddd; border-radius: 6px; padding: 12px; }
+  canvas { max-height: 260px; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px;
+         background: #eef; color: #226; font-size: 12px; margin-right: 6px; }
+</style>
+</head>
+<body>
+<h1>hermes-agentic-rl
+  <span class="tag" id="algo">algo</span>
+  <span class="tag" id="iter">iter=—</span>
+  <span class="tag" id="event">event=—</span>
+</h1>
+<div class="grid">
+  <div class="panel"><canvas id="reward"></canvas></div>
+  <div class="panel"><canvas id="loss"></canvas></div>
+  <div class="panel"><canvas id="kl"></canvas></div>
+  <div class="panel"><canvas id="value"></canvas></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const make = (id, label, color) => new Chart(document.getElementById(id), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{ label, data: [], borderColor: color, tension: 0.2, pointRadius: 0 }]
+  },
+  options: { animation: false, responsive: true, scales: { y: { beginAtZero: false } } }
+});
+const charts = {
+  reward: make('reward', 'mean_reward', '#0a7'),
+  loss: make('loss', 'loss', '#d33'),
+  kl: make('kl', 'approx_kl', '#66c'),
+  value: make('value', 'value_mean', '#a60'),
+};
+async function fetchLatest() {
+  const r = await fetch('/metrics');
+  if (!r.ok) return;
+  const data = await r.json();
+  if (data.length) {
+    const last = data[data.length - 1];
+    const isWorker = data.some(d => d.command === 'session-train-worker');
+    if (isWorker) {
+      const labels = data.map((d, i) => d.updates ?? i);
+      updateChart(charts.reward, labels, data.map(d => d.records_seen ?? 0), 'records_seen');
+      updateChart(charts.loss, labels, data.map(d => d.last_loss ?? 0), 'last_loss');
+      updateChart(charts.kl, labels, data.map(d => d.pending_pairs ?? 0), 'pending_pairs');
+      const rejected = data.map(
+        d => (d.invalid_records ?? 0) + (d.quality_filtered_records ?? 0)
+      );
+      updateChart(charts.value, labels, rejected, 'rejected_records');
+      document.getElementById('iter').textContent = 'updates=' + (last.updates ?? 0);
+      document.getElementById('algo').textContent = last.algo || last.command || 'worker';
+      document.getElementById('event').textContent = 'event=' + (last.event || 'worker');
+    } else {
+      const labels = data.map(d => d.iter);
+      updateChart(charts.reward, labels, data.map(d => d.mean_reward ?? 0), 'mean_reward');
+      updateChart(charts.loss, labels, data.map(d => d.loss ?? 0), 'loss');
+      updateChart(charts.kl, labels, data.map(d => d.approx_kl ?? 0), 'approx_kl');
+      updateChart(charts.value, labels, data.map(d => d.value_mean ?? 0), 'value_mean');
+      document.getElementById('iter').textContent = 'iter=' + (last.iter ?? 0);
+      document.getElementById('algo').textContent = last.algo || 'grpo';
+      document.getElementById('event').textContent = 'event=' + (last.event || 'train');
+    }
+  }
+}
+function updateChart(chart, labels, vals, label) {
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = vals;
+  chart.data.datasets[0].label = label;
+  chart.update();
+}
+setInterval(fetchLatest, 2000);
+fetchLatest();
+</script>
+</body>
+</html>

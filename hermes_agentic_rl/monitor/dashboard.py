@@ -35,7 +35,11 @@ _HTML = r"""<!doctype html>
 </style>
 </head>
 <body>
-<h1>hermes-agentic-rl <span class="tag" id="algo">algo</span><span class="tag" id="iter">iter=—</span><span class="tag" id="event">event=—</span></h1>
+<h1>hermes-agentic-rl
+  <span class="tag" id="algo">algo</span>
+  <span class="tag" id="iter">iter=—</span>
+  <span class="tag" id="event">event=—</span>
+</h1>
 <div class="grid">
   <div class="panel"><canvas id="reward"></canvas></div>
   <div class="panel"><canvas id="loss"></canvas></div>
@@ -46,7 +50,10 @@ _HTML = r"""<!doctype html>
 <script>
 const make = (id, label, color) => new Chart(document.getElementById(id), {
   type: 'line',
-  data: { labels: [], datasets: [{ label, data: [], borderColor: color, tension: 0.2, pointRadius: 0 }] },
+  data: {
+    labels: [],
+    datasets: [{ label, data: [], borderColor: color, tension: 0.2, pointRadius: 0 }]
+  },
   options: { animation: false, responsive: true, scales: { y: { beginAtZero: false } } }
 });
 const charts = {
@@ -73,7 +80,10 @@ async function tick() {
         updateChart(charts.reward, labels, data.map(d => d.records_seen ?? 0), 'records_seen');
         updateChart(charts.loss, labels, data.map(d => d.last_loss ?? 0), 'last_loss');
         updateChart(charts.kl, labels, data.map(d => d.pending_pairs ?? 0), 'pending_pairs');
-        updateChart(charts.value, labels, data.map(d => (d.invalid_records ?? 0) + (d.quality_filtered_records ?? 0)), 'rejected_records');
+        const rejected = data.map(
+          d => (d.invalid_records ?? 0) + (d.quality_filtered_records ?? 0)
+        );
+        updateChart(charts.value, labels, rejected, 'rejected_records');
         document.getElementById('iter').textContent = 'updates=' + (last.updates ?? 0);
         document.getElementById('algo').textContent = last.algo || last.command || 'worker';
         document.getElementById('event').textContent = 'event=' + (last.event || 'worker');
@@ -118,9 +128,11 @@ class LiveDashboard:
         if self._server is not None:
             return self.url
         dashboard = self
+
         class _Handler(BaseHTTPRequestHandler):
             def log_message(self, *_args: Any) -> None:  # silence stderr spam
                 return
+
             def do_GET(self) -> None:
                 if self.path == "/metrics":
                     with dashboard._lock:
@@ -140,6 +152,7 @@ class LiveDashboard:
                     self.wfile.write(body)
                     return
                 self.send_error(404)
+
         self._server = ThreadingHTTPServer((self.host, self.port), _Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()

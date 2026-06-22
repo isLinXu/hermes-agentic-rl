@@ -36,9 +36,9 @@ class DistributedConfig:
 
     strategy: Literal["none", "ddp", "fsdp"] = "none"
     # ── FSDP options ──
-    fsdp_sharding_strategy: Literal[
-        "FULL_SHARD", "SHARD_GRAD_OP", "NO_SHARD", "HYBRID_SHARD"
-    ] = "FULL_SHARD"
+    fsdp_sharding_strategy: Literal["FULL_SHARD", "SHARD_GRAD_OP", "NO_SHARD", "HYBRID_SHARD"] = (
+        "FULL_SHARD"
+    )
     fsdp_cpu_offload: bool = False  # offload params to CPU (slower but saves VRAM)
     fsdp_backward_prefetch: Literal["BACKWARD_PRE", "BACKWARD_POST", "NO_PREFETCH"] = "BACKWARD_PRE"
     fsdp_use_orig_params: bool = True  # needed for optimizer state_dict checkpointing

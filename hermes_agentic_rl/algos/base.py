@@ -97,7 +97,7 @@ def old_logprobs_tensor(
             return src[-length:]
         out = torch.zeros(length, dtype=dtype, device=device)
         if src.numel() > 0:
-            out[-src.numel():] = src
+            out[-src.numel() :] = src
         return out
 
     vals = record.old_logprobs[-length:] if record.old_logprobs else []

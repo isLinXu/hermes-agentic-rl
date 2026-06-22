@@ -88,8 +88,7 @@ def mine_session_turn_sample(
     assistant_tool_call = _has_assistant_tool_call(sample.assistant_message)
     tool_feedback = "tool" in feedback_roles
     tool_component = any(
-        "tool" in str(component.get("name", "")).lower()
-        and _positive_component_score(component)
+        "tool" in str(component.get("name", "")).lower() and _positive_component_score(component)
         for component in metadata.get("reward_components", [])
         if isinstance(component, dict)
     )
@@ -216,9 +215,7 @@ def summarize_replay_mining(
         "samples_scored": len(usefulness_scores),
         "skill_candidates": skill_candidates,
         "mean_usefulness_score": (
-            sum(usefulness_scores) / len(usefulness_scores)
-            if usefulness_scores
-            else 0.0
+            sum(usefulness_scores) / len(usefulness_scores) if usefulness_scores else 0.0
         ),
         "by_axis": dict(sorted(by_axis.items())),
         "by_reason": dict(sorted(by_reason.items())),
@@ -231,9 +228,7 @@ def _has_assistant_tool_call(message: dict[str, Any]) -> bool:
     if isinstance(tool_calls, list) and tool_calls:
         return True
     content = _message_text(message).lower()
-    return "<tool_call" in content or (
-        '"arguments"' in content and '"name"' in content
-    )
+    return "<tool_call" in content or ('"arguments"' in content and '"name"' in content)
 
 
 def _is_long_context(
@@ -243,9 +238,8 @@ def _is_long_context(
 ) -> bool:
     message_threshold = int(cfg.get("long_context_messages", 0))
     char_threshold = int(cfg.get("long_context_chars", 0))
-    return (
-        (message_threshold > 0 and len(sample.prompt_messages) >= message_threshold)
-        or (char_threshold > 0 and len(prompt_text) >= char_threshold)
+    return (message_threshold > 0 and len(sample.prompt_messages) >= message_threshold) or (
+        char_threshold > 0 and len(prompt_text) >= char_threshold
     )
 
 

@@ -104,9 +104,7 @@ class ProcessRewardAggregator:
         process_mean = 0.0
         n_steps = 0
         if step_states:
-            scores = await asyncio.gather(
-                *(self.prm.score(response, ns) for ns in step_states)
-            )
+            scores = await asyncio.gather(*(self.prm.score(response, ns) for ns in step_states))
             votes = [float(score) for score, _hint in scores]
             n_steps = len(votes)
             process_mean = sum(votes) / n_steps if n_steps else 0.0
@@ -121,10 +119,7 @@ class ProcessRewardAggregator:
             name=self.name,
             score=float(final) * self.weight,
             weight=self.weight,
-            reason=(
-                f"o={outcome:.3f} process_mean={process_mean:.3f} "
-                f"n_steps={n_steps}"
-            ),
+            reason=(f"o={outcome:.3f} process_mean={process_mean:.3f} n_steps={n_steps}"),
         )
 
     def _resolve_outcome(self, trajectory: Trajectory) -> float:

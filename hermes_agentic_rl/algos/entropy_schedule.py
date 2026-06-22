@@ -241,10 +241,7 @@ def _clamp(value: float, lo: float, hi: float) -> float:
 # ---------------------------------------------------------------------------
 
 EntropyScheduler = (
-    LinearEntropySchedule
-    | ExponentialEntropySchedule
-    | CosineEntropySchedule
-    | TargetEntropyPID
+    LinearEntropySchedule | ExponentialEntropySchedule | CosineEntropySchedule | TargetEntropyPID
 )
 
 
@@ -272,6 +269,5 @@ def make_entropy_scheduler(
     }
     cls = _MAP.get(kind)
     if cls is None:
-        raise ValueError(f"Unknown entropy scheduler kind: {kind!r}. "
-                         f"Choose from {list(_MAP)}")
+        raise ValueError(f"Unknown entropy scheduler kind: {kind!r}. Choose from {list(_MAP)}")
     return cls(**kwargs)  # type: ignore[return-value]

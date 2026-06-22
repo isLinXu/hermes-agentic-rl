@@ -65,14 +65,14 @@ def _grad_l2_norm(params: list[torch.Tensor]) -> float:
         if grad is None:
             continue
         total += float((grad.detach().float() ** 2).sum().item())
-    return total ** 0.5
+    return total**0.5
 
 
 def _param_l2_norm(params: list[torch.Tensor]) -> float:
     total = 0.0
     for param in params:
         total += float((param.detach().float() ** 2).sum().item())
-    return total ** 0.5
+    return total**0.5
 
 
 def _summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
@@ -195,9 +195,7 @@ def _summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
     if reward_component_metadata:
         summary["reward_component_metadata"] = {
             component_name: {
-                key: _series_stats(values)
-                for key, values in sorted(metadata.items())
-                if values
+                key: _series_stats(values) for key, values in sorted(metadata.items()) if values
             }
             for component_name, metadata in sorted(reward_component_metadata.items())
         }

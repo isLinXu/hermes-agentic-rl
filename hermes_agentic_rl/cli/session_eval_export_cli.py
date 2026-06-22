@@ -327,9 +327,7 @@ def run_session_eval_export_config(
     )
     mean_reward = 0.0
     rewards: list[float] = [
-        float(item["reward"])
-        for item in examples
-        if isinstance(item.get("reward"), (int, float))
+        float(item["reward"]) for item in examples if isinstance(item.get("reward"), (int, float))
     ]
     if rewards:
         mean_reward = sum(rewards) / len(rewards)

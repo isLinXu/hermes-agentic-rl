@@ -43,9 +43,7 @@ class HermesLoopWrapper:
             "tool_calls": self._get_value(result, "tool_calls", []),
             "tool_results": self._get_value(result, "tool_results", []),
             "final_output": self._get_value(result, "final_output"),
-            "finished_naturally": bool(
-                self._get_value(result, "finished_naturally", True)
-            ),
+            "finished_naturally": bool(self._get_value(result, "finished_naturally", True)),
             "turns_used": int(self._get_value(result, "turns_used", 0)),
             "metadata": {
                 "runtime": "hermes",
@@ -77,7 +75,9 @@ class HermesLoopWrapper:
         return getattr(result, key, default)
 
 
-def _extract_tool_calls_and_results(messages: list[dict[str, Any]]) -> tuple[list[list[dict]], list[list[dict]]]:
+def _extract_tool_calls_and_results(
+    messages: list[dict[str, Any]],
+) -> tuple[list[list[dict]], list[list[dict]]]:
     """
     从 OpenAI 风格 messages 中提取每一轮的 tool_calls 与对应 tool results。
 
@@ -138,7 +138,9 @@ class HermesAIAgentWrapper:
             try:
                 result = self._agent.run_conversation(user_message=prompt)
             except Exception as exc:
-                raise RuntimeExecutionError(f"hermes AIAgent.run_conversation failed: {exc}") from exc
+                raise RuntimeExecutionError(
+                    f"hermes AIAgent.run_conversation failed: {exc}"
+                ) from exc
         except Exception as exc:
             raise RuntimeExecutionError(f"hermes AIAgent.run_conversation failed: {exc}") from exc
 
@@ -154,7 +156,9 @@ class HermesAIAgentWrapper:
             "tool_results": tool_results,
             "final_output": result.get("final_response") or result.get("final_output"),
             "finished_naturally": True,
-            "turns_used": int(result.get("turns_used", 0)) if result.get("turns_used") is not None else 0,
+            "turns_used": int(result.get("turns_used", 0))
+            if result.get("turns_used") is not None
+            else 0,
             "metadata": {
                 "runtime": "hermes",
                 "entrypoint": self._entrypoint_name,

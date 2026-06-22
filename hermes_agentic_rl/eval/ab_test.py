@@ -24,8 +24,8 @@ class ABResult:
     n: int
     mean_diff: float
     t: float
-    approx_p: float   # two-sided, approximated via normal CDF
-    winner: str       # "candidate" / "baseline" / "tie"
+    approx_p: float  # two-sided, approximated via normal CDF
+    winner: str  # "candidate" / "baseline" / "tie"
 
 
 def paired_welch_t(

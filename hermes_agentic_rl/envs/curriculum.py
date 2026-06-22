@@ -123,11 +123,7 @@ class CurriculumEnv(BaseEnv):
         old = self.state.current_level
         if mean >= self.promote_threshold and old + 1 < len(self.levels):
             self._change_level(old + 1)
-        elif (
-            self.allow_demote
-            and mean <= self.demote_threshold
-            and old > 0
-        ):
+        elif self.allow_demote and mean <= self.demote_threshold and old > 0:
             self._change_level(old - 1)
 
     def _change_level(self, new_level: int) -> None:
@@ -198,9 +194,7 @@ class MixedCurriculumEnv(BaseEnv):
         if not levels:
             raise ValueError("MixedCurriculumEnv requires at least one stream")
         if weights is not None and len(weights) != len(levels):
-            raise ValueError(
-                f"weights length ({len(weights)}) must match levels ({len(levels)})"
-            )
+            raise ValueError(f"weights length ({len(weights)}) must match levels ({len(levels)})")
         if weights is not None and any(w < 0 for w in weights):
             raise ValueError("weights must be non-negative")
         self.levels = levels
@@ -215,9 +209,7 @@ class MixedCurriculumEnv(BaseEnv):
         self._raw_w: list[float] = [float(w) for w in raw]
         self.weights: list[float] = []
         self._renormalize()
-        self._recent: list[deque[float]] = [
-            deque(maxlen=window) for _ in levels
-        ]
+        self._recent: list[deque[float]] = [deque(maxlen=window) for _ in levels]
         self._counts: list[int] = [0] * len(levels)
         self._last_level: int = 0
         self.total_items: int = 0
@@ -344,9 +336,7 @@ class MixedCurriculumEnv(BaseEnv):
                     "weight": self.weights[i],
                     "count": self._counts[i],
                     "recent_mean": (
-                        sum(self._recent[i]) / len(self._recent[i])
-                        if self._recent[i]
-                        else 0.0
+                        sum(self._recent[i]) / len(self._recent[i]) if self._recent[i] else 0.0
                     ),
                     "window_full": len(self._recent[i]) >= self.window,
                 }

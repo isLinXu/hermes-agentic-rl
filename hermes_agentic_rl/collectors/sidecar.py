@@ -46,7 +46,9 @@ class LocalSessionSidecar:
             raise ValueError("sidecar with replay_output_path requires backend tokenizer config")
 
         self.cfg = cfg
-        self._queue: queue.Queue[dict[str, Any] | object] = queue.Queue(maxsize=max(0, cfg.queue_maxsize))
+        self._queue: queue.Queue[dict[str, Any] | object] = queue.Queue(
+            maxsize=max(0, cfg.queue_maxsize)
+        )
         self._stop_sentinel = object()
         self._closed = False
         self._stats_lock = threading.Lock()
@@ -76,7 +78,9 @@ class LocalSessionSidecar:
             if cfg.replay_output_path
             else None
         )
-        self._thread = threading.Thread(target=self._worker, name="hermes-session-sidecar", daemon=True)
+        self._thread = threading.Thread(
+            target=self._worker, name="hermes-session-sidecar", daemon=True
+        )
         self._thread.start()
 
     def submit(self, payload: dict[str, Any]) -> bool:
@@ -112,9 +116,7 @@ class LocalSessionSidecar:
         snap["queue_size"] = queue_size
         snap["queue_maxsize"] = queue_maxsize
         snap["queue_utilization"] = (
-            float(queue_size) / float(queue_maxsize)
-            if queue_maxsize > 0
-            else 0.0
+            float(queue_size) / float(queue_maxsize) if queue_maxsize > 0 else 0.0
         )
         snap["worker_alive"] = bool(self._thread.is_alive())
         snap["closed"] = bool(self._closed)
@@ -160,9 +162,7 @@ class LocalSessionSidecar:
             if self.cfg.replay_output_path and self._session_api is not None:
                 replay_payloads: list[dict[str, Any]] = []
                 for record in batch:
-                    replay_payloads.extend(
-                        self._session_api.replay_payloads_from_record(record)
-                    )
+                    replay_payloads.extend(self._session_api.replay_payloads_from_record(record))
                 if replay_payloads:
                     append_jsonl(self.cfg.replay_output_path, replay_payloads)
                 with self._stats_lock:

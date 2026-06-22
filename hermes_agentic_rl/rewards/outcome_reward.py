@@ -54,8 +54,12 @@ class OutcomeReward(BaseReward):
         elif trajectory.final_output == expected_output:
             score = 1.0
             reason = "final_output matched expected_output"
-        elif isinstance(expected_output, str) and expected_output.strip().lower() in _SUCCESS_MARKERS:
-            if trajectory.final_output and _looks_successful(trajectory.final_output, item.get("instruction")):
+        elif (
+            isinstance(expected_output, str) and expected_output.strip().lower() in _SUCCESS_MARKERS
+        ):
+            if trajectory.final_output and _looks_successful(
+                trajectory.final_output, item.get("instruction")
+            ):
                 score = 1.0
                 reason = "expected_output is a success marker; inferred success from final_output"
             else:

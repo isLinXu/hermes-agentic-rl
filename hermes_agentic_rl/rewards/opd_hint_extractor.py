@@ -68,6 +68,26 @@ _LOW_INFO_RE = re.compile("|".join(_LOW_INFO_PATTERNS), re.IGNORECASE)
 
 SelectMode = Literal["longest", "first", "axis_aware"]
 
+# Capability axes and their associated keywords. Used by the ``axis_aware``
+# selection mode to prefer hints that target the training run's focus dimension.
+# Keys mirror the FactoredAlgo head names so they can be looked up from cfg.
+_AXIS_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "tool_use": ("tool", "function", "call", "api", "invoke", "execute"),
+    "reasoning": ("reason", "step", "logic", "deduc", "infer", "think"),
+    "retrieval": ("retriev", "search", "lookup", "fetch", "query", "find"),
+    "safety": ("safe", "harm", "refus", "restrict", "danger", "avoid"),
+    "instruction": ("follow", "format", "instruct", "comply", "require"),
+    "math": ("calculat", "arithm", "equat", "solv", "numeric", "formula"),
+    "code": ("code", "function", "method", "variable", "syntax", "compil"),
+}
+
+
+def _axis_score(hint: str, axis: str) -> int:
+    """Count keyword matches between hint and capability axis."""
+    lower = hint.lower()
+    keywords = _AXIS_KEYWORDS.get(axis, ())
+    return sum(1 for kw in keywords if kw in lower)
+
 
 @dataclass(slots=True)
 class OPDHintExtractorConfig:
@@ -79,8 +99,12 @@ class OPDHintExtractorConfig:
         ``opd_hint`` (e.g. from the env / NextStatePRM) are left untouched —
         the in-trainer judge only *fills the gaps*. Set True to always re-judge.
     select: hint selection policy when a judge can emit multiple candidates.
-        ``longest`` mirrors OpenClaw-RL; ``axis_aware`` prefers hints matching
-        a configured capability axis (the hermes differentiator).
+        ``longest`` mirrors OpenClaw-RL; ``first`` takes the first passing hint;
+        ``axis_aware`` prefers hints that match ``target_axis`` keywords (hermes
+        differentiator — enables curriculum-aware distillation).
+    target_axis: capability axis name for ``axis_aware`` selection. Must be one
+        of: ``tool_use``, ``reasoning``, ``retrieval``, ``safety``,
+        ``instruction``, ``math``, ``code``. Ignored for other select modes.
     reject_low_info: drop generic, low-information hints ("be more helpful").
     max_records: hard cap on judge calls per iteration (cost guard). <=0 = no
         cap. Records beyond the cap are skipped (left hint-less).
@@ -90,6 +114,7 @@ class OPDHintExtractorConfig:
     min_hint_chars: int = 10
     overwrite_existing: bool = False
     select: SelectMode = "longest"
+    target_axis: str = "reasoning"  # used when select == "axis_aware"
     reject_low_info: bool = True
     max_records: int = 0
 
@@ -118,9 +143,7 @@ class HintExtractStats:
             # usable OPD hint. This is the "OPD effective rate" the report
             # wants to drive from ~0 to >40%.
             "opd_hint_effective_rate": (
-                float(self.n_hints_added) / float(self.n_records)
-                if self.n_records
-                else 0.0
+                float(self.n_hints_added) / float(self.n_records) if self.n_records else 0.0
             ),
         }
         out.update(self.extra)
@@ -165,9 +188,7 @@ class OPDHintExtractor:
         import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(
-                lambda: asyncio.run(self._extract_async(records, stats))
-            )
+            fut = pool.submit(lambda: asyncio.run(self._extract_async(records, stats)))
             return fut.result()
 
     async def _extract_async(
@@ -197,11 +218,9 @@ class OPDHintExtractor:
                     stacklevel=2,
                 )
                 continue
-            hint = self._clean_hint(raw)
+            hint, n_rejected = self._clean_hint_with_count(raw)
+            stats.n_rejected_quality += n_rejected
             if hint is None:
-                continue
-            if not self._passes_quality(hint):
-                stats.n_rejected_quality += 1
                 continue
             rec.metadata["opd_hint"] = hint
             rec.metadata.setdefault("opd_hint_source", "in_trainer_judge")
@@ -212,13 +231,67 @@ class OPDHintExtractor:
     # internal
     # ------------------------------------------------------------------
 
-    def _clean_hint(self, raw: Any) -> str | None:
+    def _clean_hint_with_count(self, raw: Any) -> tuple[str | None, int]:
+        """Parse judge output, apply selection policy, return (hint, n_rejected).
+
+        The judge may return:
+          - a single string (possibly ``[HINT_START]…[HINT_END]`` wrapped),
+          - a ``|``-separated list of candidates (multi-hint judges), or
+          - None / "NO_HINT" to signal no hint available.
+
+        The selection policy (``cfg.select``) determines which candidate wins:
+          * ``first``:      first candidate that passes quality.
+          * ``longest``:    longest candidate that passes quality (OpenClaw-RL).
+          * ``axis_aware``: candidate that best matches ``cfg.target_axis``
+                            keywords; ties broken by length (hermes extension).
+
+        Returns (winning_hint_or_None, n_candidates_rejected_for_quality).
+        """
         if raw is None:
-            return None
-        text = str(raw)
-        hint = extract_hint_text(text) or text.strip()
-        if not hint or hint.upper() == "NO_HINT":
-            return None
+            return None, 0
+        text = str(raw).strip()
+        if not text or text.upper() == "NO_HINT":
+            return None, 0
+
+        # Try to extract all [HINT_START]…[HINT_END] spans first (multi-hint
+        # judges may emit several delimited blocks in one response).
+        import re as _re
+
+        spans = _re.findall(r"\[HINT_START\](.*?)\[HINT_END\]", text, flags=_re.DOTALL)
+        if spans:
+            candidates = [s.strip() for s in spans if s.strip()]
+        else:
+            # Pipe-delimited or single hint fallback.
+            raw_stripped = extract_hint_text(text) or text
+            candidates = [c.strip() for c in raw_stripped.split("|") if c.strip()]
+
+        if not candidates:
+            return None, 0
+
+        # Filter by quality; count rejects for observability.
+        passing = []
+        n_rejected = 0
+        for c in candidates:
+            if self._passes_quality(c):
+                passing.append(c)
+            else:
+                n_rejected += 1
+
+        if not passing:
+            return None, n_rejected
+
+        if self.cfg.select == "first":
+            return passing[0], n_rejected
+        elif self.cfg.select == "axis_aware":
+            scored = [(_axis_score(c, self.cfg.target_axis), len(c), c) for c in passing]
+            scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+            return scored[0][2], n_rejected
+        else:  # "longest" — OpenClaw-RL default
+            return max(passing, key=len), n_rejected
+
+    def _clean_hint(self, raw: Any) -> str | None:
+        """Legacy single-return wrapper for backward compatibility."""
+        hint, _ = self._clean_hint_with_count(raw)
         return hint
 
     def _passes_quality(self, hint: str) -> bool:
@@ -291,6 +364,7 @@ def build_opd_hint_extractor(
         min_hint_chars=int(cfg.get("min_hint_chars", 10)),
         overwrite_existing=bool(cfg.get("overwrite_existing", False)),
         select=str(cfg.get("select", "longest")),  # type: ignore[arg-type]
+        target_axis=str(cfg.get("target_axis", "reasoning")),
         reject_low_info=bool(cfg.get("reject_low_info", True)),
         max_records=int(cfg.get("max_records", 0)),
     )
@@ -329,9 +403,7 @@ def build_opd_hint_extractor(
         from hermes_agentic_rl.rewards.judge_cache import JudgeCache, cached_judge
 
         max_entries = (
-            int(cache_cfg.get("max_entries", 4096))
-            if isinstance(cache_cfg, dict)
-            else 4096
+            int(cache_cfg.get("max_entries", 4096)) if isinstance(cache_cfg, dict) else 4096
         )
         judge_fn = cached_judge(  # type: ignore[assignment]
             judge_fn, JudgeCache(max_entries=max_entries), judge_id=f"opd_hint:{kind}"

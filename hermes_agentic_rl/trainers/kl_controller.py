@@ -1,6 +1,6 @@
 """KL coefficient controllers for adaptive trust-region training.
 
-Provides two variants, both following the same interface (``update`` + 
+Provides two variants, both following the same interface (``update`` +
 ``state_dict`` / ``load_state_dict``):
 
 ``AdaptiveKLController`` (P-controller)
@@ -130,7 +130,7 @@ class PIDKLController:
     Kp: float = 0.1
     Ki: float = 0.01
     Kd: float = 0.005
-    I_max: float = 2.0     # integral anti-windup clamp
+    I_max: float = 2.0  # integral anti-windup clamp
     min_coef: float = 1e-4
     max_coef: float = 10.0
     value: float = field(init=False)

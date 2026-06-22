@@ -7,6 +7,8 @@ optimizer; the Trainer does. Algorithms are pure torch functions so they are
 easy to test.
 """
 
+from typing import cast
+
 from hermes_agentic_rl.algos.base import (
     AlgoUpdateStats,
     BaseAlgo,
@@ -79,7 +81,7 @@ for _name, _algo in {
     "factored_grpo": FactoredGRPO,
     "simpo": SimPOAlgo,
 }.items():
-    register_algo(_name, _algo)
+    register_algo(_name, cast(type[BaseAlgo], _algo))
 
 __all__ = [
     "ALGO_REGISTRY",

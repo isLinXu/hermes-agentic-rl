@@ -76,14 +76,10 @@ def _flatten(items: list[ExperienceItem[list[RolloutRecord]]]) -> list[RolloutRe
     return out
 
 
-def _max_staleness(
-    items: list[ExperienceItem[Any]], learner_version: int
-) -> int:
+def _max_staleness(items: list[ExperienceItem[Any]], learner_version: int) -> int:
     if not items:
         return 0
-    return max(
-        ExperienceQueue.staleness_of(it, learner_version) for it in items
-    )
+    return max(ExperienceQueue.staleness_of(it, learner_version) for it in items)
 
 
 def run_async_training(
@@ -109,10 +105,7 @@ def run_async_training(
     while updates < cfg.max_updates:
         items = exp_queue.get_batch(cfg.batch_size, timeout=cfg.get_timeout)
         if not items:
-            if (
-                cfg.idle_timeout > 0
-                and time.monotonic() - last_progress > cfg.idle_timeout
-            ):
+            if cfg.idle_timeout > 0 and time.monotonic() - last_progress > cfg.idle_timeout:
                 break
             continue
         last_progress = time.monotonic()
@@ -128,11 +121,7 @@ def run_async_training(
         # stale batches, restore the baseline afterwards so sync/fresh batches
         # are unaffected.
         applied_tis = base_tis
-        if (
-            has_tis
-            and cfg.stale_tis_rho_clip > 0
-            and staleness > cfg.stale_threshold
-        ):
+        if has_tis and cfg.stale_tis_rho_clip > 0 and staleness > cfg.stale_threshold:
             applied_tis = cfg.stale_tis_rho_clip
             algo_cfg.tis_rho_clip = applied_tis  # type: ignore[union-attr]
 

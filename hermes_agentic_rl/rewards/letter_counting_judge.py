@@ -45,10 +45,7 @@ def extract_letter_counting_expected_answer(next_state: str) -> str | None:
 def build_letter_counting_hint(expected_answer: str) -> str:
     """Build a concise OPD hint for the expected answer payload."""
     payload = expected_answer.strip()
-    return (
-        f"The expected answer is <answer>{payload}</answer>. "
-        "Return exactly that answer format."
-    )
+    return f"The expected answer is <answer>{payload}</answer>. Return exactly that answer format."
 
 
 async def letter_counting_opd_judge_fn(response: str, next_state: str) -> str | None:

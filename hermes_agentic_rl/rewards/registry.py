@@ -41,11 +41,7 @@ def build_reward_from_spec(spec: dict[str, Any]) -> BaseReward:
         raise ValueError("reward component spec is missing 'name'")
     cls = get_reward_class(name)
     weight = float(spec.get("weight", 1.0))
-    kwargs = {
-        key: value
-        for key, value in spec.items()
-        if key not in {"name", "weight"}
-    }
+    kwargs = {key: value for key, value in spec.items() if key not in {"name", "weight"}}
     try:
         return cls(weight=weight, **kwargs)
     except TypeError:

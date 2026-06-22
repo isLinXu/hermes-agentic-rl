@@ -28,7 +28,9 @@ class ContextBenchmarkConfig:
 class ContextBenchmarkReward(BaseReward):
     name = "context_benchmark_reward"
 
-    def __init__(self, config: ContextBenchmarkConfig | None = None, *, weight: float = 1.0) -> None:
+    def __init__(
+        self, config: ContextBenchmarkConfig | None = None, *, weight: float = 1.0
+    ) -> None:
         self.config = config or ContextBenchmarkConfig()
         self.weight = float(weight)
 
@@ -52,7 +54,9 @@ class ContextBenchmarkReward(BaseReward):
         constraint_satisfaction = _hit_rate(lowered, constraints)
         tool_retention = _hit_rate(lowered, tool_facts)
         forbidden_hits = _hit_count(lowered, forbidden)
-        distractor_avoidance = 1.0 if not forbidden else max(0.0, 1.0 - forbidden_hits / len(forbidden))
+        distractor_avoidance = (
+            1.0 if not forbidden else max(0.0, 1.0 - forbidden_hits / len(forbidden))
+        )
         compression_ok = 1.0 if output and len(output) <= max_chars else 0.0
         precision_denominator = (
             _hit_count(lowered, required)
@@ -164,7 +168,8 @@ class ContextBenchmarkEnv(BaseEnv):
             "Additional noisy context:",
             *[f"- {block}" for block in noise],
             "",
-            f"Final answer must be concise, at most {max_chars} characters, and include the relevant facts.",
+            f"Final answer must be concise, at most {max_chars} characters, "
+            "and include the relevant facts.",
         ]
         return "\n".join(sections)
 
@@ -237,8 +242,10 @@ def build_context_benchmark_dataset(
         "switch the owner to legacy ops",
     ]
     noise_templates = [
-        "Historical note {idx}: a different project used {color} labels and unrelated release notes.",
-        "Chat fragment {idx}: someone mentioned lunch, roadmap guesses, and non-actionable speculation.",
+        "Historical note {idx}: a different project used {color} labels "
+        "and unrelated release notes.",
+        "Chat fragment {idx}: someone mentioned lunch, roadmap guesses, "
+        "and non-actionable speculation.",
         "Old tool output {idx}: status=unknown, owner=archive, priority=low.",
         "Reference {idx}: this paragraph is intentionally irrelevant filler for context pressure.",
     ]
@@ -261,7 +268,9 @@ def build_context_benchmark_dataset(
         ]
         forbidden = rng.sample(stale_facts, k=min(2, len(stale_facts)))
         noise = [
-            rng.choice(noise_templates).format(idx=noise_idx, color=rng.choice(["red", "teal", "black"]))
+            rng.choice(noise_templates).format(
+                idx=noise_idx, color=rng.choice(["red", "teal", "black"])
+            )
             for noise_idx in range(noise_blocks)
         ]
         task = (
@@ -284,7 +293,9 @@ def build_context_benchmark_dataset(
             "max_response_chars": max_response_chars,
             "category": "context_benchmark",
         }
-        item["prompt"] = ContextBenchmarkEnv([item], config=ContextBenchmarkConfig()).format_prompt(item)
+        item["prompt"] = ContextBenchmarkEnv([item], config=ContextBenchmarkConfig()).format_prompt(
+            item
+        )
         items.append(item)
     return items
 

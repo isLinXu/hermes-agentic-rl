@@ -155,10 +155,7 @@ def aggregate_update_stats(
     total_weight = sum(_weight(s) for s in step_stats)
 
     def _weighted(attr: str) -> float:
-        return (
-            sum(float(getattr(s, attr)) * _weight(s) for s in step_stats)
-            / max(1, total_weight)
-        )
+        return sum(float(getattr(s, attr)) * _weight(s) for s in step_stats) / max(1, total_weight)
 
     extras: dict[str, Any] = {}
     first_extra = step_stats[0].extra
@@ -168,9 +165,7 @@ def aggregate_update_stats(
     extras["n_optimizer_steps"] = len(step_stats)
     extras["update_epochs"] = max(1, update_epochs)
     extras["n_minibatches"] = n_update_batches
-    extras["minibatch_size"] = (
-        total_records if minibatch_size <= 0 else minibatch_size
-    )
+    extras["minibatch_size"] = total_records if minibatch_size <= 0 else minibatch_size
 
     numeric_means: dict[str, list[tuple[float, int]]] = {}
     for stat in step_stats:

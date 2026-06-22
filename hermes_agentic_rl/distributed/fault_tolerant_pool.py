@@ -178,7 +178,7 @@ class FaultTolerantRolloutPool:
 
         while len(out) < expected:
             try:
-                kind, payload = self.inner._result_q.get(  # noqa: SLF001
+                kind, payload = self.inner._result_q.get(
                     timeout=self.cfg.poll_interval,
                 )
             except queue.Empty:
@@ -197,9 +197,8 @@ class FaultTolerantRolloutPool:
                 # At least one worker died — try to restart.
                 if not self._handle_dead_workers():
                     raise RolloutPoolFailure(
-                        "drain timed out and at least one worker died; "
-                        "auto-restart is disabled"
-                    )
+                        "drain timed out and at least one worker died; auto-restart is disabled"
+                    ) from None
                 deadline = time.monotonic() + self.cfg.worker_timeout
                 continue
 
@@ -213,9 +212,7 @@ class FaultTolerantRolloutPool:
                 seq = int(payload.get("task_seq", -1))
                 self._handle_task_error(seq, payload, expected_remaining=expected - len(out))
             elif kind == "builder_error":
-                raise RolloutPoolFailure(
-                    f"worker builder failed: {payload}"
-                )
+                raise RolloutPoolFailure(f"worker builder failed: {payload}")
 
         out.sort(key=lambda r: r["task_seq"])
         return out
@@ -252,11 +249,11 @@ class FaultTolerantRolloutPool:
             stacklevel=2,
         )
         # round-robin to a hopefully-healthy worker
-        wid = (seq + attempts) % max(1, len(self.inner._task_qs))  # noqa: SLF001
-        self.inner._task_qs[wid].put(("task", task))  # noqa: SLF001
+        wid = (seq + attempts) % max(1, len(self.inner._task_qs))
+        self.inner._task_qs[wid].put(("task", task))
 
     def _all_alive(self) -> bool:
-        return all(p.is_alive() for p in self.inner._procs)  # noqa: SLF001
+        return all(p.is_alive() for p in self.inner._procs)
 
     def _handle_dead_workers(self) -> bool:
         if not self.cfg.restart_dead_workers:
@@ -269,7 +266,7 @@ class FaultTolerantRolloutPool:
         self.inner.start()
         self.stats.restarts += 1
         if self.cfg.auto_rebroadcast_on_restart and self._last_state_blob is not None:
-            for wq in self.inner._weight_qs:  # noqa: SLF001
+            for wq in self.inner._weight_qs:
                 try:
                     wq.put((self._last_version, self._last_state_blob))
                 except Exception:
@@ -284,8 +281,8 @@ class FaultTolerantRolloutPool:
                         f"task_seq={seq} exceeded max_retries during worker restart"
                     )
                 self.stats.retried += 1
-                wid = i % max(1, len(self.inner._task_qs))  # noqa: SLF001
-                self.inner._task_qs[wid].put(("task", task))  # noqa: SLF001
+                wid = i % max(1, len(self.inner._task_qs))
+                self.inner._task_qs[wid].put(("task", task))
         return True
 
     def metrics(self) -> dict[str, Any]:

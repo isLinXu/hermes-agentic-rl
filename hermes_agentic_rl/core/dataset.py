@@ -131,11 +131,7 @@ def select_items_by_group(
         "test": set(group_ids[n_train + n_val :]),
     }
     selected_ids = split_ids[split]
-    selected_indices = {
-        idx
-        for group_id in selected_ids
-        for idx in groups.get(group_id, [])
-    }
+    selected_indices = {idx for group_id in selected_ids for idx in groups.get(group_id, [])}
     selected = [item for idx, item in enumerate(rows) if idx in selected_indices]
     return selected, {
         "split": split,

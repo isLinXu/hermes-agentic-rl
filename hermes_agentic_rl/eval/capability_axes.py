@@ -46,7 +46,10 @@ DEFAULT_CAPABILITY_AXES: tuple[CapabilityAxis, ...] = (
     ),
     CapabilityAxis(
         name="self_evolution_signal",
-        description="Signals useful for deciding whether experience should become replay data or a skill.",
+        description=(
+            "Signals useful for deciding whether experience should become "
+            "replay data or a skill."
+        ),
         metrics=(
             CapabilityMetric("success_score_mean", 0.5),
             CapabilityMetric("mean_reward", 0.5),
@@ -54,7 +57,10 @@ DEFAULT_CAPABILITY_AXES: tuple[CapabilityAxis, ...] = (
     ),
     CapabilityAxis(
         name="prompt_context",
-        description="Long-context retention, constraint preservation, distractor avoidance, and concise synthesis.",
+        description=(
+            "Long-context retention, constraint preservation, "
+            "distractor avoidance, and concise synthesis."
+        ),
         metrics=(
             CapabilityMetric("metadata/context_required_fact_recall", 0.30),
             CapabilityMetric("metadata/context_constraint_satisfaction", 0.25),
@@ -113,7 +119,9 @@ def normalize_capability_axes(raw: Any) -> list[CapabilityAxis]:
                 metrics.append(CapabilityMetric(name=metric, weight=1.0))
                 continue
             if not isinstance(metric, dict):
-                raise ValueError(f"capability_axes.{name}.metrics entries must be strings or mappings")
+                raise ValueError(
+                    f"capability_axes.{name}.metrics entries must be strings or mappings"
+                )
             metric_name = str(metric.get("name") or metric.get("metric") or "").strip()
             if not metric_name:
                 raise ValueError(f"capability_axes.{name}.metrics entry is missing name")
@@ -138,13 +146,10 @@ def build_capability_report(
     policies: list[dict[str, Any]] = []
     for report in policy_reports:
         axis_scores = {
-            axis.name: _axis_score(dict(report.get("metrics", {})), axis)
-            for axis in axes
+            axis.name: _axis_score(dict(report.get("metrics", {})), axis) for axis in axes
         }
         present_scores = [
-            payload["score"]
-            for payload in axis_scores.values()
-            if payload.get("score") is not None
+            payload["score"] for payload in axis_scores.values() if payload.get("score") is not None
         ]
         overall_score = (
             sum(float(score) for score in present_scores) / len(present_scores)
@@ -161,11 +166,7 @@ def build_capability_report(
         )
 
     baseline = policies[0] if policies else None
-    candidates = [
-        policy
-        for policy in policies[1:]
-        if policy.get("overall_score") is not None
-    ]
+    candidates = [policy for policy in policies[1:] if policy.get("overall_score") is not None]
     best_candidate = max(
         candidates,
         key=lambda item: float(item.get("overall_score") or float("-inf")),
@@ -193,8 +194,7 @@ def build_capability_report(
                 "name": axis.name,
                 "description": axis.description,
                 "metrics": [
-                    {"name": metric.name, "weight": metric.weight}
-                    for metric in axis.metrics
+                    {"name": metric.name, "weight": metric.weight} for metric in axis.metrics
                 ],
             }
             for axis in axes

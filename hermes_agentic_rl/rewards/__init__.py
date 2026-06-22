@@ -6,6 +6,16 @@ from hermes_agentic_rl.rewards.next_turn_feedback import (
     NextTurnFeedbackReward,
     score_feedback_messages,
 )
+from hermes_agentic_rl.rewards.token_level_reward import (
+    TokenRewardConfig,
+    compute_combined_reward,
+    compute_kl_penalty,
+    compute_length_penalty,
+    compute_outcome_reward,
+    compute_token_advantages,
+    compute_trajectory_token_rewards,
+)
+from hermes_agentic_rl.rewards.token_level_reward_component import TokenLevelReward
 
 __all__ = [
     "BaseReward",
@@ -13,6 +23,14 @@ __all__ = [
     "NextTurnFeedbackReward",
     "RewardComposer",
     "RewardComposerConfig",
+    "TokenLevelReward",
+    "TokenRewardConfig",
+    "compute_combined_reward",
+    "compute_kl_penalty",
+    "compute_length_penalty",
+    "compute_outcome_reward",
+    "compute_token_advantages",
+    "compute_trajectory_token_rewards",
     "score_feedback_messages",
     "weighted_sum",
 ]

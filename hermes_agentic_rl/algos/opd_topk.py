@@ -73,11 +73,12 @@ class OPDTopKConfig:
         - ``overlap``: intersection of top-k(π_old) and top-k(π_T)
     adv_diff_clip: clip bound δ on log π_T - log π_old per token.
     """
-    k:                int   = 4
-    max_candidates:   int   = 3
-    hint_selection:   Literal["sequence_optimal", "token_optimal", "shortest"] = "sequence_optimal"
-    subset_mode:      Literal["student", "teacher", "overlap"] = "student"
-    adv_diff_clip:    float = 1.0
+
+    k: int = 4
+    max_candidates: int = 3
+    hint_selection: Literal["sequence_optimal", "token_optimal", "shortest"] = "sequence_optimal"
+    subset_mode: Literal["student", "teacher", "overlap"] = "student"
+    adv_diff_clip: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -104,8 +105,8 @@ class OPDTopKSelector:
 
     def select(
         self,
-        student_top_k: torch.Tensor,    # [T, k]
-        teacher_top_k: torch.Tensor,    # [C, T, k]
+        student_top_k: torch.Tensor,  # [T, k]
+        teacher_top_k: torch.Tensor,  # [C, T, k]
         vocab_size: int,
     ) -> tuple[int, torch.Tensor, torch.Tensor]:
         """
@@ -113,17 +114,20 @@ class OPDTopKSelector:
             (selected_hint_idx, subset_mask [T, vocab], per_token_overlap [T])
         """
         cfg = self.cfg
-        C, T, k = teacher_top_k.shape
+        C, T, _k = teacher_top_k.shape
         device = student_top_k.device
 
         if C == 0:
-            return 0, torch.zeros(T, vocab_size, dtype=torch.bool, device=device), \
-                       torch.zeros(T, dtype=torch.float32, device=device)
+            return (
+                0,
+                torch.zeros(T, vocab_size, dtype=torch.bool, device=device),
+                torch.zeros(T, dtype=torch.float32, device=device),
+            )
 
         # Compute overlap [C, T]: |top-k(π_old) ∩ top-k(π_T[c])|
         # Student top-k: [T, k] → expand to [1, T, k]
-        s = student_top_k.unsqueeze(0).expand(C, -1, -1)   # [C, T, k]
-        t = teacher_top_k                                    # [C, T, k]
+        s = student_top_k.unsqueeze(0).expand(C, -1, -1)  # [C, T, k]
+        t = teacher_top_k  # [C, T, k]
 
         # For each (c, t_pos), count tokens in both sets.
         # Efficient: sort both sets and intersect. Approx: one-hot sums.
@@ -133,13 +137,13 @@ class OPDTopKSelector:
         # Scatter student indices
         _scatter_topk(s, s_oh, vocab_size)
         _scatter_topk(t, t_oh, vocab_size)
-        overlap = (s_oh & t_oh).sum(dim=-1).float()   # [C, T]
+        overlap = (s_oh & t_oh).sum(dim=-1).float()  # [C, T]
 
         if cfg.hint_selection == "sequence_optimal":
             # Select hint with max Σ_t overlap[c, t]
-            total_overlap = overlap.sum(dim=-1)        # [C]
+            total_overlap = overlap.sum(dim=-1)  # [C]
             best_c = int(total_overlap.argmax().item())
-            per_token_overlap = overlap[best_c]        # [T]
+            per_token_overlap = overlap[best_c]  # [T]
 
         elif cfg.hint_selection == "token_optimal":
             # Per-token best hint: we need to pick one hint overall for
@@ -155,19 +159,17 @@ class OPDTopKSelector:
             per_token_overlap = overlap[0]
 
         # Build vocabulary subset mask [T, vocab]
-        subset_mask = _build_subset_mask(
-            s_oh[best_c], t_oh[best_c], cfg.subset_mode
-        )  # [T, vocab]
+        subset_mask = _build_subset_mask(s_oh[best_c], t_oh[best_c], cfg.subset_mode)  # [T, vocab]
 
         return best_c, subset_mask, per_token_overlap
 
     def compute_topk_opd_loss(
         self,
-        new_logprobs_full: torch.Tensor,     # [T, vocab] current policy full logits
-        old_logprobs_full: torch.Tensor,     # [T, vocab] old policy full logits
-        teacher_logprobs_full: torch.Tensor, # [T, vocab] teacher full logits
-        subset_mask: torch.Tensor,           # [T, vocab] bool
-        response_mask: torch.Tensor,         # [T]        bool
+        new_logprobs_full: torch.Tensor,  # [T, vocab] current policy full logits
+        old_logprobs_full: torch.Tensor,  # [T, vocab] old policy full logits
+        teacher_logprobs_full: torch.Tensor,  # [T, vocab] teacher full logits
+        subset_mask: torch.Tensor,  # [T, vocab] bool
+        response_mask: torch.Tensor,  # [T]        bool
     ) -> torch.Tensor:
         """Compute OPD loss restricted to the top-k subset.
 
@@ -185,8 +187,8 @@ class OPDTopKSelector:
         dtype = new_logprobs_full.dtype
 
         # Restrict to subset
-        sub_new = new_logprobs_full  * subset_mask.to(dtype)   # [T, vocab]
-        sub_old = old_logprobs_full  * subset_mask.to(dtype)
+        sub_new = new_logprobs_full * subset_mask.to(dtype)  # [T, vocab]
+        sub_old = old_logprobs_full * subset_mask.to(dtype)
         sub_tch = teacher_logprobs_full * subset_mask.to(dtype)
 
         adv = (sub_tch - sub_old).clamp(-cfg.adv_diff_clip, cfg.adv_diff_clip)
@@ -206,8 +208,8 @@ class OPDTopKSelector:
 
 
 def _scatter_topk(
-    indices: torch.Tensor,   # [C, T, k] or [T, k]
-    out: torch.Tensor,       # [C, T, vocab] or [T, vocab] bool
+    indices: torch.Tensor,  # [C, T, k] or [T, k]
+    out: torch.Tensor,  # [C, T, vocab] or [T, vocab] bool
     vocab_size: int,
 ) -> None:
     """In-place: set out[..., indices[..., j]] = True for j in range(k)."""
@@ -218,10 +220,10 @@ def _scatter_topk(
 
 
 def _build_subset_mask(
-    s_oh: torch.Tensor,   # [T, vocab] bool — student top-k
-    t_oh: torch.Tensor,   # [T, vocab] bool — teacher top-k
+    s_oh: torch.Tensor,  # [T, vocab] bool — student top-k
+    t_oh: torch.Tensor,  # [T, vocab] bool — teacher top-k
     mode: str,
-) -> torch.Tensor:         # [T, vocab] bool
+) -> torch.Tensor:  # [T, vocab] bool
     if mode == "student":
         return s_oh
     if mode == "teacher":
@@ -238,7 +240,7 @@ def _build_subset_mask(
 
 def approx_topk_from_per_token_logprobs(
     per_token_logprobs: torch.Tensor,  # [T] one logprob per sampled token
-    sampled_ids: torch.Tensor,         # [T] the sampled token ids
+    sampled_ids: torch.Tensor,  # [T] the sampled token ids
     vocab_size: int,
     k: int = 4,
 ) -> torch.Tensor:
@@ -255,7 +257,7 @@ def approx_topk_from_per_token_logprobs(
         ids = sampled_ids.unsqueeze(1).expand(T, k)
         return ids.clamp(0, vocab_size - 1)
     # Take global top-k by logprob
-    top_vals, top_pos = per_token_logprobs.topk(min(k, T))
-    top_ids = sampled_ids[top_pos]                      # [k]
-    result = top_ids.unsqueeze(0).expand(T, -1)         # [T, k]
+    _top_vals, top_pos = per_token_logprobs.topk(min(k, T))
+    top_ids = sampled_ids[top_pos]  # [k]
+    result = top_ids.unsqueeze(0).expand(T, -1)  # [T, k]
     return result.clamp(0, vocab_size - 1)

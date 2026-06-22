@@ -107,9 +107,7 @@ def batch_generate(
         torch.manual_seed(int(cfg.seed))
 
     # Pad prompts
-    input_ids, attention_mask = _pad_and_mask(
-        prompt_ids_list, cfg.pad_token_id, str(device)
-    )
+    input_ids, attention_mask = _pad_and_mask(prompt_ids_list, cfg.pad_token_id, str(device))
 
     # Track per-sequence state
     response_ids: list[list[int]] = [[] for _ in range(B)]

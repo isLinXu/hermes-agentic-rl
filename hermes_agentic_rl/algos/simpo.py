@@ -75,7 +75,7 @@ class SimPOConfig:
 
     beta: float = 2.5
     gamma: float = 1.0
-    loss_agg: str = "mean_token"   # "mean_token" | "sum_token"
+    loss_agg: str = "mean_token"  # "mean_token" | "sum_token"
     dapo_filter: bool = True
     require_mixed: bool = False
     min_reward_gap: float = 0.0
@@ -96,7 +96,7 @@ def _length_normalized_logprob(
         return logprobs.new_zeros(())
     if loss_agg == "mean_token":
         return logprobs.mean()
-    return logprobs.sum()   # "sum_token" = standard log P(y|x)
+    return logprobs.sum()  # "sum_token" = standard log P(y|x)
 
 
 def _select_winner_loser(
@@ -160,9 +160,15 @@ class SimPOAlgo(BaseAlgo):
             # Return a detached zero — no gradient computation needed for empty batches.
             zero = torch.zeros(())
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
-                n_records=0, extra={"algo": "simpo", "n_pairs": 0},
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
+                mean_reward=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
+                n_records=0,
+                extra={"algo": "simpo", "n_pairs": 0},
             )
 
         # ── 1. Group records by prompt ───────────────────────────────────
@@ -200,9 +206,13 @@ class SimPOAlgo(BaseAlgo):
         if not filtered_groups:
             zero = torch.zeros(())
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
                 mean_reward=sum(r.reward for r in records) / max(1, len(records)),
-                mean_advantage=0.0, clip_frac=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
                 n_records=len(records),
                 extra={
                     "algo": "simpo",
@@ -215,26 +225,29 @@ class SimPOAlgo(BaseAlgo):
         # ── 3. Collect (winner, loser) pairs ────────────────────────────
         all_pairs: list[tuple[RolloutRecord, RolloutRecord]] = []
         for recs in filtered_groups:
-            all_pairs.extend(
-                _select_winner_loser(recs, min_reward_gap=cfg.min_reward_gap)
-            )
+            all_pairs.extend(_select_winner_loser(recs, min_reward_gap=cfg.min_reward_gap))
 
         if not all_pairs:
             zero = torch.zeros(())
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
                 mean_reward=sum(r.reward for r in records) / max(1, len(records)),
-                mean_advantage=0.0, clip_frac=0.0, n_records=len(records),
+                mean_advantage=0.0,
+                clip_frac=0.0,
+                n_records=len(records),
                 extra={"algo": "simpo", "n_pairs": 0},
             )
 
         # ── 4. Batch score winners + losers ─────────────────────────────
         winners = [w for w, _ in all_pairs]
-        losers  = [l for _, l in all_pairs]
+        losers = [l for _, l in all_pairs]
         all_unique_recs = list({id(r): r for r in winners + losers}.values())
 
         # Score all unique records in one batched forward pass.
-        prompt_ids_list  = [rec.prompt_ids  for rec in all_unique_recs]
+        prompt_ids_list = [rec.prompt_ids for rec in all_unique_recs]
         response_ids_list = [rec.response_ids for rec in all_unique_recs]
         new_logp_batch, mask_batch = policy.score_batch(
             prompt_ids_list, response_ids_list
@@ -253,21 +266,17 @@ class SimPOAlgo(BaseAlgo):
             w_idx = rec_to_idx[id(winner)]
             l_idx = rec_to_idx[id(loser)]
 
-            w_lp  = new_logp_batch[w_idx]         # [T]
-            w_mask = mask_batch[w_idx].to(dtype)   # [T]
-            l_lp  = new_logp_batch[l_idx]
+            w_lp = new_logp_batch[w_idx]  # [T]
+            w_mask = mask_batch[w_idx].to(dtype)  # [T]
+            l_lp = new_logp_batch[l_idx]
             l_mask = mask_batch[l_idx].to(dtype)
 
             # Mask-select valid (non-padding) token log-probs.
             w_valid = w_lp * w_mask
             l_valid = l_lp * l_mask
 
-            r_w = _length_normalized_logprob(
-                w_valid[w_mask.bool()], cfg.loss_agg
-            )
-            r_l = _length_normalized_logprob(
-                l_valid[l_mask.bool()], cfg.loss_agg
-            )
+            r_w = _length_normalized_logprob(w_valid[w_mask.bool()], cfg.loss_agg)
+            r_l = _length_normalized_logprob(l_valid[l_mask.bool()], cfg.loss_agg)
 
             # SimPO Bradley-Terry margin loss.
             # L = -log σ(β * (R̃_w - R̃_l - γ))
@@ -285,7 +294,7 @@ class SimPOAlgo(BaseAlgo):
             ent_vals: list[torch.Tensor] = []
             for rec in all_unique_recs:
                 idx = rec_to_idx[id(rec)]
-                lp   = new_logp_batch[idx]
+                lp = new_logp_batch[idx]
                 mask = mask_batch[idx].to(dtype)
                 n = mask.sum().clamp(min=1)
                 ent_vals.append(-(lp * mask).sum() / n)
@@ -300,7 +309,7 @@ class SimPOAlgo(BaseAlgo):
         stats = AlgoUpdateStats(
             loss=float(total.detach().item()),
             policy_loss=float(simpo_loss.detach().item()),
-            kl=0.0,         # reference-free — no KL term
+            kl=0.0,  # reference-free — no KL term
             entropy=ent_val,
             mean_reward=mean_r,
             mean_advantage=mean_gap,

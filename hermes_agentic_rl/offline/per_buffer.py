@@ -213,9 +213,12 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
     def add_sample(self, sample: TrainSample, priority: float | None = None) -> None:  # type: ignore[override]
         """Add a sample with an explicit (or default-max) priority."""
-        p = priority if priority is not None else (
-            self._default_priority if self._default_priority is not None
-            else self._max_priority
+        p = (
+            priority
+            if priority is not None
+            else (
+                self._default_priority if self._default_priority is not None else self._max_priority
+            )
         )
         p = max(self.eps_priority, float(p))
 
@@ -233,7 +236,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             return [], []
 
         # P(i) = p_i^alpha / sum
-        powered = [p ** self.alpha for p in prio_list]
+        powered = [p**self.alpha for p in prio_list]
         total = sum(powered)
         probs = [pw / total for pw in powered]
 
@@ -286,7 +289,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             td_errors: per-sample TD errors (or absolute advantages).
                 Length must match ``indices``.
         """
-        prio_list = list(self._priorities)   # materialise for indexed write
+        prio_list = list(self._priorities)  # materialise for indexed write
         changed = False
         for idx, err in zip(indices, td_errors, strict=False):
             if 0 <= idx < len(prio_list):
@@ -311,8 +314,14 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         """Return a dict of buffer statistics for logging."""
         n = len(self._priorities)
         if n == 0:
-            return {"size": 0, "max_priority": 0.0, "min_priority": 0.0,
-                    "mean_priority": 0.0, "beta": self.beta, "alpha": self.alpha}
+            return {
+                "size": 0,
+                "max_priority": 0.0,
+                "min_priority": 0.0,
+                "mean_priority": 0.0,
+                "beta": self.beta,
+                "alpha": self.alpha,
+            }
         return {
             "size": float(n),
             "max_priority": max(self._priorities),

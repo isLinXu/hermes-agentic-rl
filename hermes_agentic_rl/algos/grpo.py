@@ -133,36 +133,35 @@ class GRPO(BaseAlgo):
         if not all_records:
             zero = torch.zeros((), dtype=torch.float32)
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
-                n_records=0, extra={"algo": "grpo", "n_updated": 0, "approx_kl": 0.0},
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
+                mean_reward=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
+                n_records=0,
+                extra={"algo": "grpo", "n_updated": 0, "approx_kl": 0.0},
             )
 
         if cfg.advantage_norm == "group":
             records_with_adv: list[tuple[RolloutRecord, list[float]]] = []
             grouped = batch.by_group()
-            all_singleton_groups = grouped and all(
-                len(recs) == 1 for recs in grouped.values()
-            )
+            all_singleton_groups = grouped and all(len(recs) == 1 for recs in grouped.values())
             if all_singleton_groups and len(all_records) > 1:
                 # Every prompt produced a single rollout — group-relative
                 # advantage is identically zero. Fall back to batch norm so
                 # cross-prompt variance still yields a usable signal.
                 rewards_all = [r.reward for r in all_records]
-                scalar_advs = batch_normalize_advantage(
-                    rewards_all, eps=cfg.advantage_eps
-                )
+                scalar_advs = batch_normalize_advantage(rewards_all, eps=cfg.advantage_eps)
                 records_with_adv = [
-                    (rec, [a])
-                    for rec, a in zip(all_records, scalar_advs, strict=False)
+                    (rec, [a]) for rec, a in zip(all_records, scalar_advs, strict=False)
                 ]
                 group_norm_batch_fallback = 1.0
             else:
                 for _gid, recs in grouped.items():
                     rewards_g = [r.reward for r in recs]
-                    scalar_advs = group_normalize_advantage(
-                        rewards_g, eps=cfg.advantage_eps
-                    )
+                    scalar_advs = group_normalize_advantage(rewards_g, eps=cfg.advantage_eps)
                     for rec, adv in zip(recs, scalar_advs, strict=False):
                         records_with_adv.append((rec, [adv]))
                 # Degenerate config guard: every group has a single rollout, so the
@@ -230,9 +229,15 @@ class GRPO(BaseAlgo):
         if B == 0 or T_max == 0:
             zero = new_logp.new_zeros(())
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
-                n_records=0, extra={"algo": "grpo", "n_updated": 0, "approx_kl": 0.0},
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
+                mean_reward=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
+                n_records=0,
+                extra={"algo": "grpo", "n_updated": 0, "approx_kl": 0.0},
             )
 
         device = new_logp.device
@@ -264,7 +269,10 @@ class GRPO(BaseAlgo):
 
         # 6) Batched clipped surrogate.
         pol_loss, loss_stats = clipped_surrogate_loss_batched(
-            new_logp, old_logp, adv_tensor, mask,
+            new_logp,
+            old_logp,
+            adv_tensor,
+            mask,
             clip_eps=cfg.clip_eps,
             clip_eps_high=cfg.clip_eps_high,
             loss_agg=cfg.loss_agg,
@@ -277,9 +285,13 @@ class GRPO(BaseAlgo):
         # 7) KL-to-reference (batched). Uses shared compute_kl_penalty
         #    so the estimator path is consistent with RLOO/OPD/PPO.
         kl_result = compute_kl_penalty(
-            new_logp, mask,
-            prompt_ids_list, response_ids_list,
-            score_temperature, ref_policy, cfg.kl_coef,
+            new_logp,
+            mask,
+            prompt_ids_list,
+            response_ids_list,
+            score_temperature,
+            ref_policy,
+            cfg.kl_coef,
             kl_estimator=cfg.kl_estimator,
         )
         if kl_result is not None:

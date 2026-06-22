@@ -19,9 +19,9 @@ try:
     )
     from hermes_agentic_rl.trainers.on_policy import (
         OnPolicyTrainer,
-        OnPolicyTrainerConfig,
         TrainStats,
     )
+    from hermes_agentic_rl.trainers.on_policy_config import OnPolicyTrainerConfig
     from hermes_agentic_rl.trainers.ppo_trainer import (
         PPOTrainer,
         PPOTrainerConfig,

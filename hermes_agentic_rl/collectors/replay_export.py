@@ -25,9 +25,7 @@ class HFTokenizerAdapter:
             else (hf_tok.eos_token_id if hf_tok.eos_token_id is not None else 0)
         )
         self.eos_id = int(hf_tok.eos_token_id) if hf_tok.eos_token_id is not None else self.pad_id
-        self.bos_id = int(
-            hf_tok.bos_token_id if hf_tok.bos_token_id is not None else self.pad_id
-        )
+        self.bos_id = int(hf_tok.bos_token_id if hf_tok.bos_token_id is not None else self.pad_id)
 
     def encode(self, text: str, add_eos: bool = False) -> list[int]:
         ids = list(self._tok.encode(text, add_special_tokens=False))
@@ -69,7 +67,12 @@ def append_jsonl(path: str | Path, payloads: list[dict[str, Any]]) -> str:
 
 
 def record_to_session_turn_samples(record: Any) -> list[Any]:
-    if isinstance(record, dict) and "task_id" in record and "prompt" in record and "turns_used" in record:
+    if (
+        isinstance(record, dict)
+        and "task_id" in record
+        and "prompt" in record
+        and "turns_used" in record
+    ):
         return trajectory_to_session_turn_samples(trajectory_from_dict(record))
 
     if isinstance(record, dict):
@@ -92,7 +95,9 @@ def record_to_session_turn_samples(record: Any) -> list[Any]:
                 runtime_task_id = runtime_meta.get("task_id") or runtime_meta.get("session_id")
         return collect_session_turn_samples(
             [dict(m) for m in messages if isinstance(m, dict)],
-            session_id=str(record.get("session_id") or runtime_task_id or record.get("task_id") or "session"),
+            session_id=str(
+                record.get("session_id") or runtime_task_id or record.get("task_id") or "session"
+            ),
             task_id=record.get("task_id"),
         )
 

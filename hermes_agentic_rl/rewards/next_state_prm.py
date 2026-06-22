@@ -49,8 +49,8 @@ from hermes_agentic_rl.core.types import RewardResult, Trajectory
 # Vote types
 # ---------------------------------------------------------------------------
 
-GOOD    = +1
-BAD     = -1
+GOOD = +1
+BAD = -1
 NEUTRAL = 0
 
 VOTE_LABELS = {GOOD: "GOOD", BAD: "BAD", NEUTRAL: "NEUTRAL"}
@@ -59,9 +59,10 @@ VOTE_LABELS = {GOOD: "GOOD", BAD: "BAD", NEUTRAL: "NEUTRAL"}
 @dataclass(slots=True)
 class PRMVote:
     """Result of one judge call."""
-    vote:  int          # GOOD / BAD / NEUTRAL
-    hint:  str | None   # optional directive hint
-    raw:   str = ""     # raw judge output (for debugging)
+
+    vote: int  # GOOD / BAD / NEUTRAL
+    hint: str | None  # optional directive hint
+    raw: str = ""  # raw judge output (for debugging)
 
 
 # ---------------------------------------------------------------------------
@@ -136,9 +137,10 @@ class NextStatePRMConfig:
     write_hint_to_metadata: if True, the best hint is written to
        trajectory.metadata["runtime"]["rl"]["opd_hint"].
     """
-    m:                    int  = 3
-    at_least_one:         bool = True
-    hint_min_length:      int  = 10
+
+    m: int = 3
+    at_least_one: bool = True
+    hint_min_length: int = 10
     write_hint_to_metadata: bool = True
 
 
@@ -183,8 +185,8 @@ class NextStatePRM:
         votes: list[PRMVote] = await asyncio.gather(*tasks)
 
         good_count = sum(1 for v in votes if v.vote == GOOD)
-        bad_count  = sum(1 for v in votes if v.vote == BAD)
-        threshold  = math.ceil(cfg.m / 2)
+        bad_count = sum(1 for v in votes if v.vote == BAD)
+        threshold = math.ceil(cfg.m / 2)
 
         if good_count >= threshold:
             majority = GOOD
@@ -240,11 +242,9 @@ class NextStatePRMComponent:
 
         runtime = trajectory.metadata.get("runtime") or {}
         if not isinstance(runtime, dict):
-            return RewardResult(
-                name=self.name, score=0.0, weight=self.weight, reason="no runtime"
-            )
+            return RewardResult(name=self.name, score=0.0, weight=self.weight, reason="no runtime")
 
-        response   = trajectory.final_output or ""
+        response = trajectory.final_output or ""
         next_state = runtime.get("next_state")  # may be None for last turn
 
         score, hint = await self.prm.score(response, next_state)

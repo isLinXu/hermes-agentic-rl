@@ -89,13 +89,11 @@ class OpenAICompatibleJudgeClient:
                 return parsed
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")[:500]
-                last_error = RuntimeError(
-                    f"judge HTTP {exc.code} from {endpoint}: {body}"
-                )
+                last_error = RuntimeError(f"judge HTTP {exc.code} from {endpoint}: {body}")
             except Exception as exc:  # pragma: no cover - network timing dependent
                 last_error = exc
             if attempt + 1 < attempts:
-                time.sleep(min(2.0, 0.25 * (2 ** attempt)))
+                time.sleep(min(2.0, 0.25 * (2**attempt)))
         raise RuntimeError(f"judge request failed: {last_error}") from last_error
 
 
@@ -122,8 +120,7 @@ class OpenAICompatibleOPDJudge(OPDJudge):
                 {
                     "role": "user",
                     "content": (
-                        "Assistant response:\n"
-                        f"{response}\n\nNext-state signal:\n{next_state}"
+                        f"Assistant response:\n{response}\n\nNext-state signal:\n{next_state}"
                     ),
                 },
             ]
@@ -164,8 +161,7 @@ class OpenAICompatibleNextStateJudge(NextStateJudge):
                 {
                     "role": "user",
                     "content": (
-                        "Assistant response:\n"
-                        f"{response}\n\nNext-state signal:\n{next_state}"
+                        f"Assistant response:\n{response}\n\nNext-state signal:\n{next_state}"
                     ),
                 },
             ]

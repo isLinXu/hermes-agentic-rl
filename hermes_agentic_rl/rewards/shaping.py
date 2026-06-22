@@ -30,7 +30,7 @@ from typing import Any
 # Type alias
 # ---------------------------------------------------------------------------
 
-RolloutRecord = Any   # avoid circular import; duck-typed
+RolloutRecord = Any  # avoid circular import; duck-typed
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +55,7 @@ def length_penalty_shaping(
         use_response_tokens: if True, measure ``len(record.response_ids)``;
             otherwise measure ``record.metadata.get("response_tokens", 0)``.
     """
+
     def _shape(records: list[Any]) -> list[Any]:
         for rec in records:
             if use_response_tokens:
@@ -104,6 +105,7 @@ def format_bonus_shaping(
             reward_shaping_fn=format_bonus_shaping(is_json, bonus=0.2),
         )
     """
+
     def _shape(records: list[Any]) -> list[Any]:
         for rec in records:
             # Try to get decoded text from metadata, fall back to empty string.
@@ -140,6 +142,7 @@ def compose_shaping(
         )
         trainer = GRPOTrainer(..., reward_shaping_fn=fn)
     """
+
     def _shape(records: list[Any]) -> list[Any]:
         for shaper in shapers:
             records = list(shaper(records))
@@ -258,6 +261,7 @@ def adaptive_shaping(
         target_reward: reward level at which shaping becomes zero.
         gain: multiplier on the scale factor.
     """
+
     def _shape(records: list[Any]) -> list[Any]:
         if not records:
             return records

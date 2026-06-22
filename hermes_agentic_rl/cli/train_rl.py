@@ -202,8 +202,8 @@ def _build_reward_component(spec: dict[str, Any]) -> BaseReward:
         cfg = LengthPenaltyConfig(
             target_len=int(spec.get("target_len", 512)),
             alpha=float(spec.get("alpha", 0.1)),
-            mode=str(spec.get("mode", "linear")),
-            apply_on=str(spec.get("apply_on", "response")),
+            mode=cast(Literal["linear", "quadratic"], spec.get("mode", "linear")),
+            apply_on=cast(Literal["response", "total"], spec.get("apply_on", "response")),
         )
         return LengthPenaltyReward(cfg, weight=weight)
     if typ in {"letter_counting", "LetterCountingReward"}:

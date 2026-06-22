@@ -37,10 +37,7 @@ from hermes_agentic_rl.backends.base import (
 
 
 _DEFAULT_CHARS = (
-    "abcdefghijklmnopqrstuvwxyz"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "0123456789"
-    " .,!?:;'\"()[]{}<>/_-+=\n\t"
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?:;'\"()[]{}<>/_-+=\n\t"
 )
 
 
@@ -134,7 +131,11 @@ class _CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         if self._use_sdpa:
             out = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, is_causal=True,
+                q,
+                k,
+                v,
+                attn_mask=None,
+                is_causal=True,
             )
         else:
             att = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
@@ -187,7 +188,9 @@ class TinyCausalLM(nn.Module):
         )
         self.ln_f = nn.LayerNorm(dim)
         self.head = nn.Linear(dim, vocab_size, bias=False)
-        self.value_head: nn.Linear | None = nn.Linear(dim, 1, bias=True) if with_value_head else None
+        self.value_head: nn.Linear | None = (
+            nn.Linear(dim, 1, bias=True) if with_value_head else None
+        )
 
     def _trunk(self, idx: torch.Tensor) -> torch.Tensor:
         B, T = idx.shape
@@ -441,12 +444,12 @@ class TinyCausalLMBackend(LLMBackend):
             values_full = torch.zeros(B, T_in, dtype=logits.dtype, device=device)
 
         policy_logits = _logprob_logits(logits, temperature)
-        logp_all = torch.log_softmax(policy_logits, dim=-1)      # [B, T_in, V]
+        logp_all = torch.log_softmax(policy_logits, dim=-1)  # [B, T_in, V]
         per_tok_logp = logp_all.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)  # [B, T_in]
 
         if need_entropy:
             probs = torch.softmax(policy_logits, dim=-1)
-            ent_all = -(probs * logp_all).sum(dim=-1)            # [B, T_in]
+            ent_all = -(probs * logp_all).sum(dim=-1)  # [B, T_in]
         else:
             ent_all = torch.zeros_like(per_tok_logp)
 
@@ -523,8 +526,8 @@ class TinyCausalLMBackend(LLMBackend):
         targets = self._to_tensor(full[1:])
         if need_value:
             logits, values = self.model.forward_with_value(x)
-            logits = logits.squeeze(0)       # [T-1, V]
-            values = values.squeeze(0)       # [T-1]
+            logits = logits.squeeze(0)  # [T-1, V]
+            values = values.squeeze(0)  # [T-1]
         else:
             logits = self.model(x).squeeze(0)
             values = torch.zeros(logits.shape[0], device=self.cfg.device)

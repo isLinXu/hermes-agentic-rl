@@ -81,10 +81,7 @@ def _metric_value(metrics: dict[str, Any], metric: str) -> float | None:
 
 def _thresholds(spec: dict[str, Any]) -> dict[str, Any]:
     raw = spec.get("thresholds")
-    if isinstance(raw, dict):
-        thresholds = dict(raw)
-    else:
-        thresholds = {}
+    thresholds = dict(raw) if isinstance(raw, dict) else {}
     for key in (
         "min_score",
         "min_mean_reward",
@@ -252,9 +249,7 @@ def build_scorecard(
     suite_cfg: dict[str, Any],
 ) -> dict[str, Any]:
     required = [item for item in benchmark_readouts if bool(item.get("required", True))]
-    required_passed = [
-        item for item in required if str(item.get("status")) == "passed"
-    ]
+    required_passed = [item for item in required if str(item.get("status")) == "passed"]
     scored = [
         item
         for item in benchmark_readouts
@@ -262,8 +257,7 @@ def build_scorecard(
     ]
     total_weight = sum(float(item.get("weight", 1.0)) for item in scored)
     weighted_score = (
-        sum(float(item["score"]) * float(item.get("weight", 1.0)) for item in scored)
-        / total_weight
+        sum(float(item["score"]) * float(item.get("weight", 1.0)) for item in scored) / total_weight
         if total_weight
         else 0.0
     )
@@ -308,9 +302,7 @@ def scorecard_markdown(scorecard: dict[str, Any]) -> str:
             continue
         score = _as_float(item.get("score"))
         raw_best_policy = item.get("best_policy")
-        best_policy: dict[str, Any] = (
-            raw_best_policy if isinstance(raw_best_policy, dict) else {}
-        )
+        best_policy: dict[str, Any] = raw_best_policy if isinstance(raw_best_policy, dict) else {}
         raw_promotion = item.get("promotion")
         promotion: dict[str, Any] = raw_promotion if isinstance(raw_promotion, dict) else {}
         lines.append(
@@ -330,7 +322,8 @@ def scorecard_markdown(scorecard: dict[str, Any]) -> str:
         )
 
     failed = [
-        item for item in scorecard.get("benchmarks", [])
+        item
+        for item in scorecard.get("benchmarks", [])
         if isinstance(item, dict) and item.get("failed_checks")
     ]
     if failed:
@@ -339,7 +332,11 @@ def scorecard_markdown(scorecard: dict[str, Any]) -> str:
         lines.append("|---|---|")
         for item in failed:
             failed_checks = item.get("failed_checks")
-            values = ", ".join(str(check) for check in failed_checks) if isinstance(failed_checks, list) else ""
+            values = (
+                ", ".join(str(check) for check in failed_checks)
+                if isinstance(failed_checks, list)
+                else ""
+            )
             lines.append(f"| {item.get('name', '')} | {values} |")
     return "\n".join(lines) + "\n"
 
