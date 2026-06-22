@@ -42,7 +42,7 @@ def test_score_batch_matches_per_record_tiny():
         responses.append(out.response_ids)
 
     logp_batch, mask = b.score_batch(prompts, responses)
-    B, T_max = logp_batch.shape
+    B, _T_max = logp_batch.shape
     assert B == 3
     assert mask.dtype == torch.bool
 
@@ -118,16 +118,21 @@ def test_score_batch_is_differentiable():
     assert loss.requires_grad
     loss.backward()
     has_grad = any(
-        p.grad is not None and p.grad.abs().sum().item() > 0
-        for p in b.trainable_parameters()
+        p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters()
     )
     assert has_grad
 
 
 def test_score_with_value_batch_shapes():
-    b = TinyCausalLMBackend(TinyBackendConfig(
-        dim=16, n_heads=2, n_layers=1, seed=0, with_value_head=True,
-    ))
+    b = TinyCausalLMBackend(
+        TinyBackendConfig(
+            dim=16,
+            n_heads=2,
+            n_layers=1,
+            seed=0,
+            with_value_head=True,
+        )
+    )
     prompts = [b.tokenizer.encode("a"), b.tokenizer.encode("bc")]
     responses = [
         b.generate(prompts[0], max_new_tokens=2, seed=1).response_ids,
@@ -172,7 +177,12 @@ def test_gae_batched_matches_per_row():
         mask[i, :L] = True
 
     advs_b, rets_b = compute_gae_batched(
-        rewards, values, mask, gamma=0.99, lam=0.95, normalize=False,
+        rewards,
+        values,
+        mask,
+        gamma=0.99,
+        lam=0.95,
+        normalize=False,
     )
 
     for i in range(B):
@@ -180,7 +190,9 @@ def test_gae_batched_matches_per_row():
         advs_i, rets_i = compute_gae(
             rewards_list[i],
             torch.tensor(values_list[i]),
-            gamma=0.99, lam=0.95, normalize=False,
+            gamma=0.99,
+            lam=0.95,
+            normalize=False,
         )
         assert torch.allclose(advs_b[i, :L], advs_i, atol=1e-5), f"advs mismatch row {i}"
         assert torch.allclose(rets_b[i, :L], rets_i, atol=1e-5), f"rets mismatch row {i}"
@@ -193,20 +205,15 @@ def test_gae_batched_matches_per_row():
 
 def test_clipped_surrogate_batched_basic():
     new = torch.tensor(
-        [[-1.0, -0.5, -2.0, 0.0],
-         [-0.7, -0.7, 0.0, 0.0],
-         [-1.5, 0.0, 0.0, 0.0]], requires_grad=True,
+        [[-1.0, -0.5, -2.0, 0.0], [-0.7, -0.7, 0.0, 0.0], [-1.5, 0.0, 0.0, 0.0]],
+        requires_grad=True,
     )
     old = torch.tensor(
-        [[-1.0, -0.5, -2.0, 0.0],
-         [-0.7, -0.7, 0.0, 0.0],
-         [-1.5, 0.0, 0.0, 0.0]],
+        [[-1.0, -0.5, -2.0, 0.0], [-0.7, -0.7, 0.0, 0.0], [-1.5, 0.0, 0.0, 0.0]],
     )
     adv = torch.tensor([1.0, 0.5, -0.5]).unsqueeze(-1)
     mask = torch.tensor(
-        [[True, True, True, False],
-         [True, True, False, False],
-         [True, False, False, False]],
+        [[True, True, True, False], [True, True, False, False], [True, False, False, False]],
     )
     loss, stats = clipped_surrogate_loss_batched(new, old, adv, mask, clip_eps=0.2)
     # ratio == 1 everywhere, so stats:
@@ -238,13 +245,15 @@ def _make_batch(b: TinyCausalLMBackend, n_groups: int, gsize: int) -> RolloutBat
         p = b.tokenizer.encode(f"p{g}")
         for i in range(gsize):
             o = b.generate(p, max_new_tokens=3, seed=g * 7 + i)
-            recs.append(RolloutRecord(
-                prompt_ids=list(p),
-                response_ids=list(o.response_ids),
-                old_logprobs=list(o.logprobs),
-                reward=float(i) / gsize,
-                group_id=f"g{g}",
-            ))
+            recs.append(
+                RolloutRecord(
+                    prompt_ids=list(p),
+                    response_ids=list(o.response_ids),
+                    old_logprobs=list(o.logprobs),
+                    reward=float(i) / gsize,
+                    group_id=f"g{g}",
+                )
+            )
     return RolloutBatch(recs)
 
 
@@ -257,8 +266,7 @@ def test_grpo_batched_produces_gradient():
     if loss.requires_grad:
         loss.backward()
     assert any(
-        p.grad is not None and p.grad.abs().sum().item() > 0
-        for p in b.trainable_parameters()
+        p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters()
     )
     assert "approx_kl" in stats.extra
 
@@ -300,9 +308,15 @@ def test_grpo_batched_with_reference_kl():
 
 
 def test_ppo_batched_respects_old_values_metadata():
-    b = TinyCausalLMBackend(TinyBackendConfig(
-        dim=16, n_heads=2, n_layers=1, seed=0, with_value_head=True,
-    ))
+    b = TinyCausalLMBackend(
+        TinyBackendConfig(
+            dim=16,
+            n_heads=2,
+            n_layers=1,
+            seed=0,
+            with_value_head=True,
+        )
+    )
     p = [1, 2, 3, 4]
     r = [5, 6, 7]
     # Frozen old_values that DIFFER from the current V_new
@@ -315,7 +329,7 @@ def test_ppo_batched_respects_old_values_metadata():
         metadata={"_ppo_old_values": [0.05, 0.10, 0.15]},
     )
     algo = PPO(PPOConfig(vf_clip_eps=0.001, normalize_advantage=False))
-    loss, stats = algo.compute_loss(b, None, RolloutBatch([rec]))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch([rec]))
     # value_clip_frac should be > 0 because V_new - V_old is large vs 0.001
     assert stats.extra["value_clip_frac"] > 0.0
 
@@ -328,11 +342,12 @@ def test_ppo_batched_respects_old_values_metadata():
 def test_running_mean_std_converges():
     rms = RunningMeanStd()
     import random
+
     random.seed(0)
     data = [random.gauss(3.0, 2.0) for _ in range(5000)]
     # Update in batches of 50
     for i in range(0, len(data), 50):
-        rms.update(data[i:i + 50])
+        rms.update(data[i : i + 50])
     assert abs(rms.mean - 3.0) < 0.15
     assert abs(rms.std - 2.0) < 0.15
 

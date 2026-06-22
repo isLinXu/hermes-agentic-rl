@@ -16,7 +16,7 @@ def _write_mock_sessions(path: Path) -> None:
                 {"role": "user", "content": "Fix the divide-by-zero bug in calc.py."},
                 {
                     "role": "assistant",
-                    "content": "I'll patch it.\n<tool_call>{\"name\": \"write_file\", "
+                    "content": 'I\'ll patch it.\n<tool_call>{"name": "write_file", '
                     '"arguments": {"path": "calc.py"}}</tool_call>',
                 },
                 {"role": "tool", "content": "tests passed: 5/5"},
@@ -31,7 +31,7 @@ def _write_mock_sessions(path: Path) -> None:
                 {"role": "user", "content": "Create a README and run the build."},
                 {
                     "role": "assistant",
-                    "content": "Creating it.\n<tool_call>{\"name\": \"write_file\", "
+                    "content": 'Creating it.\n<tool_call>{"name": "write_file", '
                     '"arguments": {"path": "README.md"}}</tool_call>',
                 },
                 {"role": "tool", "content": "file written: README.md"},
@@ -46,7 +46,7 @@ def _write_mock_sessions(path: Path) -> None:
                 {"role": "user", "content": "Delete temp files."},
                 {
                     "role": "assistant",
-                    "content": "<tool_call>{\"name\": \"run\", "
+                    "content": '<tool_call>{"name": "run", '
                     '"arguments": {"cmd": "rm -rf /"}}</tool_call>',
                 },
                 {"role": "tool", "content": "error: refused"},
@@ -101,7 +101,7 @@ def test_distill_skills_accepts_bare_message_list(tmp_path: Path) -> None:
                 {"role": "user", "content": "Write a hello world script."},
                 {
                     "role": "assistant",
-                    "content": "<tool_call>{\"name\": \"write_file\", "
+                    "content": '<tool_call>{"name": "write_file", '
                     '"arguments": {"path": "hello.py"}}</tool_call>',
                 },
                 {"role": "tool", "content": "file written"},

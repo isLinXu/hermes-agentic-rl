@@ -35,7 +35,6 @@ from hermes_agentic_rl.trainers.on_policy_config import (
 )
 from hermes_agentic_rl.trainers.ppo_trainer import PPOTrainerConfig
 
-
 # ---------------------------------------------------------------------------
 # RolloutManager assistant message extraction
 # ---------------------------------------------------------------------------
@@ -197,9 +196,7 @@ def test_toolcall_reward_empty_calls_still_zero():
         finished_naturally=True,
         turns_used=1,
     )
-    result = asyncio.run(
-        ToolcallReward(weight=0.3).evaluate({}, traj, tool_context=None)
-    )
+    result = asyncio.run(ToolcallReward(weight=0.3).evaluate({}, traj, tool_context=None))
     assert result.score == 0.0
     assert "no tool calls" in result.reason
 
@@ -320,8 +317,12 @@ def test_stack_cached_logprobs_preserves_graph_and_shapes():
     )
     assert batch.has_shared_logprobs_for([rec_a, rec_b])
     assert not batch.has_shared_logprobs_for(
-        [rec_a, RolloutRecord(prompt_ids=[], response_ids=[], old_logprobs=[],
-                              reward=0.0, group_id="g")]
+        [
+            rec_a,
+            RolloutRecord(
+                prompt_ids=[], response_ids=[], old_logprobs=[], reward=0.0, group_id="g"
+            ),
+        ]
     )
 
     logp, mask = stack_cached_logprobs(cache, [rec_a, rec_b])
@@ -367,14 +368,18 @@ def test_old_logprobs_tensor_uses_cached_metadata():
         group_id="g",
     )
     out2 = old_logprobs_tensor(
-        rec2, length=3, dtype=torch.float32, device=torch.device("cpu"),
+        rec2,
+        length=3,
+        dtype=torch.float32,
+        device=torch.device("cpu"),
     )
-    assert torch.allclose(
-        out2, torch.tensor([-0.5, -0.6, -0.7], dtype=torch.float32)
-    )
+    assert torch.allclose(out2, torch.tensor([-0.5, -0.6, -0.7], dtype=torch.float32))
 
     # Length shorter than cached → right-aligned slice.
     out3 = old_logprobs_tensor(
-        rec, length=2, dtype=torch.float32, device=torch.device("cpu"),
+        rec,
+        length=2,
+        dtype=torch.float32,
+        device=torch.device("cpu"),
     )
     assert torch.allclose(out3, torch.tensor([-0.2, -0.3], dtype=torch.float32))

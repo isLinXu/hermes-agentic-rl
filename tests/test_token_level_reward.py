@@ -27,7 +27,6 @@ from hermes_agentic_rl.rewards.token_level_reward import (
     compute_trajectory_token_rewards,
 )
 
-
 # ---------------------------------------------------------------------------
 # compute_token_advantages
 # ---------------------------------------------------------------------------

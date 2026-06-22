@@ -33,7 +33,10 @@ def test_eval_harness_produces_report():
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
     h = EvalHarness(
-        _backend(), env, rm, cfg=EvalConfig(n_rollouts=6, max_new_tokens=6, temperature=0.0, seed_base=0),
+        _backend(),
+        env,
+        rm,
+        cfg=EvalConfig(n_rollouts=6, max_new_tokens=6, temperature=0.0, seed_base=0),
         name="policy_v1",
     )
     rep = h.run()
@@ -75,12 +78,8 @@ def test_paired_welch_t_rejects_tiny_diff():
 def test_run_ab_returns_reports_and_verdict():
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
-    h1 = EvalHarness(
-        _backend(seed=0), env, rm, EvalConfig(n_rollouts=6, seed_base=0), name="base"
-    )
-    h2 = EvalHarness(
-        _backend(seed=1), env, rm, EvalConfig(n_rollouts=6, seed_base=0), name="cand"
-    )
+    h1 = EvalHarness(_backend(seed=0), env, rm, EvalConfig(n_rollouts=6, seed_base=0), name="base")
+    h2 = EvalHarness(_backend(seed=1), env, rm, EvalConfig(n_rollouts=6, seed_base=0), name="cand")
     b, c, res = run_ab(h1, h2)
     assert b.name == "base" and c.name == "cand"
     assert res.winner in {"baseline", "candidate", "tie"}

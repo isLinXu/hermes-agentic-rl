@@ -16,9 +16,7 @@ def test_reward_manager_runs_components_and_aggregates():
         turns_used=1,
     )
 
-    manager = RewardManager(
-        rewards=[OutcomeReward(weight=0.7), ToolcallReward(weight=0.3)]
-    )
+    manager = RewardManager(rewards=[OutcomeReward(weight=0.7), ToolcallReward(weight=0.3)])
 
     summary = asyncio.run(
         manager.evaluate({"expected_output": "done"}, trajectory, tool_context=None)

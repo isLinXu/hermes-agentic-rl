@@ -62,8 +62,15 @@ def test_grpo_with_lagrangian_runs_and_records_snapshot():
         cost_fn=lambda item, traj: len(traj.final_output or "") * 0.05,
         cfg=LagrangianConfig(cost_limit=0.2, init_lambda=0.0, lr_lambda=0.2),
     )
-    cfg = GRPOTrainerConfig(n_iters=3, group_size=3, prompts_per_iter=1, lr=0.01,
-                            max_new_tokens=4, log_every=1000, seed=0)
+    cfg = GRPOTrainerConfig(
+        n_iters=3,
+        group_size=3,
+        prompts_per_iter=1,
+        lr=0.01,
+        max_new_tokens=4,
+        log_every=1000,
+        seed=0,
+    )
     trainer = GRPOTrainer(_backend(), env, rm, cfg=cfg, lagrangian=ctl)
     stats = trainer.train()
     assert len(stats.iters) == 3
@@ -75,9 +82,16 @@ def test_grpo_with_lagrangian_runs_and_records_snapshot():
 
 # helper -------------------------------------------------------------------
 
+
 def _dummy_traj():
     from hermes_agentic_rl.core.types import Trajectory
+
     return Trajectory(
-        task_id="x", prompt="x", steps=[], final_output="", finished_naturally=True,
-        turns_used=0, metadata={},
+        task_id="x",
+        prompt="x",
+        steps=[],
+        final_output="",
+        finished_naturally=True,
+        turns_used=0,
+        metadata={},
     )

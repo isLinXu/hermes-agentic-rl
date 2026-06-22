@@ -20,9 +20,7 @@ from hermes_agentic_rl.trainers.ppo_trainer import PPOTrainer, PPOTrainerConfig
 
 def _make_ppo(*, whiten: bool, clip: float = 3.0, n_iters: int = 3) -> PPOTrainer:
     backend = TinyCausalLMBackend(
-        TinyBackendConfig(
-            dim=16, n_heads=2, n_layers=1, seed=0, with_value_head=True
-        )
+        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0, with_value_head=True)
     )
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
@@ -67,9 +65,7 @@ def test_ppo_advantage_clip_zero_disables_clipping() -> None:
 
 def test_ppo_update_epochs_and_minibatches_record_optimizer_steps() -> None:
     backend = TinyCausalLMBackend(
-        TinyBackendConfig(
-            dim=16, n_heads=2, n_layers=1, seed=0, with_value_head=True
-        )
+        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0, with_value_head=True)
     )
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
@@ -101,9 +97,7 @@ def test_ppo_update_epochs_and_minibatches_record_optimizer_steps() -> None:
 
 def test_ppo_uses_frozen_old_values_when_provided() -> None:
     backend = TinyCausalLMBackend(
-        TinyBackendConfig(
-            dim=16, n_heads=2, n_layers=1, seed=0, with_value_head=True
-        )
+        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0, with_value_head=True)
     )
     prompt_ids = backend.tokenizer.encode("Say: hello")
     gen = backend.generate(prompt_ids, max_new_tokens=4, temperature=1.0, seed=0)

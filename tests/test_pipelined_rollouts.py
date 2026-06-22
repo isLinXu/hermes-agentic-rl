@@ -140,8 +140,14 @@ def test_pipeline_disabled_without_pool():
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
     cfg = GRPOTrainerConfig(
-        n_iters=2, group_size=3, prompts_per_iter=1, max_new_tokens=4,
-        lr=5e-3, log_every=100, seed=1, pipeline_rollouts=True,
+        n_iters=2,
+        group_size=3,
+        prompts_per_iter=1,
+        max_new_tokens=4,
+        lr=5e-3,
+        log_every=100,
+        seed=1,
+        pipeline_rollouts=True,
     )
     trainer = GRPOTrainer(policy=backend, env=env, reward_manager=rm, cfg=cfg)
     assert trainer._pipeline_enabled() is False

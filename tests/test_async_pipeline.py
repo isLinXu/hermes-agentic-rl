@@ -33,7 +33,6 @@ from hermes_agentic_rl.distributed.experience_queue import (
 )
 from hermes_agentic_rl.trainers.async_loop import AsyncLoopConfig, run_async_training
 
-
 # ---------------------------------------------------------------------------
 # TIS
 # ---------------------------------------------------------------------------
@@ -89,9 +88,7 @@ def test_vtrace_reduces_to_nstep_return_on_policy():
     new = torch.tensor([[-0.2, -0.2]])
     beh = new.clone()  # on-policy → ρ = c = 1
     mask = torch.tensor([[True, True]])
-    vs, adv, _ = vtrace_returns(
-        rewards, values, boot, new, beh, mask, VTraceConfig(gamma=1.0)
-    )
+    vs, _adv, _ = vtrace_returns(rewards, values, boot, new, beh, mask, VTraceConfig(gamma=1.0))
     # step1: r=1, bootstrap 0, V=0.5 → vs1 = 1.0; step0: r=0 + γ vs1 = 1.0
     assert torch.allclose(vs, torch.tensor([[1.0, 1.0]]), atol=1e-5)
 
@@ -220,8 +217,12 @@ def test_async_loop_consumes_and_updates():
 
     rm = RewardManager([_Reward()])  # type: ignore[list-item]
     cfg = OnPolicyTrainerConfig(
-        n_iters=0, group_size=2, prompts_per_iter=1, max_new_tokens=4,
-        log_every=100, seed=3,
+        n_iters=0,
+        group_size=2,
+        prompts_per_iter=1,
+        max_new_tokens=4,
+        log_every=100,
+        seed=3,
     )
     trainer = OnPolicyTrainer(
         policy=b, env=env, reward_manager=rm, algo=GRPO(GRPOConfig(kl_coef=0.0)), cfg=cfg
@@ -244,8 +245,12 @@ def test_async_loop_consumes_and_updates():
         trainer,
         q,
         AsyncLoopConfig(
-            max_updates=4, batch_size=2, get_timeout=0.5, idle_timeout=5.0,
-            stale_tis_rho_clip=1.0, stale_threshold=0,
+            max_updates=4,
+            batch_size=2,
+            get_timeout=0.5,
+            idle_timeout=5.0,
+            stale_tis_rho_clip=1.0,
+            stale_threshold=0,
         ),
     )
     t.join(timeout=5.0)

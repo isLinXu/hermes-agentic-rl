@@ -25,7 +25,6 @@ from hermes_agentic_rl.rewards.composer import (
     RewardComposerConfig,
 )
 
-
 # ---------------------------------------------------------------------------
 # Test rewards: tiny deterministic stubs
 # ---------------------------------------------------------------------------
@@ -96,7 +95,7 @@ def test_composer_normalize_whitens_after_two_samples():
         config={"normalize": {"x": True}},
     )
     s1 = asyncio.run(composer.evaluate({}, _traj(), tool_context=None))
-    s2 = asyncio.run(composer.evaluate({}, _traj(), tool_context=None))
+    _s2 = asyncio.run(composer.evaluate({}, _traj(), tool_context=None))
     s3 = asyncio.run(composer.evaluate({}, _traj(), tool_context=None))
 
     # First sample: count=1 → whiten returns raw value (no stats yet).
@@ -227,12 +226,8 @@ class _StubInnerPool:
 
     def __init__(self, n_workers: int = 2) -> None:
         self._result_q: queue_mod.Queue[Any] = queue_mod.Queue()
-        self._task_qs: list[queue_mod.Queue[Any]] = [
-            queue_mod.Queue() for _ in range(n_workers)
-        ]
-        self._weight_qs: list[queue_mod.Queue[Any]] = [
-            queue_mod.Queue() for _ in range(n_workers)
-        ]
+        self._task_qs: list[queue_mod.Queue[Any]] = [queue_mod.Queue() for _ in range(n_workers)]
+        self._weight_qs: list[queue_mod.Queue[Any]] = [queue_mod.Queue() for _ in range(n_workers)]
         self._procs: list[_FakeProc] = [_FakeProc() for _ in range(n_workers)]
         self.broadcasts: list[Any] = []
         self.start_calls = 0
@@ -280,7 +275,8 @@ def test_fault_tolerant_drain_happy_path():
 
     inner = _StubInnerPool()
     pool = FaultTolerantRolloutPool(
-        inner, FaultTolerantPoolConfig(max_retries=2, poll_interval=0.05),
+        inner,
+        FaultTolerantPoolConfig(max_retries=2, poll_interval=0.05),
     )
     pool.submit_tasks([_Task(task_seq=0, item={}), _Task(task_seq=1, item={})])
     inner._result_q.put(_ok(0))
@@ -299,7 +295,8 @@ def test_fault_tolerant_retries_then_succeeds():
 
     inner = _StubInnerPool()
     pool = FaultTolerantRolloutPool(
-        inner, FaultTolerantPoolConfig(max_retries=3, poll_interval=0.05),
+        inner,
+        FaultTolerantPoolConfig(max_retries=3, poll_interval=0.05),
     )
     pool.submit_tasks([_Task(task_seq=42, item={})])
 
@@ -326,7 +323,8 @@ def test_fault_tolerant_exhausts_retries():
 
     inner = _StubInnerPool()
     pool = FaultTolerantRolloutPool(
-        inner, FaultTolerantPoolConfig(max_retries=2, poll_interval=0.05),
+        inner,
+        FaultTolerantPoolConfig(max_retries=2, poll_interval=0.05),
     )
     pool.submit_tasks([_Task(task_seq=99, item={})])
     inner._result_q.put(_err(99, "bang"))

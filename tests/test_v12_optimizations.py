@@ -56,13 +56,17 @@ from hermes_agentic_rl.trainers.on_policy_config import (
     validate_on_policy_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _tiny_backend(dim: int = 16, n_heads: int = 2, n_layers: int = 2, max_len: int = 32, seed: int = 0) -> TinyCausalLMBackend:
-    return TinyCausalLMBackend(TinyBackendConfig(dim=dim, n_heads=n_heads, n_layers=n_layers, max_len=max_len, seed=seed))
+
+def _tiny_backend(
+    dim: int = 16, n_heads: int = 2, n_layers: int = 2, max_len: int = 32, seed: int = 0
+) -> TinyCausalLMBackend:
+    return TinyCausalLMBackend(
+        TinyBackendConfig(dim=dim, n_heads=n_heads, n_layers=n_layers, max_len=max_len, seed=seed)
+    )
 
 
 def _rec(
@@ -84,6 +88,7 @@ def _rec(
 # P0-1: GSPO approx_kl uses k3 estimator
 # ---------------------------------------------------------------------------
 
+
 class TestGSPOApproxKLK3:
     """GSPO.compute_loss().extra['approx_kl'] must be >= 0 (k3 property)."""
 
@@ -97,9 +102,7 @@ class TestGSPOApproxKLK3:
         batch = RolloutBatch(records)
         _loss, stats = algo.compute_loss(backend, None, batch)
         approx_kl = stats.extra.get("approx_kl", -999.0)
-        assert approx_kl >= 0.0, (
-            f"GSPO approx_kl should be >= 0 with k3 estimator, got {approx_kl}"
-        )
+        assert approx_kl >= 0.0, f"GSPO approx_kl should be >= 0 with k3 estimator, got {approx_kl}"
 
     def test_approx_kl_k3_formula(self) -> None:
         """Cross-check: k3(r) = exp(-r) - 1 + r >= 0 for any r."""
@@ -113,6 +116,7 @@ class TestGSPOApproxKLK3:
 # P0-2: PIDKLController — no hot-path import overhead
 # ---------------------------------------------------------------------------
 
+
 class TestPIDKLControllerNoImport:
     """PIDKLController.update() should not import math on each call."""
 
@@ -124,7 +128,7 @@ class TestPIDKLControllerNoImport:
             Ki=0.01,
             Kd=0.005,
         )
-        prev = ctrl.value
+        _prev = ctrl.value
         for kl in [0.2, 0.15, 0.1, 0.08, 0.12]:
             new = ctrl.update(kl)
             assert 0 < new <= 10.0, f"beta out of bounds: {new}"
@@ -144,6 +148,7 @@ class TestPIDKLControllerNoImport:
     def test_math_module_at_top_level(self) -> None:
         """math is imported at module level; the per-call overhead is zero."""
         import hermes_agentic_rl.trainers.kl_controller as kl_mod
+
         assert hasattr(kl_mod, "math"), (
             "math should be imported at module level, not inside update()"
         )
@@ -152,6 +157,7 @@ class TestPIDKLControllerNoImport:
 # ---------------------------------------------------------------------------
 # P1-1: GRPO KL-penalty uses shared kl_from_logprobs_batched
 # ---------------------------------------------------------------------------
+
 
 class TestGRPOKLSharedImpl:
     """GRPO KL value should equal kl_from_logprobs_batched manually computed."""
@@ -185,6 +191,7 @@ class TestGRPOKLSharedImpl:
 # P1-2: SimPO empty batch returns plain zero (no requires_grad)
 # ---------------------------------------------------------------------------
 
+
 class TestSimPOEmptyBatch:
     """Empty batch and filtered batch should not carry requires_grad=True."""
 
@@ -215,6 +222,7 @@ class TestSimPOEmptyBatch:
 # P1-3: clipped_surrogate_loss returns approx_kl + n_tokens
 # ---------------------------------------------------------------------------
 
+
 class TestClippedSurrogateLossSingleStats:
     """Single-rollout variant must return same stat keys as batched variant."""
 
@@ -223,7 +231,7 @@ class TestClippedSurrogateLossSingleStats:
         new_lp = torch.randn(T, requires_grad=True)
         old_lp = torch.randn(T)
         adv = 1.0
-        loss, stats = clipped_surrogate_loss(new_lp, old_lp, adv)
+        _loss, stats = clipped_surrogate_loss(new_lp, old_lp, adv)
         assert "approx_kl" in stats, "approx_kl must be in single-rollout stats"
         assert "n_tokens" in stats, "n_tokens must be in single-rollout stats"
         assert stats["approx_kl"] >= 0.0, "k3 approx_kl must be non-negative"
@@ -232,7 +240,7 @@ class TestClippedSurrogateLossSingleStats:
     def test_zero_response_fallback(self) -> None:
         new_lp = torch.zeros(0)
         old_lp = torch.zeros(0)
-        loss, stats = clipped_surrogate_loss(new_lp, old_lp, 1.0)
+        loss, _stats = clipped_surrogate_loss(new_lp, old_lp, 1.0)
         assert float(loss.item()) == 0.0
         # Empty path returns minimal stats (no approx_kl key currently — OK).
 
@@ -241,16 +249,15 @@ class TestClippedSurrogateLossSingleStats:
 # P2-1: group_normalize_advantage_tensor
 # ---------------------------------------------------------------------------
 
+
 class TestGroupNormalizeAdvantageTensor:
     """group_normalize_advantage_tensor should match the list version."""
 
     def test_matches_list_version(self) -> None:
         rewards = [0.2, 0.8, 1.0, -0.5, 0.4]
         list_out = group_normalize_advantage(rewards)
-        tensor_out = group_normalize_advantage_tensor(
-            torch.tensor(rewards, dtype=torch.float32)
-        )
-        for a, b in zip(list_out, tensor_out.tolist()):
+        tensor_out = group_normalize_advantage_tensor(torch.tensor(rewards, dtype=torch.float32))
+        for a, b in zip(list_out, tensor_out.tolist(), strict=True):
             assert abs(a - b) < 1e-5, f"mismatch: {a} vs {b}"
 
     def test_single_element_zero(self) -> None:
@@ -275,6 +282,7 @@ class TestGroupNormalizeAdvantageTensor:
 # P2-2: compute_gae_batched normalize uses tensor comparison
 # ---------------------------------------------------------------------------
 
+
 class TestComputeGAEBatchedNormalizeTensor:
     """compute_gae_batched normalize path should not call .item()."""
 
@@ -284,7 +292,7 @@ class TestComputeGAEBatchedNormalizeTensor:
         rewards[:, -1] = torch.tensor([1.0, 0.5, -0.5, 0.0])
         values = torch.zeros(B, T)
         mask = torch.ones(B, T, dtype=torch.bool)
-        advs, rets = compute_gae_batched(rewards, values, mask, normalize=True)
+        advs, _rets = compute_gae_batched(rewards, values, mask, normalize=True)
         # After normalization: valid advantages should have ~zero mean
         valid_advs = advs[mask]
         assert abs(float(valid_advs.mean().item())) < 0.1
@@ -294,7 +302,7 @@ class TestComputeGAEBatchedNormalizeTensor:
         rewards = torch.zeros(B, T)
         values = torch.zeros(B, T)
         mask = torch.zeros(B, T, dtype=torch.bool)  # all masked
-        advs, rets = compute_gae_batched(rewards, values, mask, normalize=True)
+        advs, _rets = compute_gae_batched(rewards, values, mask, normalize=True)
         assert advs.shape == (B, T)
         assert float(advs.sum().item()) == 0.0
 
@@ -302,6 +310,7 @@ class TestComputeGAEBatchedNormalizeTensor:
 # ---------------------------------------------------------------------------
 # P2-3: validate_on_policy_config — PID gain warnings
 # ---------------------------------------------------------------------------
+
 
 class TestValidatePIDKLConfig:
     """validate_on_policy_config should warn on invalid PID gain settings."""
@@ -364,13 +373,17 @@ class TestValidatePIDKLConfig:
 # Integration: all algo approx_kl values are k3-consistent
 # ---------------------------------------------------------------------------
 
+
 class TestAllAlgosApproxKLNonneg:
     """Smoke test: every registered algo's approx_kl >= 0 (k3 property)."""
 
-    @pytest.mark.parametrize("algo_name,algo_cls,cfg", [
-        ("grpo", GRPO, GRPOConfig(kl_estimator="k3")),
-        ("gspo", GSPO, GSPOConfig(kl_estimator="k3")),
-    ])
+    @pytest.mark.parametrize(
+        "algo_name,algo_cls,cfg",
+        [
+            ("grpo", GRPO, GRPOConfig(kl_estimator="k3")),
+            ("gspo", GSPO, GSPOConfig(kl_estimator="k3")),
+        ],
+    )
     def test_approx_kl_nonneg(self, algo_name, algo_cls, cfg) -> None:
         backend = _tiny_backend()
         algo = algo_cls(cfg)
@@ -387,6 +400,7 @@ class TestAllAlgosApproxKLNonneg:
 # ---------------------------------------------------------------------------
 # P1-4: Shared batch_prepare utilities (v1.2 dedup)
 # ---------------------------------------------------------------------------
+
 
 class TestStackOldLogprobs:
     """stack_old_logprobs builds a correctly-shaped [B, T_max] tensor."""
@@ -501,8 +515,13 @@ class TestComputeKLPenalty:
         logp = torch.randn(2, 4)
         mask = torch.ones(2, 4)
         result = compute_kl_penalty(
-            logp, mask, [[1, 2]], [[3, 4]], 1.0,
-            ref_policy=None, kl_coef=0.02,
+            logp,
+            mask,
+            [[1, 2]],
+            [[3, 4]],
+            1.0,
+            ref_policy=None,
+            kl_coef=0.02,
         )
         assert result is None
 
@@ -512,7 +531,12 @@ class TestComputeKLPenalty:
         logp = torch.randn(2, 4)
         mask = torch.ones(2, 4)
         result = compute_kl_penalty(
-            logp, mask, [[1, 2]], [[3, 4]], 1.0,
-            ref_policy=object(), kl_coef=0.0,
+            logp,
+            mask,
+            [[1, 2]],
+            [[3, 4]],
+            1.0,
+            ref_policy=object(),
+            kl_coef=0.0,
         )
         assert result is None

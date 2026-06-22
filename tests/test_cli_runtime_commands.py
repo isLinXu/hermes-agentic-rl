@@ -154,7 +154,9 @@ def test_cli_rollout_works_with_hermes_when_entrypoint_is_injected(
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-        def run_conversation(self, user_message: str, task_id: str | None = None, system_message: str | None = None):
+        def run_conversation(
+            self, user_message: str, task_id: str | None = None, system_message: str | None = None
+        ):
             del task_id, system_message
             return {
                 "final_response": "done",
@@ -165,7 +167,7 @@ def test_cli_rollout_works_with_hermes_when_entrypoint_is_injected(
                         "content": "",
                         "tool_calls": [{"name": "write_file", "arguments": {"path": "x.txt"}}],
                     },
-                    {"role": "tool", "name": "write_file", "content": "{\"ok\": true}"},
+                    {"role": "tool", "name": "write_file", "content": '{"ok": true}'},
                     {"role": "assistant", "content": "done"},
                 ],
             }

@@ -286,9 +286,7 @@ def test_terminal_command_adapter_targets_command_only(monkeypatch) -> None:
 
 def test_terminal_command_adapter_can_train_stop_suffix(monkeypatch) -> None:
     target = (
-        "<tool_call>"
-        '{"name": "terminal", "arguments": {"command": "python clean.py"}}'
-        "</tool_call>"
+        '<tool_call>{"name": "terminal", "arguments": {"command": "python clean.py"}}</tool_call>'
     )
     trace = _sample_trace()
     trace["tools"] = [{"name": "terminal", "description": "Run shell commands"}]
@@ -495,11 +493,7 @@ def test_hermes_reasoning_trace_reward_gives_partial_structure_credit() -> None:
 
 
 def test_hermes_reasoning_trace_reward_penalizes_invalid_argument_json() -> None:
-    target = (
-        "<tool_call>"
-        '{"name":"terminal","arguments":{"command":"python clean.py"}}'
-        "</tool_call>"
-    )
+    target = '<tool_call>{"name":"terminal","arguments":{"command":"python clean.py"}}</tool_call>'
     prediction = (
         "<tool_call>"
         '{"name":"terminal","arguments":"{\\"command\\": \\"python clean.py\\""}'

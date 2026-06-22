@@ -34,7 +34,7 @@ def test_online_cycle_cli_runs_rollout_replay_worker_and_eval_export(
                         "content": "",
                         "tool_calls": [{"name": "write_file", "arguments": {"path": "x.txt"}}],
                     },
-                    {"role": "tool", "name": "write_file", "content": "{\"ok\": true}"},
+                    {"role": "tool", "name": "write_file", "content": '{"ok": true}'},
                     {"role": "assistant", "content": "done"},
                 ],
             }

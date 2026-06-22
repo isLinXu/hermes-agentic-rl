@@ -10,7 +10,9 @@ import hermes_agentic_rl.cli.session_train_worker_cli as worker_cli
 from hermes_agentic_rl.cli.main import main
 
 
-def test_session_train_worker_cli_consumes_replay_and_saves_policy(tmp_path: Path, monkeypatch, capsys):
+def test_session_train_worker_cli_consumes_replay_and_saves_policy(
+    tmp_path: Path, monkeypatch, capsys
+):
     replay_path = tmp_path / "replay.jsonl"
     replay_path.write_text(
         json.dumps(
@@ -413,9 +415,7 @@ def test_session_train_worker_cli_bc_recovers_from_truncated_replay(
     assert state["trained_samples"] == 2
 
 
-def test_session_train_worker_cli_bc_waits_for_partial_jsonl_line(
-    tmp_path: Path, monkeypatch
-):
+def test_session_train_worker_cli_bc_waits_for_partial_jsonl_line(tmp_path: Path, monkeypatch):
     replay_path = tmp_path / "partial_replay.jsonl"
     first_record = json.dumps(
         {
@@ -602,9 +602,7 @@ def test_session_train_worker_cli_quarantines_invalid_records_and_writes_metrics
     assert last_metric["quarantined_records"] == 3
 
 
-def test_session_train_worker_cli_applies_quality_filters_and_dedupes(
-    tmp_path: Path, monkeypatch
-):
+def test_session_train_worker_cli_applies_quality_filters_and_dedupes(tmp_path: Path, monkeypatch):
     replay_path = tmp_path / "quality_replay.jsonl"
     quarantine_path = tmp_path / "quality_quarantine.jsonl"
     replay_path.write_text(
@@ -808,7 +806,9 @@ def test_session_train_worker_cli_can_publish_metrics_to_dashboard_sink(
     assert dash.records[-1]["records_seen"] == 1
 
 
-def test_session_train_worker_cli_supports_dpo_from_scored_replay(tmp_path: Path, monkeypatch, capsys):
+def test_session_train_worker_cli_supports_dpo_from_scored_replay(
+    tmp_path: Path, monkeypatch, capsys
+):
     replay_path = tmp_path / "dpo_replay.jsonl"
     replay_path.write_text(
         "\n".join(
@@ -881,9 +881,7 @@ def test_session_train_worker_cli_supports_dpo_from_scored_replay(tmp_path: Path
     assert state["trained_pairs"] == 1
 
 
-def test_session_train_worker_cli_dpo_drains_backlog_with_pair_limit(
-    tmp_path: Path, monkeypatch
-):
+def test_session_train_worker_cli_dpo_drains_backlog_with_pair_limit(tmp_path: Path, monkeypatch):
     replay_path = tmp_path / "dpo_backlog_replay.jsonl"
     replay_path.write_text(
         "\n".join(
@@ -1260,7 +1258,9 @@ def test_session_train_worker_cli_dpo_rescans_full_replay_when_source_grows(
     assert save_path.exists()
 
 
-def test_session_train_worker_cli_supports_rm_from_scored_replay(tmp_path: Path, monkeypatch, capsys):
+def test_session_train_worker_cli_supports_rm_from_scored_replay(
+    tmp_path: Path, monkeypatch, capsys
+):
     replay_path = tmp_path / "rm_replay.jsonl"
     replay_path.write_text(
         "\n".join(

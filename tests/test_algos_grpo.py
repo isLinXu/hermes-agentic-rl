@@ -76,7 +76,9 @@ def test_grpo_compute_loss_backward_works():
     # backward succeeds and grads appear
     if loss.requires_grad:
         loss.backward()
-    has_grad = any(p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters())
+    has_grad = any(
+        p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters()
+    )
     assert has_grad, "no gradient reached the policy"
 
 
@@ -89,5 +91,5 @@ def test_grpo_with_reference_produces_kl():
             p.add_(torch.randn_like(p) * 0.1)
     batch = _make_batch(b, n_groups=1, group_size=3)
     algo = GRPO(GRPOConfig(clip_eps=0.2, kl_coef=0.1))
-    loss, stats = algo.compute_loss(b, ref, batch)
+    _loss, stats = algo.compute_loss(b, ref, batch)
     assert stats.n_records == 3

@@ -38,9 +38,7 @@ class _DenseTokenReward:
 
 
 def _make_trainer(*, batch_generate: bool = False) -> GRPOTrainer:
-    policy = TinyCausalLMBackend(
-        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0)
-    )
+    policy = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0))
     return GRPOTrainer(
         policy=policy,
         env=EchoTaskEnv(build_default_echo_dataset()),

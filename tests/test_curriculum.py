@@ -22,7 +22,6 @@ from hermes_agentic_rl.curriculum import (
     create_default_curriculum,
 )
 
-
 # ---------------------------------------------------------------------------
 # CurriculumStage
 # ---------------------------------------------------------------------------
@@ -83,9 +82,27 @@ class TestCurriculumStage:
 class TestCurriculumScheduler:
     def _make_scheduler(self, **kwargs):
         stages = [
-            CurriculumStage(name="stage_a", reward_weight=0.5, mastery_threshold=0.7, sustain_evals=3, primary_metric="metric_a"),
-            CurriculumStage(name="stage_b", reward_weight=0.7, mastery_threshold=0.6, sustain_evals=3, primary_metric="metric_b"),
-            CurriculumStage(name="stage_c", reward_weight=1.0, mastery_threshold=0.5, sustain_evals=3, primary_metric="metric_c"),
+            CurriculumStage(
+                name="stage_a",
+                reward_weight=0.5,
+                mastery_threshold=0.7,
+                sustain_evals=3,
+                primary_metric="metric_a",
+            ),
+            CurriculumStage(
+                name="stage_b",
+                reward_weight=0.7,
+                mastery_threshold=0.6,
+                sustain_evals=3,
+                primary_metric="metric_b",
+            ),
+            CurriculumStage(
+                name="stage_c",
+                reward_weight=1.0,
+                mastery_threshold=0.5,
+                sustain_evals=3,
+                primary_metric="metric_c",
+            ),
         ]
         cfg_kwargs = {"auto_advance": True, "min_iters_per_stage": 2}
         cfg_kwargs.update(kwargs)
@@ -217,7 +234,7 @@ class TestComputeTurnReward:
 
     def test_with_json_tool_call(self):
         response = '```json\n{"name": "calculator", "arguments": {"expr": "2+2"}}\n```'
-        reward, is_valid = compute_turn_reward(response)
+        reward, _is_valid = compute_turn_reward(response)
         assert reward > 0.0
 
     def test_with_expected_tool_names(self):
@@ -238,5 +255,5 @@ class TestCurriculumOutcomeReward:
         assert reward >= 0.9
 
     def test_wrong_answer(self):
-        reward, is_correct = compute_outcome_reward("37", "42")
+        _reward, is_correct = compute_outcome_reward("37", "42")
         assert not is_correct

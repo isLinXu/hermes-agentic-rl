@@ -7,9 +7,9 @@ torch = pytest.importorskip("torch")
 from hermes_agentic_rl.algos import (
     ALGO_REGISTRY,
     GRPO,
+    PPO,
     HybridAlgo,
     OPDAlgo,
-    PPO,
     get_algo,
     list_algos,
     register_algo,

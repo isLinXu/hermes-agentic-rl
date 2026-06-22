@@ -117,9 +117,7 @@ def test_end_to_end_minimal_pipeline(tmp_path: Path):
     rollout_manager = RolloutManager(agent_loop=FakeEndToEndLoop())
     trajectory = asyncio.run(rollout_manager.collect(item, "create hello.txt"))
 
-    reward_manager = RewardManager(
-        rewards=[OutcomeReward(weight=0.7), ToolcallReward(weight=0.3)]
-    )
+    reward_manager = RewardManager(rewards=[OutcomeReward(weight=0.7), ToolcallReward(weight=0.3)])
     summary = asyncio.run(reward_manager.evaluate(item, trajectory, tool_context=None))
 
     bridge = TrainerBridge(AtroposGrpoTrainer(output_path=tmp_path / "train.jsonl"))
