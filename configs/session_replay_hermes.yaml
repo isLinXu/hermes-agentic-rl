@@ -15,7 +15,11 @@ backend:
 # data_quality:
 #   min_prompt_tokens: 1
 #   min_response_tokens: 8
+#   min_reward: 0.0
 #   max_abs_reward: 5.0
+#   min_unique_response_tokens: 2
+#   max_response_token_repetition: 0.85
+#   require_metadata_keys: [session_id]
 #   dedupe_within_scan: true
 
 # Direction-aware replay mining is enabled by default. It annotates each replay
