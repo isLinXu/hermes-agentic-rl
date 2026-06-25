@@ -436,7 +436,7 @@ def _extract_metric(batch_stats: dict[str, Any], key: str) -> float | None:
     # Try flat key first
     if key in batch_stats:
         val = batch_stats[key]
-        if isinstance(val, (int, float)):
+        if isinstance(val, int | float):
             return float(val)
 
     # Try nested key with dot notation
@@ -448,7 +448,7 @@ def _extract_metric(batch_stats: dict[str, Any], key: str) -> float | None:
         else:
             return None
 
-    if isinstance(current, (int, float)):
+    if isinstance(current, int | float):
         return float(current)
     return None
 

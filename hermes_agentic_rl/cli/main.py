@@ -9,16 +9,13 @@ import shutil
 from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from hermes_agentic_rl import __version__
-from hermes_agentic_rl.config import load_config
-from hermes_agentic_rl.core.trajectory import trajectory_to_dict
-from hermes_agentic_rl.datasets.jsonl_loader import load_jsonl_dataset
-from hermes_agentic_rl.framework import build_framework
 from hermes_agentic_rl.runtime.errors import RuntimeUnavailableError
-from hermes_agentic_rl.trainers.atropos_grpo import AtroposGrpoTrainer
-from hermes_agentic_rl.trainers.base import BaseTrainer
+
+if TYPE_CHECKING:
+    from hermes_agentic_rl.trainers.base import BaseTrainer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -159,6 +156,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run_rollout(config_path: str, output_path: str | None) -> int:
+    from hermes_agentic_rl.config import load_config
+    from hermes_agentic_rl.core.trajectory import trajectory_to_dict
+    from hermes_agentic_rl.datasets.jsonl_loader import load_jsonl_dataset
+    from hermes_agentic_rl.framework import build_framework
+
     config = load_config(config_path)
     dataset = load_jsonl_dataset(config["environment"]["dataset_path"])
     item = dataset[0]
@@ -285,6 +287,12 @@ def _run_train(
     print_effective_config: bool,
     print_effective_config_only: bool,
 ) -> int:
+    from hermes_agentic_rl.config import load_config
+    from hermes_agentic_rl.datasets.jsonl_loader import load_jsonl_dataset
+    from hermes_agentic_rl.framework import build_framework
+    from hermes_agentic_rl.trainers.atropos_grpo import AtroposGrpoTrainer
+    from hermes_agentic_rl.trainers.base import BaseTrainer
+
     base_cwd = Path.cwd()
     config = load_config(config_path)
 

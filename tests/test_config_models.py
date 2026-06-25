@@ -22,6 +22,15 @@ def test_pydantic_accepts_minimal_config() -> None:
     assert model.runtime.max_agent_turns == 5
 
 
+def test_pydantic_accepts_hermes_integration() -> None:
+    model = validate_config_model(
+        {
+            "runtime": {"integration": "hermes", "max_agent_turns": 10},
+        }
+    )
+    assert model.runtime.integration == "hermes"
+
+
 def test_pydantic_rejects_invalid_integration() -> None:
     with pytest.raises(pydantic.ValidationError):
         validate_config_model({"runtime": {"integration": "ghost", "max_agent_turns": 1}})

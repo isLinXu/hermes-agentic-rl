@@ -7,7 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from hermes_agentic_rl.collectors.sidecar import build_sidecar_from_runtime_config
 from hermes_agentic_rl.integrations.hermes_repo import prepare_hermes_imports
 from hermes_agentic_rl.runtime.base import BaseRuntimeAdapter
 from hermes_agentic_rl.runtime.errors import (
@@ -128,6 +127,10 @@ class HermesRuntimeAdapter(BaseRuntimeAdapter):
         if entrypoint.name == "ai_agent":
             # AIAgent 作为最稳定、最面向用户的入口。它会在内部完成 tool-calling loop。
             try:
+                from hermes_agentic_rl.collectors.sidecar import (
+                    build_sidecar_from_runtime_config,
+                )
+
                 # 通过 kwargs 保持前后兼容：不同版本 AIAgent.__init__ 参数较多
                 model = runtime_cfg.get("model")
                 provider = runtime_cfg.get("provider")
@@ -163,6 +166,8 @@ class HermesRuntimeAdapter(BaseRuntimeAdapter):
 
         # 其他入口：先以最小可用形态包装（后续如需要可再扩展 server/tool wiring）
         try:
+            from hermes_agentic_rl.collectors.sidecar import build_sidecar_from_runtime_config
+
             session_log_path = runtime_cfg.get("session_log_path")
             session_sidecar = build_sidecar_from_runtime_config(runtime_cfg)
             loop = attr() if callable(attr) else attr

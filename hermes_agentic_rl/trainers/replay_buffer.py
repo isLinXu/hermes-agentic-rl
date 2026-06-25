@@ -170,10 +170,10 @@ class ReplayBuffer:
                 ]
             )
             for value in candidates:
-                if isinstance(value, (int, float)):
+                if isinstance(value, int | float):
                     return max(self.priority_eps, abs(float(value)))
         reward = getattr(rec, "reward", 0.0)
-        if isinstance(reward, (int, float)):
+        if isinstance(reward, int | float):
             return max(self.priority_eps, abs(float(reward)))
         return max(self.priority_eps, 1.0)
 

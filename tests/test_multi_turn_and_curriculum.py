@@ -158,7 +158,12 @@ def test_multi_turn_credit_hybrid_uses_local_tool_feedback():
         trajectory,
         final_reward=1.0,
         n_turns=2,
-        cfg={"mode": "hybrid", "gamma": 0.9},
+        cfg={
+            "mode": "hybrid",
+            "gamma": 0.9,
+            "final_reward_weight": 0.4,
+            "local_reward_weight": 0.6,
+        },
     )
 
     assert len(turn_rewards) == 2
@@ -281,7 +286,12 @@ def test_grpo_trainer_multi_turn_credit_flows_into_batch():
             log_every=100,
             seed=0,
             multi_turn=True,
-            multi_turn_credit={"mode": "hybrid", "gamma": 0.9},
+            multi_turn_credit={
+                "mode": "hybrid",
+                "gamma": 0.9,
+                "final_reward_weight": 0.4,
+                "local_reward_weight": 0.6,
+            },
         ),
         agent_loop_factory=lambda backend, seed: FakeLoop(),  # type: ignore[arg-type]
     )

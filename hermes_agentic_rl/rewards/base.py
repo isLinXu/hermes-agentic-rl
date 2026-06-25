@@ -9,9 +9,9 @@ from hermes_agentic_rl.core.types import RewardResult, Trajectory
 class BaseReward(ABC):
     name: str
 
-    @abstractmethod
     def __init__(self, **kwargs: Any) -> None:
-        pass
+        """Optional hook for subclasses; kwargs are ignored by default."""
+        del kwargs
 
     @abstractmethod
     async def evaluate(

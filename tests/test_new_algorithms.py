@@ -86,8 +86,11 @@ class _PassthroughReward(BaseReward):
 
     name = "passthrough"
 
+    def __init__(self, weight: float = 1.0) -> None:
+        self.weight = weight
+
     async def evaluate(self, item: dict, traj: Trajectory, tool_context: Any) -> RewardResult:
-        return RewardResult(score=0.5, weight=1.0, name=self.name, reason="fixed")
+        return RewardResult(score=0.5, weight=self.weight, name=self.name, reason="fixed")
 
 
 # EchoTaskEnv items need {"instruction": "...", "target": "..."}

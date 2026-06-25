@@ -262,7 +262,7 @@ class DynamicRewardBalancer:
         for key, val in batch_stats.items():
             if isinstance(key, str) and key.startswith(prefix) and key.endswith(suffix):
                 name = key[len(prefix) : -len(suffix)]
-                if name and isinstance(val, (int, float)):
+                if name and isinstance(val, int | float):
                     out.setdefault(name, float(val))
 
         return out

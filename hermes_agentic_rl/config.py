@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - exercised when optional dep missing
 # ---------------------------------------------------------------------------
 # Known integration names for config validation.
 # ---------------------------------------------------------------------------
-_KNOWN_INTEGRATIONS = {"fake", "hf", "vllm", "sglang", "openai", "anthropic"}
+_KNOWN_INTEGRATIONS = {"fake", "hermes", "hf", "vllm", "sglang", "openai", "anthropic"}
 
 
 class ConfigValidationError(ValueError):

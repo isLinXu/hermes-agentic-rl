@@ -12,13 +12,6 @@ Everything in this package is **optional**: importing a submodule fails
 gracefully if the external dependency is missing.
 """
 
-from hermes_agentic_rl.integrations.atropos_env_import import (
-    AtroposEnvAdapter,
-    AtroposEnvAdapterConfig,
-    AtroposRewardComponent,
-    AtroposUnavailableError,
-    HermesAPIServer,
-)
 from hermes_agentic_rl.integrations.hermes_preflight import (
     HermesPreflightResult,
     run_hermes_preflight,
@@ -32,14 +25,30 @@ from hermes_agentic_rl.integrations.hermes_repo import (
 
 __all__ = [
     "HERMES_AGENT_REPO_ENV",
-    "AtroposEnvAdapter",
-    "AtroposEnvAdapterConfig",
-    "AtroposRewardComponent",
-    "AtroposUnavailableError",
-    "HermesAPIServer",
     "HermesPreflightResult",
     "HermesRepoResolution",
     "prepare_hermes_imports",
     "resolve_hermes_repo",
     "run_hermes_preflight",
 ]
+
+try:
+    from hermes_agentic_rl.integrations.atropos_env_import import (
+        AtroposEnvAdapter,
+        AtroposEnvAdapterConfig,
+        AtroposRewardComponent,
+        AtroposUnavailableError,
+        HermesAPIServer,
+    )
+
+    __all__.extend(
+        [
+            "AtroposEnvAdapter",
+            "AtroposEnvAdapterConfig",
+            "AtroposRewardComponent",
+            "AtroposUnavailableError",
+            "HermesAPIServer",
+        ]
+    )
+except Exception:
+    pass

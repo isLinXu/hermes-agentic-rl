@@ -206,6 +206,52 @@ python -m hermes_agentic_rl.cli.main hermes-preflight
 python -m hermes_agentic_rl.cli.main atropos-preflight
 ```
 
+If you want a repeatable local environment for the real Hermes / Atropos
+integration checks, install the dedicated extra first:
+
+```bash
+env -u PYTHONHOME -u PYTHONPATH uv sync --extra integration
+git submodule update --init subprojects/hermes-agent subprojects/atropos subprojects/tinker-atropos
+env -u PYTHONHOME -u PYTHONPATH uv run python -m hermes_agentic_rl.cli.main hermes-preflight
+env -u PYTHONHOME -u PYTHONPATH uv run python -m hermes_agentic_rl.cli.main atropos-preflight
+```
+
+Notes:
+
+- The `integration` extra installs the small set of runtime packages needed by
+  current preflight checks, including `requests`, `httpx`, `websockets`, and
+  the `tinker` package used by `tinker-atropos`.
+- `subprojects/atropos` may still fail to fully recurse if one of its nested
+  community environments hits an upstream Git LFS quota limit. That does not
+  block the top-level `atropos-preflight` path as long as `atroposlib`,
+  `tinker_atropos.config`, and `tinker` remain importable.
+- For a fuller local runtime setup that also installs the editable subprojects
+  into the uv environment, run:
+
+```bash
+bash scripts/bootstrap_real_integrations.sh
+```
+
+- The bootstrap script installs `subprojects/hermes-agent` with dependencies,
+  then installs `subprojects/atropos` and `subprojects/tinker-atropos` in
+  editable mode without pulling their heavyweight optional runtime stack (for
+  example `vllm`). This is enough for preflight and local import-chain checks.
+- After running the bootstrap script, prefer the project virtualenv directly for
+  "real chain" checks:
+
+```bash
+env -u PYTHONHOME -u PYTHONPATH ./.venv/bin/python scripts/check_real_hermes.py
+env -u PYTHONHOME -u PYTHONPATH ./.venv/bin/python -m hermes_agentic_rl.cli.main hermes-preflight
+env -u PYTHONHOME -u PYTHONPATH ./.venv/bin/python -m hermes_agentic_rl.cli.main atropos-preflight
+```
+
+- If your shell exports `PYTHONHOME` or `PYTHONPATH`, clear them for uv-based
+  setup and checks:
+
+```bash
+env -u PYTHONHOME -u PYTHONPATH uv sync --extra integration
+```
+
 The framework code treats these as external projects. CI initializes the
 top-level submodules, while linting, typing, packaging, and docs gates focus on this
 repository's adapters, trainers, rewards, configs, and tests.

@@ -174,7 +174,7 @@ def aggregate_update_stats(
                 continue
             if isinstance(value, bool):
                 continue
-            if isinstance(value, (int, float)):
+            if isinstance(value, int | float):
                 numeric_means.setdefault(key, []).append((float(value), _weight(stat)))
     for key, values in numeric_means.items():
         denom = sum(w for _, w in values)

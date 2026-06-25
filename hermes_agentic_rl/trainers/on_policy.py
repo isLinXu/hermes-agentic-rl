@@ -1785,7 +1785,7 @@ class OnPolicyTrainer:
         for k, v in rec.items():
             if k in seen_keys or k in _suppressed:
                 continue
-            if isinstance(v, (int, float)):
+            if isinstance(v, int | float):
                 parts.append(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}")
         return "[train] " + " ".join(parts)
 

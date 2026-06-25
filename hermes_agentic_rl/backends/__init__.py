@@ -21,11 +21,17 @@ from hermes_agentic_rl.backends.base import (
     LLMBackend,
     TokenizerProtocol,
 )
-from hermes_agentic_rl.backends.tiny import (
-    TinyBackendConfig,
-    TinyCausalLMBackend,
-    TinyTokenizer,
-)
+
+try:  # optional: tiny backend depends on torch
+    from hermes_agentic_rl.backends.tiny import (
+        TinyBackendConfig,
+        TinyCausalLMBackend,
+        TinyTokenizer,
+    )
+
+    _HAS_TINY = True
+except Exception:  # pragma: no cover
+    _HAS_TINY = False
 
 try:  # optional
     from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
@@ -48,11 +54,10 @@ __all__ = [
     "BackendUnavailableError",
     "GenerationOutput",
     "LLMBackend",
-    "TinyBackendConfig",
-    "TinyCausalLMBackend",
-    "TinyTokenizer",
     "TokenizerProtocol",
 ]
+if _HAS_TINY:
+    __all__.extend(["TinyBackendConfig", "TinyCausalLMBackend", "TinyTokenizer"])
 if _HAS_HF:
     __all__.extend(["HFBackendConfig", "HFCausalLMBackend"])
 if _HAS_VLLM:

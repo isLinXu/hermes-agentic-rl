@@ -167,12 +167,12 @@ def _category_for(record: dict[str, Any]) -> str:
 
 def _record_reward(record: dict[str, Any]) -> float | None:
     reward = record.get("reward")
-    if isinstance(reward, (int, float)):
+    if isinstance(reward, int | float):
         return float(reward)
     metadata = record.get("metadata")
     if isinstance(metadata, dict):
         reward = metadata.get("reward")
-        if isinstance(reward, (int, float)):
+        if isinstance(reward, int | float):
             return float(reward)
     return None
 
@@ -327,7 +327,7 @@ def run_session_eval_export_config(
     )
     mean_reward = 0.0
     rewards: list[float] = [
-        float(item["reward"]) for item in examples if isinstance(item.get("reward"), (int, float))
+        float(item["reward"]) for item in examples if isinstance(item.get("reward"), int | float)
     ]
     if rewards:
         mean_reward = sum(rewards) / len(rewards)

@@ -61,6 +61,7 @@ class MPRolloutPoolConfig:
     n_workers: int = 2
     ctx_method: str = "spawn"  # "fork" is faster but unsafe with torch on macOS
     task_timeout: float = 120.0
+    worker_startup_timeout: float = 120.0
     build_ctx: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -90,6 +91,7 @@ def _worker_main(
         result_q.put(("builder_error", worker_id, repr(exc), traceback.format_exc()))
         return
 
+    result_q.put(("ready", worker_id))
     current_weights_version = -1
 
     def _sync_weights() -> None:
@@ -300,7 +302,28 @@ class MPRolloutPool:
             self._task_qs.append(tq)
             self._weight_qs.append(wq)
             self._procs.append(p)
+        self._wait_for_workers_ready()
         self._started = True
+
+    def _wait_for_workers_ready(self) -> None:
+        import time
+
+        ready = 0
+        deadline = time.monotonic() + float(self.cfg.worker_startup_timeout)
+        while ready < self.cfg.n_workers:
+            if time.monotonic() > deadline:
+                raise RuntimeError(
+                    f"only {ready}/{self.cfg.n_workers} rollout workers became ready "
+                    f"within {self.cfg.worker_startup_timeout}s"
+                )
+            try:
+                kind, payload = self._result_q.get(timeout=1.0)
+            except Exception:
+                continue
+            if kind == "ready":
+                ready += 1
+            elif kind == "builder_error":
+                raise RuntimeError(f"worker builder failed: {payload}")
 
     def shutdown(self) -> None:
         if not self._started:

@@ -58,7 +58,7 @@ def safe_eval(expr: str) -> str:
         if isinstance(node, ast.Expression):
             return _walk(node.body)
         if isinstance(node, ast.Constant):
-            if isinstance(node.value, (int, float)):
+            if isinstance(node.value, int | float):
                 return node.value
             raise ValueError(f"bad_literal:{type(node.value).__name__}")
         if isinstance(node, ast.BinOp) and type(node.op) in SAFE_OPS:

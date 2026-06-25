@@ -204,7 +204,7 @@ def curriculum_shaping(
         it = 0
         for rec in records:
             candidate = rec.metadata.get("_trainer_iter")
-            if isinstance(candidate, (int, float)):
+            if isinstance(candidate, int | float):
                 it = int(candidate)
                 break
 

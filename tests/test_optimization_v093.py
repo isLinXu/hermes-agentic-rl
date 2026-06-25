@@ -351,7 +351,7 @@ def test_fault_tolerant_timeout_extends_when_workers_alive():
         FaultTolerantPoolConfig(
             max_retries=2,
             poll_interval=0.02,
-            worker_timeout=0.05,
+            worker_timeout=0.15,
         ),
     )
     pool.submit_tasks([_Task(task_seq=7, item={})])
@@ -363,7 +363,7 @@ def test_fault_tolerant_timeout_extends_when_workers_alive():
     import time
 
     def _enqueue_after_delay():
-        time.sleep(0.07)
+        time.sleep(0.20)
         inner._result_q.put(_ok(7))
 
     threading.Thread(target=_enqueue_after_delay, daemon=True).start()

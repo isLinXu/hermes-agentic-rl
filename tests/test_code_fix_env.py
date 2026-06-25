@@ -3,9 +3,33 @@ from __future__ import annotations
 import asyncio
 import textwrap
 
+import pytest
+
 from hermes_agentic_rl.core.reward_manager import RewardManager
 from hermes_agentic_rl.core.types import Trajectory
 from hermes_agentic_rl.envs.code_fix import CodeBug, CodeFixEnv, CodeFixReward
+
+
+def _inprocess_sandbox(fixed_code: str, test_code: str, timeout: float = 5.0) -> tuple[bool, str]:
+    """Fast in-process substitute for subprocess sandbox in unit tests."""
+    del timeout
+    namespace: dict[str, object] = {}
+    try:
+        exec(fixed_code, namespace)
+        exec(test_code, namespace)
+        return True, ""
+    except AssertionError as exc:
+        return False, f"TEST_FAIL: {exc}"
+    except Exception as exc:
+        return False, f"TEST_ERROR: {type(exc).__name__}: {exc}"
+
+
+@pytest.fixture(autouse=True)
+def _fast_codefix_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "hermes_agentic_rl.envs.code_fix._run_tests_in_sandbox",
+        _inprocess_sandbox,
+    )
 
 
 def _single_add_env() -> CodeFixEnv:

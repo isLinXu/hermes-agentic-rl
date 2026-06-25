@@ -92,7 +92,7 @@ more-itertools==11.0.2 ; platform_machine != 'ppc64le' and platform_machine != '
     # via
     #   jaraco-classes
     #   jaraco-functools
-msgpack==1.1.2
+msgpack==1.2.1
     # via cachecontrol
 mypy==1.11.2
     # via hermes-agentic-rl (pyproject.toml)

@@ -13,6 +13,15 @@ dependencies = ["PyYAML>=6.0"]
 [project.optional-dependencies]
 # Real RL training (GRPO/PPO) needs torch. CPU build is fine for the MVP.
 rl = ["torch>=2.1"]
+# Real Hermes / Atropos preflight wiring. Keep this separate from `rl` so users
+# can validate local integration paths without pulling in the whole training
+# stack first.
+integration = [
+    "requests>=2.33,<3",
+    "httpx[socks]>=0.28.1,<1",
+    "websockets>=16,<17",
+    "tinker @ git+https://github.com/thinking-machines-lab/tinker.git@a6347549717c18eaac6cc5ecfcd0bf4a6efb1e48",
+]
 # HF dataset loading / offline real-trace training.
 data = ["datasets>=2.19", "pyarrow>=14"]
 # Observability stack (TensorBoard + W&B).

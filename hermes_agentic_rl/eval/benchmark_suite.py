@@ -63,7 +63,7 @@ def _slugify(value: str) -> str:
 def _as_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return 1.0 if value else 0.0
-    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+    if isinstance(value, int | float) and math.isfinite(float(value)):
         return float(value)
     return None
 

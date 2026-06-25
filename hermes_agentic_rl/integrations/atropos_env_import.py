@@ -759,11 +759,11 @@ def _extract_prompt_text(raw: Any) -> str:
     """
     if isinstance(raw, str):
         return raw
-    if isinstance(raw, (tuple, list)) and raw:
+    if isinstance(raw, tuple | list) and raw:
         head = raw[0]
         if isinstance(head, str):
             return head
-        if isinstance(head, (tuple, list)) and head and isinstance(head[-1], dict):
+        if isinstance(head, tuple | list) and head and isinstance(head[-1], dict):
             last = head[-1]
             if "content" in last:
                 return str(last["content"])
@@ -788,7 +788,7 @@ def _extract_prompt_text(raw: Any) -> str:
 
 
 def _extract_gold_answer(raw: Any) -> Any:
-    if isinstance(raw, (tuple, list)) and len(raw) >= 2:
+    if isinstance(raw, tuple | list) and len(raw) >= 2:
         return raw[1]
     if isinstance(raw, dict):
         for key in ("answer", "gold", "target", "ground_truth", "label"):

@@ -131,7 +131,7 @@ class ProcessRewardAggregator:
         key = self.cfg.outcome_metadata_key
         if key:
             val = trajectory.metadata.get(key)
-            if isinstance(val, (int, float)) and not isinstance(val, bool):
+            if isinstance(val, int | float) and not isinstance(val, bool):
                 return float(val)
         return float(self.cfg.outcome_default)
 
@@ -139,7 +139,7 @@ class ProcessRewardAggregator:
 def _coerce_step_states(runtime: dict[str, Any]) -> list[str]:
     """Pull per-step next-state strings, falling back to the single signal."""
     raw = runtime.get("step_next_states")
-    if isinstance(raw, (list, tuple)):
+    if isinstance(raw, list | tuple):
         out = [str(s) for s in raw if isinstance(s, str) and s.strip()]
         if out:
             return out
