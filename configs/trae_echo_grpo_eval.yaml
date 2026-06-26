@@ -1,0 +1,49 @@
+# Generated: 2026-06-24
+# Rules-Ver: 3.0
+# Context-ID: TRAE-ECHO-EVAL
+#
+# 目的：提供一个“完全离线、可快速复现”的最小训练实验，用于验证
+# hermes-agentic-rl 的 on-policy RL (GRPO) 训练闭环是否有效。
+#
+# 运行：
+#   python -m hermes_agentic_rl.cli.main train-rl --config configs/trae_echo_grpo_eval.yaml --output output/trae_echo_grpo_eval
+#
+algo: grpo
+
+backend:
+  name: tiny
+  dim: 32
+  n_heads: 4
+  n_layers: 2
+  max_len: 128
+  seed: 0
+
+environment:
+  type: echo
+
+train_rl:
+  # 迭代数不宜太少，否则 Tiny 模型可能出现“偶然学不到”的噪声。
+  # 但为了在本机快速验证，这里取一个折中值。
+  n_iters: 40
+  group_size: 8
+  prompts_per_iter: 2
+  lr: 0.005
+  max_new_tokens: 8
+  temperature: 1.0
+  update_epochs: 2
+  minibatch_size: 8
+  clip_eps: 0.2
+  kl_coef: 0.0
+  entropy_coef: 0.0
+  use_reference: false
+  log_every: 5
+  seed: 123
+
+  # 关键：启用 v0.6+ checkpoint 机制，供 eval-rl 加载对比。
+  checkpoint_every: 10
+  keep_last_checkpoints: 5
+
+metrics:
+  jsonl: true
+  stdout: true
+  tensorboard: true
