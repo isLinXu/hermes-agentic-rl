@@ -39,6 +39,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="只打印将要执行的动作和命令，不实际执行。",
     )
+    parser.add_argument(
+        "--hf-repo-id",
+        default="lambda/hermes-agent-reasoning-traces",
+        help="默认 parquet 缺失时用于 dry-run 展示的 Hugging Face 数据集 repo id。",
+    )
+    parser.add_argument(
+        "--hf-config-name",
+        default="kimi",
+        help="默认 parquet 缺失时用于 dry-run 展示的 Hugging Face config name。",
+    )
+    parser.add_argument(
+        "--hf-split",
+        default="train",
+        help="默认 parquet 缺失时用于 dry-run 展示的 Hugging Face split。",
+    )
     return parser
 
 
@@ -75,17 +90,23 @@ def ensure_dataset_link(repo_root: Path, dataset_override: Path | None) -> Path:
     return default_dataset
 
 
-def _resolve_dataset_for_dry_run(repo_root: Path, dataset_override: Path | None) -> tuple[Path, str]:
+def _resolve_data_source(
+    repo_root: Path,
+    dataset_override: Path | None,
+    *,
+    hf_repo_id: str,
+    hf_config_name: str,
+    hf_split: str,
+) -> tuple[str, str]:
     default_dataset = repo_root / DEFAULT_DATASET_RELATIVE_PATH
-    if dataset_override is None:
-        if not default_dataset.exists():
-            raise FileNotFoundError(f"缺少数据文件：{default_dataset}")
-        return default_dataset, f"使用默认数据文件：{default_dataset}"
-
-    source = dataset_override.expanduser().resolve()
-    if not source.exists():
-        raise FileNotFoundError(f"指定的数据文件不存在：{source}")
-    return default_dataset, f"将创建或刷新数据链接：{default_dataset} -> {source}"
+    if dataset_override is not None:
+        source = dataset_override.expanduser().resolve()
+        if not source.exists():
+            raise FileNotFoundError(f"指定的数据文件不存在：{source}")
+        return "parquet", f"显式数据文件：{source}"
+    if default_dataset.exists():
+        return "parquet", f"默认数据文件：{default_dataset}"
+    return "hf", f"HF 数据源：{hf_repo_id}/{hf_config_name}/{hf_split}"
 
 
 def _clean_env() -> dict[str, str]:
@@ -109,12 +130,22 @@ def main() -> int:
     commands = build_commands(PROJECT_ROOT, include_preflight=include_preflight)
 
     try:
+        source_mode, source_description = _resolve_data_source(
+            PROJECT_ROOT,
+            args.dataset,
+            hf_repo_id=args.hf_repo_id,
+            hf_config_name=args.hf_config_name,
+            hf_split=args.hf_split,
+        )
         if args.dry_run:
-            _dataset_path, dataset_message = _resolve_dataset_for_dry_run(PROJECT_ROOT, args.dataset)
-            print(f"Dry run: {dataset_message}")
+            print(f"数据源模式: {source_mode}")
+            print(f"数据源说明: {source_description}")
             for command in commands:
                 print("  " + " ".join(shlex.quote(part) for part in command))
             return 0
+
+        if source_mode == "hf":
+            raise FileNotFoundError(f"缺少数据文件：{PROJECT_ROOT / DEFAULT_DATASET_RELATIVE_PATH}")
 
         resolved_dataset = ensure_dataset_link(PROJECT_ROOT, args.dataset)
         print(f"[DATASET] 已就绪：{resolved_dataset}")

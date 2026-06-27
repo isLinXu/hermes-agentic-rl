@@ -71,12 +71,13 @@ def test_main_dry_run_prints_plan_with_dataset_override(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "Dry run" in captured.out
+    assert "数据源模式: parquet" in captured.out
+    assert str(dataset) in captured.out
     assert "configs/hermes_reasoning_traces_eval_rl.yaml" in captured.out
     assert "configs/benchmark_suite.yaml" in captured.out
 
 
-def test_main_returns_error_when_dataset_missing(
+def test_main_dry_run_falls_back_to_hf_when_default_parquet_missing(
     tmp_path: Path,
     monkeypatch,
     capsys,
@@ -84,10 +85,57 @@ def test_main_returns_error_when_dataset_missing(
     import scripts.reverify_real_benchmark as module
 
     monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(sys, "argv", ["reverify_real_benchmark.py", "--dry-run"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "reverify_real_benchmark.py",
+            "--dry-run",
+            "--hf-repo-id",
+            "lambda/hermes-agent-reasoning-traces",
+            "--hf-config-name",
+            "kimi",
+            "--hf-split",
+            "train",
+        ],
+    )
 
     exit_code = module.main()
     captured = capsys.readouterr()
 
-    assert exit_code == 2
-    assert "train.parquet" in captured.err
+    assert exit_code == 0
+    assert "数据源模式: hf" in captured.out
+    assert "lambda/hermes-agent-reasoning-traces" in captured.out
+
+
+def test_explicit_dataset_keeps_parquet_priority(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    import scripts.reverify_real_benchmark as module
+
+    dataset = tmp_path / "external" / "train.parquet"
+    dataset.parent.mkdir(parents=True)
+    dataset.write_bytes(b"parquet")
+
+    monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "reverify_real_benchmark.py",
+            "--dry-run",
+            "--dataset",
+            str(dataset),
+            "--hf-repo-id",
+            "lambda/hermes-agent-reasoning-traces",
+        ],
+    )
+
+    exit_code = module.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "数据源模式: parquet" in captured.out
+    assert str(dataset) in captured.out
