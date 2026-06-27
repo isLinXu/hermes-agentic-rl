@@ -8,24 +8,21 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def test_build_commands_covers_preflight_eval_and_suite(tmp_path: Path) -> None:
+def test_build_commands_uses_runtime_config_paths() -> None:
     from scripts.reverify_real_benchmark import build_commands
 
-    repo_root = tmp_path
-    dataset_path = repo_root / "data" / "hermes_reasoning_traces" / "train.parquet"
-    dataset_path.parent.mkdir(parents=True)
-    dataset_path.write_bytes(b"parquet")
-
-    commands = build_commands(repo_root=repo_root, include_preflight=True)
+    commands = build_commands(
+        eval_config_path=Path("/tmp/eval.yaml"),
+        stage2_eval_config_path=Path("/tmp/stage2.yaml"),
+        benchmark_suite_config_path=Path("/tmp/suite.yaml"),
+        include_preflight=True,
+    )
 
     assert len(commands) == 4
     assert commands[0][-1] == "hermes-preflight"
-    assert commands[1][-2:] == ["--config", "configs/hermes_reasoning_traces_eval_rl.yaml"]
-    assert commands[2][-2:] == [
-        "--config",
-        "configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml",
-    ]
-    assert commands[3][-2:] == ["--config", "configs/benchmark_suite.yaml"]
+    assert commands[1][-2:] == ["--config", "/tmp/eval.yaml"]
+    assert commands[2][-2:] == ["--config", "/tmp/stage2.yaml"]
+    assert commands[3][-2:] == ["--config", "/tmp/suite.yaml"]
 
 
 def test_ensure_dataset_link_creates_default_symlink(tmp_path: Path) -> None:
@@ -139,3 +136,56 @@ def test_explicit_dataset_keeps_parquet_priority(
     assert exit_code == 0
     assert "数据源模式: parquet" in captured.out
     assert str(dataset) in captured.out
+
+
+def test_materialize_runtime_configs_builds_hf_eval_configs_without_dataset_path(
+    tmp_path: Path,
+) -> None:
+    import scripts.reverify_real_benchmark as module
+
+    plan = module.RuntimePlan(
+        mode="hf",
+        description="HF fallback",
+        dataset_path=None,
+        dataset_override=None,
+        hf_repo_id="lambda/hermes-agent-reasoning-traces",
+        hf_config_name="kimi",
+        hf_split="train",
+        hf_streaming=True,
+        hf_rows_api_only=True,
+    )
+
+    runtime = module.materialize_runtime_configs(tmp_path, plan)
+    payload = module._load_yaml(runtime.eval_config_path)
+
+    assert "dataset_path" not in payload["environment"]
+    assert payload["environment"]["repo_id"] == "lambda/hermes-agent-reasoning-traces"
+    assert payload["environment"]["config_name"] == "kimi"
+    assert payload["environment"]["split"] == "train"
+    assert payload["environment"]["streaming"] is True
+    assert payload["environment"]["rows_api_only"] is True
+
+
+def test_materialize_runtime_configs_rewrites_benchmark_suite_config_paths(
+    tmp_path: Path,
+) -> None:
+    import scripts.reverify_real_benchmark as module
+
+    plan = module.RuntimePlan(
+        mode="hf",
+        description="HF fallback",
+        dataset_path=None,
+        dataset_override=None,
+        hf_repo_id="lambda/hermes-agent-reasoning-traces",
+        hf_config_name="kimi",
+        hf_split="train",
+        hf_streaming=True,
+        hf_rows_api_only=True,
+    )
+
+    runtime = module.materialize_runtime_configs(tmp_path, plan)
+    payload = module._load_yaml(runtime.benchmark_suite_config_path)
+    config_paths = [item["config_path"] for item in payload["benchmark_suite"]["benchmarks"]]
+
+    assert str(runtime.eval_config_path) in config_paths or str(runtime.stage2_eval_config_path) in config_paths
+    assert "configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml" not in config_paths
