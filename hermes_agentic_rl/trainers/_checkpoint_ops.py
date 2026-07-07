@@ -35,9 +35,17 @@ def save_full_checkpoint(
         snapshot_state_to_cpu,
     )
 
+    # FSDP-aware state_dict collection
+    if getattr(trainer, "_fsdp_enabled", False):
+        from hermes_agentic_rl.trainers.distributed import gather_fsdp_state_dict
+
+        model_state = gather_fsdp_state_dict(trainer.policy.model)  # type: ignore[attr-defined]
+    else:
+        model_state = trainer.policy.model.state_dict()  # type: ignore[attr-defined]
+
     state = CheckpointState(
         iteration=it,
-        model_state=trainer.policy.model.state_dict(),  # type: ignore[attr-defined]
+        model_state=model_state,
         optimizer_state=trainer._optim.state_dict(),
         rng_state=capture_rng_state(),
         stats=list(trainer.stats.iters),
@@ -112,7 +120,25 @@ def maybe_resume(trainer: OnPolicyTrainer) -> None:
 
     if not hasattr(trainer.policy, "model"):
         return
-    trainer.policy.model.load_state_dict(target.model_state)  # type: ignore[attr-defined]
+    # FSDP-aware load: use SHARDED_STATE_DICT for loading
+    if getattr(trainer, "_fsdp_enabled", False):
+        from torch.distributed.fsdp import (
+            FullyShardedDataParallel as FSDP,
+        )
+        from torch.distributed.fsdp import (
+            ShardedStateDictConfig,
+            StateDictType,
+        )
+
+        load_policy = ShardedStateDictConfig(offload_to_cpu=True)
+        with FSDP.state_dict_type(
+            trainer.policy.model,  # type: ignore[attr-defined]
+            StateDictType.SHARDED_STATE_DICT,
+            load_policy,
+        ):
+            trainer.policy.model.load_state_dict(target.model_state)  # type: ignore[attr-defined]
+    else:
+        trainer.policy.model.load_state_dict(target.model_state)  # type: ignore[attr-defined]
     if target.optimizer_state is not None:
         try:
             trainer._optim.load_state_dict(target.optimizer_state)
@@ -181,4 +207,10 @@ def save_checkpoint(trainer: OnPolicyTrainer, it: int) -> None:
     out.mkdir(parents=True, exist_ok=True)
     target = out / f"policy_iter_{it:04d}.pt"
     if hasattr(trainer.policy, "model"):
-        torch.save(trainer.policy.model.state_dict(), target)  # type: ignore[attr-defined]
+        if getattr(trainer, "_fsdp_enabled", False):
+            from hermes_agentic_rl.trainers.distributed import gather_fsdp_state_dict
+
+            state = gather_fsdp_state_dict(trainer.policy.model)  # type: ignore[attr-defined]
+        else:
+            state = trainer.policy.model.state_dict()  # type: ignore[attr-defined]
+        torch.save(state, target)

@@ -254,3 +254,19 @@ class GRPOTrainer(OnPolicyTrainer):
             lagrangian=lagrangian,
         )
         self._grpo_cfg = cfg  # keep public access to config type v0.2 tests expect
+
+    def _validate_backend(self, policy: LLMBackend) -> None:
+        """GRPO requires a trainable policy backend with score_batch() support.
+
+        VLLMRolloutBackend is generation-only and cannot be used as the learner
+        policy — it must be passed as ``vllm_rollout`` to the base trainer
+        instead. This catches the common misconfiguration at construction time.
+        """
+        cls_name = type(policy).__name__
+        if not policy.is_trainable():
+            raise RuntimeError(
+                f"{cls_name} is not trainable. GRPOTrainer requires a backend "
+                f"with trainable_parameters() returning non-empty list. "
+                f"Use HFCausalLMBackend or TinyCausalLMBackend as the policy, "
+                f"and pass VLLMRolloutBackend via the vllm_rollout parameter."
+            )
