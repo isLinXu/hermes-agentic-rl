@@ -619,6 +619,72 @@ class OnPolicyTrainer:
             )
             self._curriculum_scheduler = CurriculumScheduler(stages=stages, cfg=sched_cfg)
 
+        # ── Staleness-adaptive TIS controller ──────────────────────────────
+        # When pipeline_rollouts or replay_buffer is enabled, the staleness
+        # of consumed rollouts varies per iter. This controller dynamically
+        # adjusts the TIS rho_clip: high trust (high clip) for fresh rollouts,
+        # conservative (low clip) for stale ones. Overrides the algo's fixed
+        # tis_rho_clip when active.
+        self._staleness_tis: Any = None
+        staleness_tis_cfg = getattr(self.cfg, "staleness_adaptive_tis", None)
+        if isinstance(staleness_tis_cfg, dict) and staleness_tis_cfg:
+            from hermes_agentic_rl.algos.common.staleness_adaptive_tis import (
+                StalenessAdaptiveTIS,
+                StalenessSchedule,
+            )
+
+            schedule = StalenessSchedule(
+                max_rho_clip=float(staleness_tis_cfg.get("max_rho_clip", 2.0)),
+                min_rho_clip=float(staleness_tis_cfg.get("min_rho_clip", 1.0)),
+                max_staleness=int(staleness_tis_cfg.get("max_staleness", 10)),
+                interpolation=str(staleness_tis_cfg.get("interpolation", "linear")),
+                rho_floor=float(staleness_tis_cfg.get("rho_floor", 0.0)),
+            )
+            self._staleness_tis = StalenessAdaptiveTIS(
+                schedule=schedule,
+                window_size=int(staleness_tis_cfg.get("window_size", 10)),
+                enabled=bool(staleness_tis_cfg.get("enabled", True)),
+            )
+
+        # ── LoRA hot-reload manager ────────────────────────────────────────
+        # When lora_hot_reload config is set and a vLLM rollout backend is
+        # available, inject LoRA adapters into the policy model and create a
+        # LoRAHotReloadManager that merges LoRA deltas → shadow weights → vLLM
+        # sync after each optimizer step.
+        self._lora_hot_reload: Any = None
+        lora_cfg = getattr(self.cfg, "lora_hot_reload", None)
+        if isinstance(lora_cfg, dict) and lora_cfg and self._vllm_rollout is not None:
+            from hermes_agentic_rl.peft.lora import (
+                LoRAConfig,
+                inject_lora,
+            )
+            from hermes_agentic_rl.peft.lora_hot_reload import (
+                LoRAHotReloadManager,
+            )
+
+            lora_config = LoRAConfig(
+                r=int(lora_cfg.get("rank", 8)),
+                alpha=float(lora_cfg.get("alpha", 16.0)),
+                dropout=float(lora_cfg.get("dropout", 0.0)),
+                target_patterns=tuple(lora_cfg.get("target_patterns", ("qkv", "proj"))),
+                freeze_base=True,
+            )
+            if hasattr(policy, "model"):
+                adapter = inject_lora(policy.model, lora_config)  # type: ignore[attr-defined]
+                self._lora_hot_reload = LoRAHotReloadManager(
+                    adapter=adapter,
+                    base_model=policy.model,  # type: ignore[attr-defined]
+                    vllm_backend=self._vllm_rollout,
+                    sync_every=int(lora_cfg.get("sync_every", 1)),
+                    shadow_device=str(lora_cfg.get("shadow_device", "cpu")),
+                )
+                logger.info(
+                    "LoRA hot-reload enabled: rank=%d, alpha=%.1f, sync_every=%d",
+                    lora_config.r,
+                    lora_config.alpha,
+                    int(lora_cfg.get("sync_every", 1)),
+                )
+
         self._maybe_resume()
 
     # ------------------------------------------------------------------
@@ -1368,6 +1434,19 @@ class OnPolicyTrainer:
         # learner's policy version (number of completed updates so far).
         agg.extra["rollout_staleness"] = float(self._rollout_staleness)
         agg.extra["policy_version"] = float(self._update_version)
+
+        # Staleness-adaptive TIS: observe this iter's staleness and push the
+        # adjusted rho_clip into the algo config for the NEXT iter's loss
+        # computation. The algo's fixed tis_rho_clip is overridden when active.
+        if self._staleness_tis is not None:
+            self._staleness_tis.observe_staleness(self._rollout_staleness)
+            tis_cfg = self._staleness_tis.get_config()
+            algo_cfg = getattr(self.algo, "cfg", None)
+            if algo_cfg is not None and hasattr(algo_cfg, "tis_rho_clip"):
+                if tis_cfg.enabled:
+                    algo_cfg.tis_rho_clip = float(tis_cfg.rho_clip)
+            agg.extra.update(self._staleness_tis.stats())
+
         self._update_version += 1
         # Replay buffer stats (when enabled).
         if self._replay_buffer is not None:
@@ -1399,9 +1478,13 @@ class OnPolicyTrainer:
             last_iter = it
             # v0.9: sync weights to vLLM before rollout.
             if self._vllm_rollout is not None and it > 0:
-                sync_every = max(1, int(self.cfg.vllm_sync_every))
-                if it % sync_every == 0:
-                    self._sync_weights_to_vllm(self.policy)
+                if self._lora_hot_reload is not None:
+                    # LoRA hot-reload: merge deltas and push to vLLM.
+                    self._lora_hot_reload.sync_to_vllm()
+                else:
+                    sync_every = max(1, int(self.cfg.vllm_sync_every))
+                    if it % sync_every == 0:
+                        self._sync_weights_to_vllm(self.policy)
             stats = asyncio.run(self._one_iter(it))
             if self.lagrangian is not None:
                 self.lagrangian.dual_step()

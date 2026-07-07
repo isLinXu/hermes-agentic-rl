@@ -189,7 +189,8 @@ def build_trainer_config(config: dict[str, Any]) -> GRPOTrainerConfig:
 
     for key, value in config.items():
         # Skip non-config sections
-        if key in ("backend", "model_name", "rewards", "ruler", "env"):
+        if key in ("backend", "model_name", "rewards", "ruler", "env",
+                    "client_server", "quantization", "hparam_search"):
             continue
         if key in valid_fields:
             kwargs[key] = value
@@ -330,6 +331,58 @@ def build_env(config: dict[str, Any]) -> Any:
     return SimToolEnv(dataset=dataset)
 
 
+def build_client_server(
+    config: dict[str, Any], backend: Any
+) -> Any | None:
+    """Build a client-server pair from config, if the ``client_server`` section
+    is present.
+
+    YAML schema::
+
+        client_server:
+          enabled: true
+          sync_mode: full           # full | delta | metadata
+          sync_interval: 0.0        # seconds between syncs (0 = always)
+          weight_file: /shared/w.pt # optional: for multi-process sync
+
+    When ``weight_file`` is omitted, an in-process ``ClientServerPair`` is
+    created (server = the backend's model, client = the backend itself).
+    """
+    cs_cfg = config.get("client_server", {})
+    if not cs_cfg or not cs_cfg.get("enabled", False):
+        return None
+
+    from hermes_agentic_rl.client_server import (
+        ClientServerPair,
+        SyncMode,
+    )
+
+    sync_mode_str = str(cs_cfg.get("sync_mode", "full"))
+    sync_mode = SyncMode(sync_mode_str)
+    sync_interval = float(cs_cfg.get("sync_interval", 0.0))
+
+    model = getattr(backend, "model", None)
+    if model is None:
+        logger.warning(
+            "client_server enabled but backend has no .model — skipping"
+        )
+        return None
+
+    pair = ClientServerPair.create(
+        model=model,
+        rollout_backend=backend,
+        optimizer=None,  # optimizer is owned by the trainer
+        sync_mode=sync_mode,
+        sync_interval=sync_interval,
+    )
+    logger.info(
+        "Client-server mode: sync_mode=%s, sync_interval=%.3f",
+        sync_mode_str,
+        sync_interval,
+    )
+    return pair
+
+
 def run_from_config(config: dict[str, Any]) -> None:
     """Run training from a config dict.
 
@@ -384,6 +437,12 @@ def run_from_config(config: dict[str, Any]) -> None:
         reward_manager=reward_manager,
         cfg=trainer_cfg,
     )
+
+    # 4b. Wire client-server pair if configured.
+    cs_pair = build_client_server(config, backend)
+    if cs_pair is not None:
+        # Attach the server's version counter to the trainer for observability.
+        trainer._cs_pair = cs_pair  # type: ignore[attr-defined]
 
     logger.info(f"Starting training: {trainer_cfg.n_iters} iters, "
                 f"group_size={trainer_cfg.group_size}")

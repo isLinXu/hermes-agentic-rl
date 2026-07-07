@@ -9,6 +9,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 from hermes_agentic_rl.client_server import (
     ClientServerPair,
     RolloutClient,
@@ -16,7 +17,6 @@ from hermes_agentic_rl.client_server import (
     TrainingServer,
     WeightSnapshot,
 )
-from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 
 
 class _MockRolloutBackend:
@@ -99,7 +99,6 @@ def test_rollout_client_skip_sync_same_version():
     client = RolloutClient(mock, weight_source=server)
 
     client.sync_weights(force=True)
-    version_after_first = client.weight_version
 
     # Without force and same version, should skip.
     synced = client.sync_weights()

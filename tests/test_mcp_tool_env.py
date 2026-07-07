@@ -18,7 +18,6 @@ from hermes_agentic_rl.envs.mcp_tool_env import (
     build_mcp_tool_dataset,
 )
 
-
 # ── Test handlers ──
 
 def _echo_handler(arg: str) -> str:

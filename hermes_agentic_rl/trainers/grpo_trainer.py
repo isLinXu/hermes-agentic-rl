@@ -136,6 +136,10 @@ class GRPOTrainerConfig:
     # When set, OnPolicyTrainer creates an internal CurriculumScheduler
     # and runs observe/advance inside the training loop (on_policy.py:594-620, 1457-1479).
     curriculum: dict[str, Any] | None = None
+    # --- Staleness-adaptive TIS (forwarded to OnPolicyTrainerConfig) ---
+    staleness_adaptive_tis: dict[str, Any] | None = None
+    # --- LoRA hot-reload (forwarded to OnPolicyTrainerConfig) ---
+    lora_hot_reload: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Fatal cross-field validation — catches misconfigurations that
