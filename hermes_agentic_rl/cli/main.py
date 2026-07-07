@@ -9,13 +9,10 @@ import shutil
 from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from hermes_agentic_rl import __version__
 from hermes_agentic_rl.runtime.errors import RuntimeUnavailableError
-
-if TYPE_CHECKING:
-    from hermes_agentic_rl.trainers.base import BaseTrainer
 
 
 def build_parser() -> argparse.ArgumentParser:

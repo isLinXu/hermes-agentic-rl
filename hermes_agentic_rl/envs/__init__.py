@@ -23,10 +23,16 @@ __all__ = [
     "LetterCountingConfig",
     "LetterCountingEnv",
     "LetterCountingReward",
+    "MCPToolEnv",
+    "MCPToolRegistry",
+    "MCPToolReward",
+    "MCPToolSpec",
+    "MCPToolTask",
     "SimToolEnv",
     "SimToolRewardComponent",
     "TerminalTaskEnv",
     "build_context_benchmark_dataset",
+    "build_mcp_tool_dataset",
     "build_sim_tool_dataset",
     "calc_tool",
     "load_hermes_reasoning_trace_turns",
@@ -154,4 +160,29 @@ def __getattr__(name: str) -> Any:
         from hermes_agentic_rl.envs.terminal_task_env import TerminalTaskEnv
 
         return TerminalTaskEnv
+    if name in {
+        "MCPToolEnv",
+        "MCPToolRegistry",
+        "MCPToolReward",
+        "MCPToolSpec",
+        "MCPToolTask",
+        "build_mcp_tool_dataset",
+    }:
+        from hermes_agentic_rl.envs.mcp_tool_env import (
+            MCPToolEnv,
+            MCPToolRegistry,
+            MCPToolReward,
+            MCPToolSpec,
+            MCPToolTask,
+            build_mcp_tool_dataset,
+        )
+
+        return {
+            "MCPToolEnv": MCPToolEnv,
+            "MCPToolRegistry": MCPToolRegistry,
+            "MCPToolReward": MCPToolReward,
+            "MCPToolSpec": MCPToolSpec,
+            "MCPToolTask": MCPToolTask,
+            "build_mcp_tool_dataset": build_mcp_tool_dataset,
+        }[name]
     raise AttributeError(name)
