@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
 import torch
-import torch.nn.functional as F
 
 from hermes_agentic_rl.agent_loop.base import BaseAgentLoop
 from hermes_agentic_rl.agent_loop.policy_loop import PolicyAgentLoop
@@ -45,13 +44,19 @@ from hermes_agentic_rl.backends.batch_generate import BatchRolloutGenerator
 from hermes_agentic_rl.core.reward_manager import RewardManager
 from hermes_agentic_rl.core.rollout_manager import RolloutManager
 from hermes_agentic_rl.core.types import Trajectory
-from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
+from hermes_agentic_rl.envs.base_env import BaseEnv
 from hermes_agentic_rl.mdp.state_encoder import PromptStateEncoder
-from hermes_agentic_rl.trainers._rollout_helpers import (
-    batch_single_turn_trajectory as _batch_single_turn_trajectory,
+from hermes_agentic_rl.trainers._checkpoint_ops import (
+    maybe_resume as _maybe_resume_fn,
+)
+from hermes_agentic_rl.trainers._checkpoint_ops import (
+    save_checkpoint as _save_checkpoint_fn,
+)
+from hermes_agentic_rl.trainers._checkpoint_ops import (
+    save_full_checkpoint as _save_full_checkpoint_fn,
 )
 from hermes_agentic_rl.trainers._rollout_helpers import (
-    config_to_dict as _config_to_dict,
+    batch_single_turn_trajectory as _batch_single_turn_trajectory,
 )
 from hermes_agentic_rl.trainers._rollout_helpers import (
     extract_next_state as _extract_next_state,
@@ -77,6 +82,10 @@ from hermes_agentic_rl.trainers._rollout_helpers import (
 from hermes_agentic_rl.trainers._rollout_helpers import (
     turn_group_id as _turn_group_id,
 )
+from hermes_agentic_rl.trainers._train_loop_ops import (
+    run_all_post_iter,
+    run_final_checkpoint,
+)
 from hermes_agentic_rl.trainers.batch_stats import (
     _rl_dense_reward_metadata,
     _teacher_responses_from_env,
@@ -94,9 +103,9 @@ from hermes_agentic_rl.trainers.multi_turn_credit import assign_multi_turn_rewar
 from hermes_agentic_rl.trainers.on_policy_config import OnPolicyTrainerConfig
 from hermes_agentic_rl.trainers.profiling import (
     StepProfiler,
-    append_jsonl,
     format_json_record,
 )
+from hermes_agentic_rl.trainers.sft_mixin import SFTMixin
 from hermes_agentic_rl.trainers.train_stats import TrainStats as _TrainStats
 from hermes_agentic_rl.utils.coerce import coerce_float
 
@@ -193,7 +202,7 @@ def _scheduled_scalar(
 TrainStats = _TrainStats
 
 
-class OnPolicyTrainer:
+class OnPolicyTrainer(SFTMixin):
     """Generic rollout → loss → step loop, parameterized by a BaseAlgo.
 
     Subclasses only need to provide ``self.algo`` and (optionally) override
@@ -688,7 +697,7 @@ class OnPolicyTrainer:
                     int(lora_cfg.get("sync_every", 1)),
                 )
 
-        self._maybe_resume()
+        _maybe_resume_fn(self)
 
     # ------------------------------------------------------------------
     # Optimizer step helper (eliminates duplicate unscale/clip/step/LR logic)
@@ -1482,7 +1491,6 @@ class OnPolicyTrainer:
             # v0.9: sync weights to vLLM before rollout.
             if self._vllm_rollout is not None and it > 0:
                 if self._lora_hot_reload is not None:
-                    # LoRA hot-reload: merge deltas and push to vLLM.
                     self._lora_hot_reload.sync_to_vllm()
                 else:
                     sync_every = max(1, int(self.cfg.vllm_sync_every))
@@ -1505,155 +1513,16 @@ class OnPolicyTrainer:
                     pass
             self.stats.add(record)
 
-            # EMA shadow update (after the learner step).
-            if self._ema is not None:
-                self._ema.update(self.policy)
-                record["ema_rollout"] = 1.0
-                record["ema_tau"] = self._ema.current_tau()
-
-            # PRM online co-training (after policy update, using latest batch).
-            if self._prm_pipeline is not None:
-                _last_batch = getattr(self, "_last_train_batch", None)
-                if _last_batch is not None:
-                    tokenizer = getattr(self.policy, "tokenizer", None)
-                    if tokenizer is not None:
-                        try:
-                            prm_metrics = self._prm_pipeline.step(
-                                it, _last_batch, tokenizer=tokenizer
-                            )
-                            if prm_metrics:
-                                record.update(prm_metrics)
-                        except Exception as _prm_e:
-                            record["prm_error"] = str(_prm_e)
-
-            # Dynamic reward balancer: update component weights based on
-            # per-batch variance (differentiator over OpenClaw-RL static weights).
-            if self._dynamic_balancer is not None:
-                try:
-                    new_weights = self._dynamic_balancer.observe_batch(it, record)
-                    # Apply updated weights to reward_manager components.
-                    for comp in getattr(self.reward_manager, "components", []):
-                        name = getattr(comp, "name", None)
-                        if name is not None and name in new_weights:
-                            comp.weight = new_weights[name]
-                    record.update(self._dynamic_balancer.snapshot())
-                except Exception:
-                    pass
-
-            # Curriculum scheduler: observe batch stats and maybe advance stage.
-            # This integrates with DynamicRewardBalancer by adjusting the
-            # base_weights based on curriculum stage progression.
-            if self._curriculum_scheduler is not None:
-                try:
-                    self._curriculum_scheduler.observe_batch_stats(it, record)
-                    if self._curriculum_scheduler.should_advance():
-                        old_name = self._curriculum_scheduler.get_current_stage().name
-                        self._curriculum_scheduler.advance()
-                        new_stage = self._curriculum_scheduler.get_current_stage()
-                        if new_stage is not None:
-                            record["curriculum_advanced"] = 1.0
-                            record["curriculum_from"] = old_name
-                            record["curriculum_to"] = new_stage.name
-                            # Update dynamic balancer base weights if present
-                            if self._dynamic_balancer is not None:
-                                stage_weights = self._curriculum_scheduler.get_stage_weights()
-                                for wname, wval in stage_weights.items():
-                                    if wname in self._dynamic_balancer.base_weights:
-                                        self._dynamic_balancer.base_weights[wname] = wval
-                    record.update(self._curriculum_scheduler.snapshot())
-                except Exception:
-                    pass
-
-            # Memory shaper snapshot for logging.
-            if self._memory_shaper is not None:
-                record.update(self._memory_shaper.snapshot())
-
-            # Reference policy periodic re-clone (prevents KL drift).
-            ref_every = int(getattr(self.cfg, "ref_update_every", 0))
-            if ref_every > 0 and self.ref_policy is not None and it > 0 and it % ref_every == 0:
-                if hasattr(self.policy, "clone_frozen"):
-                    self.ref_policy = self.policy.clone_frozen()
-                    record["ref_policy_updated"] = 1.0
-
-            # Eval hook: periodically evaluate with deterministic decoding.
-            eval_every = int(getattr(self.cfg, "eval_every", 0))
-            if eval_every > 0 and it > 0 and it % eval_every == 0:
-                eval_record = self._run_eval_hook(it)
-                if eval_record:
-                    record.update(eval_record)
-
-            # Best-reward tracking + best checkpoint + early-stop counter.
-            mean_r = float(record.get("mean_reward", 0.0))
-            improved = mean_r > (self._best_reward + self.cfg.early_stop_min_delta)
-            if improved:
-                self._best_reward = mean_r
-                self._best_iter = it
-                self._iters_since_best = 0
-                if self._best_ckpt_manager is not None and hasattr(self.policy, "model"):
-                    self._save_full_checkpoint(it, manager=self._best_ckpt_manager)
-            else:
-                self._iters_since_best += 1
-
-            if self.cfg.log_every and (it % self.cfg.log_every == 0):
-                self.logger(record)
-            if self.cfg.metrics_sink is not None:
-                try:
-                    self.cfg.metrics_sink(record)
-                except Exception:
-                    # metrics must never break training
-                    pass
-            if self._profiler.enabled and self._profile_output_path is not None:
-                profile_record = {
-                    "iter": it,
-                    "algo": self.algo_name,
-                    **{
-                        k: v
-                        for k, v in record.items()
-                        if isinstance(k, str) and k.startswith("time_")
-                    },
-                }
-                append_jsonl(self._profile_output_path, profile_record)
-            if (
-                self.cfg.save_every
-                and self.cfg.output_dir is not None
-                and self.cfg.save_every > 0
-                and it > 0
-                and it % self.cfg.save_every == 0
-            ):
-                self._save_checkpoint(it)
-            if (
-                self._ckpt_manager is not None
-                and self.cfg.checkpoint_every > 0
-                and it > 0
-                and it % self.cfg.checkpoint_every == 0
-            ):
-                self._save_full_checkpoint(it, background=True)
-
-            # Early-stop check (after all per-iter side effects).
-            if (
-                self.cfg.early_stop_patience > 0
-                and self._iters_since_best >= self.cfg.early_stop_patience
-            ):
-                print(
-                    f"[train] early stop at iter={it} "
-                    f"(best={self._best_reward:.4f} @ iter {self._best_iter}; "
-                    f"patience={self.cfg.early_stop_patience} exhausted)"
-                )
-                self._early_stopped = True
+            # Execute all per-iteration side-effects (EMA, PRM, curriculum,
+            # reward balancer, eval, checkpointing, early-stop, etc.).
+            if run_all_post_iter(self, it, record):
                 break
 
-        # Always emit a final checkpoint if ckpt manager is active.
-        if self._ckpt_manager is not None and self.cfg.n_iters > start:
-            self._save_full_checkpoint(last_iter)
-        if self._async_ckpt_saver is not None:
-            try:
-                self._async_ckpt_saver.flush()
-            finally:
-                self._async_ckpt_saver.close()
+        run_final_checkpoint(self, last_iter)
         return self.stats
 
     # ------------------------------------------------------------------
-    # checkpoint helpers
+    # checkpoint helpers (delegated to _checkpoint_ops)
     # ------------------------------------------------------------------
 
     def _save_full_checkpoint(
@@ -1663,169 +1532,14 @@ class OnPolicyTrainer:
         *,
         background: bool = False,
     ) -> None:
-        """Save a {model, optimizer, rng, stats} bundle via CheckpointManager.
-
-        If ``manager`` is None, uses the default checkpoint manager. Passing an
-        alternate manager (e.g. ``self._best_ckpt_manager``) writes to a
-        separate directory with its own retention policy.
-
-        When ``background=True`` and ``async_checkpoint`` is enabled, the CPU
-        snapshot is taken synchronously but disk I/O runs on a worker thread.
-        Best and final checkpoints always call with ``background=False``.
-        """
-        target_mgr = manager or self._ckpt_manager
-        if target_mgr is None or not hasattr(self.policy, "model"):
-            return
-        from hermes_agentic_rl.trainers.checkpoint import (
-            CheckpointState,
-            capture_rng_state,
-            snapshot_state_to_cpu,
-        )
-
-        state = CheckpointState(
-            iteration=it,
-            model_state=self.policy.model.state_dict(),  # type: ignore[attr-defined]
-            optimizer_state=self._optim.state_dict(),
-            rng_state=capture_rng_state(),
-            stats=list(self.stats.iters),
-            config=_config_to_dict(self.cfg),
-            best_reward=self._best_reward,
-            best_iteration=self._best_iter,
-            # Reward normalizer state (RunningMeanStd).
-            running_stats=(self._reward_rms.state_dict() if self._reward_rms is not None else None),
-            # Adaptive KL controller state (P or PID).
-            kl_ctrl_state=(self._kl_ctrl.state_dict() if self._kl_ctrl is not None else None),
-            # EMA shadow weights so rollout behavior is deterministic on resume.
-            ema_state=(
-                {
-                    k: v.detach().cpu()
-                    for k, v in self._ema.shadow.model.state_dict().items()  # type: ignore[attr-defined]
-                }
-                if self._ema is not None and hasattr(self._ema.shadow, "model")
-                else None
-            ),
-            # PRM head weights for warm-start on next run.
-            prm_head_state=(
-                self._prm_pipeline.prm.head.state_dict() if self._prm_pipeline is not None else None
-            ),
-            # Curriculum scheduler state for resuming stage progression.
-            curriculum_state=(
-                self._curriculum_scheduler.state_dict()
-                if self._curriculum_scheduler is not None
-                else None
-            ),
-        )
-        use_async = (
-            background
-            and self.cfg.async_checkpoint
-            and self._async_ckpt_saver is not None
-            and manager is None
-        )
-        if use_async:
-            saver = self._async_ckpt_saver
-            assert saver is not None
-            saver.submit(target_mgr, snapshot_state_to_cpu(state))
-        else:
-            target_mgr.save(state)
+        """Save a {model, optimizer, rng, stats} bundle via CheckpointManager."""
+        _save_full_checkpoint_fn(self, it, manager=manager, background=background)
 
     def _maybe_resume(self) -> None:
-        if self._ckpt_manager is None:
-            return
-        from hermes_agentic_rl.trainers.checkpoint import (
-            CheckpointState,
-            restore_rng_state,
-        )
-
-        target: CheckpointState | None = None
-        resume_from = self.cfg.resume_from
-        if resume_from is not None and resume_from != "latest":
-            try:
-                target = self._ckpt_manager.load(int(resume_from))
-            except Exception:
-                target = None
-            if target is None:
-                raise RuntimeError(
-                    f"resume_from={resume_from!r} requested but checkpoint not found"
-                )
-        elif resume_from == "latest" or self.cfg.auto_resume:
-            target = self._ckpt_manager.load_latest()
-            if target is None:
-                return  # nothing to resume from; fresh start
-        else:
-            return
-
-        if not hasattr(self.policy, "model"):
-            return
-        self.policy.model.load_state_dict(target.model_state)  # type: ignore[attr-defined]
-        if target.optimizer_state is not None:
-            try:
-                self._optim.load_state_dict(target.optimizer_state)
-            except Exception:
-                pass  # optimizer mismatch shouldn't break resume
-        if target.rng_state is not None:
-            try:
-                restore_rng_state(target.rng_state)
-            except Exception:
-                pass
-        self.stats.iters = list(target.stats)
-        self._best_reward = float(target.best_reward)
-        self._best_iter = int(target.best_iteration)
-        # Resume from the NEXT iteration — we already finished `iteration`.
-        self._start_iter = int(target.iteration) + 1
-
-        # Restore reward normalizer state.
-        running_stats = getattr(target, "running_stats", None)
-        if running_stats is not None and self._reward_rms is not None:
-            try:
-                self._reward_rms.load_state_dict(running_stats)
-            except Exception:
-                pass
-
-        # Restore adaptive KL controller state.
-        kl_ctrl_state = getattr(target, "kl_ctrl_state", None)
-        if kl_ctrl_state is not None and self._kl_ctrl is not None:
-            try:
-                self._kl_ctrl.load_state_dict(kl_ctrl_state)
-            except Exception:
-                pass
-
-        # Restore EMA shadow weights.
-        ema_state = getattr(target, "ema_state", None)
-        if ema_state is not None and self._ema is not None and hasattr(self._ema.shadow, "model"):
-            try:
-                self._ema.shadow.model.load_state_dict(ema_state, strict=False)  # type: ignore[attr-defined]
-            except Exception:
-                pass  # shape mismatch → shadow will re-track from scratch
-
-        # Restore PRM head weights for warm-start.
-        prm_head_state = getattr(target, "prm_head_state", None)
-        if prm_head_state is not None and self._prm_pipeline is not None:
-            try:
-                self._prm_pipeline.prm.head.load_state_dict(prm_head_state)
-            except Exception:
-                pass
-
-        # Restore curriculum scheduler state.
-        curriculum_state = getattr(target, "curriculum_state", None)
-        if curriculum_state is not None and self._curriculum_scheduler is not None:
-            try:
-                self._curriculum_scheduler.load_state_dict(curriculum_state)
-            except Exception:
-                pass
-
-        print(
-            f"[train] resumed from iter={target.iteration} "
-            f"(best_reward={self._best_reward:.4f} start_iter={self._start_iter})"
-        )
+        _maybe_resume_fn(self)
 
     def _save_checkpoint(self, it: int) -> None:
-        if self.cfg.output_dir is None:
-            return
-        out = Path(self.cfg.output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        target = out / f"policy_iter_{it:04d}.pt"
-        if hasattr(self.policy, "model"):
-            torch.save(self.policy.model.state_dict(), target)  # type: ignore[attr-defined]
+        _save_checkpoint_fn(self, it)
 
     def _default_logger(self, rec: dict[str, Any]) -> None:
         if str(getattr(self.cfg, "log_format", "text")).lower() == "json":
@@ -1965,180 +1679,12 @@ class OnPolicyTrainer:
             "eval_temperature": eval_temp,
         }
 
-    def _maybe_run_interleaved_sft(self, iter_idx: int) -> dict[str, Any]:
-        every = max(0, int(self.cfg.interleave_sft_every))
-        if every <= 0 or iter_idx <= 0 or iter_idx % every != 0:
-            return {}
-        samples = asyncio.run(
-            self._collect_supervised_samples(int(self.cfg.interleave_sft_samples))
-        )
-        if not samples:
-            raise RuntimeError(
-                "interleave_sft is enabled, but the active environment produced no "
-                "supervised samples. Implement build_supervised_samples(item) on the env "
-                "or disable interleave_sft_every."
-            )
-        return self._run_supervised_updates(
-            samples,
-            lr=float(self.cfg.interleave_sft_lr),
-            epochs=max(1, int(self.cfg.interleave_sft_epochs)),
-        )
-
-    def _maybe_run_bootstrap_sft(self) -> dict[str, Any]:
-        rounds = max(0, int(self.cfg.bootstrap_sft_rounds))
-        if rounds <= 0:
-            return {}
-        asyncio.run(self.env.setup())
-
-        losses: list[float] = []
-        total_samples = 0
-        total_steps = 0
-        for _ in range(rounds):
-            samples = asyncio.run(
-                self._collect_supervised_samples(int(self.cfg.bootstrap_sft_samples))
-            )
-            if not samples:
-                raise RuntimeError(
-                    "bootstrap_sft is enabled, but the active environment produced no "
-                    "supervised samples. Implement build_supervised_samples(item) on the env "
-                    "or disable bootstrap_sft_rounds."
-                )
-            metrics = self._run_supervised_updates(
-                samples,
-                lr=float(self.cfg.bootstrap_sft_lr),
-                epochs=max(1, int(self.cfg.bootstrap_sft_epochs)),
-            )
-            if "sft_loss" in metrics:
-                losses.append(float(metrics["sft_loss"]))
-            total_samples += int(metrics.get("n_sft_samples", 0))
-            total_steps += int(metrics.get("n_sft_steps", 0))
-
-        return {
-            "iter": -1,
-            "algo": "sft_bootstrap",
-            "mean_reward": 0.0,
-            "loss": (sum(losses) / len(losses)) if losses else 0.0,
-            "sft_loss": (sum(losses) / len(losses)) if losses else 0.0,
-            "n_sft_samples": total_samples,
-            "n_sft_steps": total_steps,
-            "bootstrap_sft_rounds": rounds,
-        }
-
-    async def _collect_supervised_samples(self, n_items: int) -> list[SupervisedSample]:
-        out: list[SupervisedSample] = []
-        for _ in range(max(1, n_items)):
-            item = await self.env.get_next_item()
-            out.extend(self.env.build_supervised_samples(item))
-        return [
-            sample
-            for sample in out
-            if str(sample.instruction).strip() and str(sample.response).strip()
-        ]
-
-    def _run_supervised_updates(
-        self,
-        samples: list[SupervisedSample],
-        *,
-        lr: float,
-        epochs: int,
-    ) -> dict[str, Any]:
-        batch_size = max(1, min(int(self.cfg.interleave_sft_batch_size), len(samples)))
-        prev_lrs = [float(group["lr"]) for group in self.optim.param_groups]
-        for group in self.optim.param_groups:
-            group["lr"] = float(lr)
-
-        losses: list[float] = []
-        n_steps = 0
-        try:
-            for epoch_idx in range(epochs):
-                ordered = list(samples)
-                rng_epoch = self._minibatch_rng(
-                    iter_idx=len(self.stats.iters) + 1,
-                    epoch_idx=epoch_idx + 1,
-                )
-                rng_epoch.shuffle(ordered)
-                for start in range(0, len(ordered), batch_size):
-                    batch = ordered[start : start + batch_size]
-                    if not batch:
-                        continue
-                    inp, labels, loss_mask = self._collate_supervised_batch(batch)
-                    self.optim.zero_grad()
-                    logits = self._forward_model_logits(inp)
-                    ce = F.cross_entropy(
-                        logits.reshape(-1, logits.size(-1)),
-                        labels.reshape(-1),
-                        reduction="none",
-                    ).reshape(labels.shape)
-                    loss = (ce * loss_mask.float()).sum() / loss_mask.sum().clamp(min=1)
-                    loss.backward()
-                    if self.cfg.grad_clip and self.cfg.grad_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(
-                            self._trainable_params,
-                            max_norm=self.cfg.grad_clip,
-                        )
-                    self.optim.step()
-                    losses.append(float(loss.detach().item()))
-                    n_steps += 1
-        finally:
-            for group, lr in zip(self.optim.param_groups, prev_lrs, strict=False):
-                group["lr"] = lr
-
-        return {
-            "sft_loss": (sum(losses) / len(losses)) if losses else 0.0,
-            "n_sft_samples": len(samples),
-            "n_sft_steps": n_steps,
-        }
-
-    def _collate_supervised_batch(
-        self, batch: list[SupervisedSample]
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        rows: list[tuple[list[int], int]] = []
-        max_len = self._policy_max_sequence_length()
-        for sample in batch:
-            obs = self._prompt_encoder.encode({"instruction": sample.instruction})
-            prompt_ids = list(obs.prompt_ids)
-            if sample.prompt_suffix:
-                prompt_ids.extend(self.policy.tokenizer.encode(sample.prompt_suffix))
-            response_ids = self.policy.tokenizer.encode(sample.response, add_eos=True)
-            full = prompt_ids + response_ids
-            if max_len is not None and len(full) > max_len:
-                drop = len(full) - max_len
-                full = full[drop:]
-                prompt_ids = prompt_ids[drop:] if drop < len(prompt_ids) else []
-            rows.append((full, len(prompt_ids)))
-
-        max_len = max(len(full_ids) for full_ids, _prompt_len in rows)
-        device = self._trainable_params[0].device
-        pad_id = int(getattr(self.policy.tokenizer, "pad_id", 0))
-        inp = torch.full((len(rows), max_len - 1), pad_id, dtype=torch.long, device=device)
-        labels = torch.full((len(rows), max_len - 1), pad_id, dtype=torch.long, device=device)
-        loss_mask = torch.zeros((len(rows), max_len - 1), dtype=torch.bool, device=device)
-
-        for row_idx, (full_ids, prompt_len) in enumerate(rows):
-            input_ids = full_ids[:-1]
-            target_ids = full_ids[1:]
-            n = len(input_ids)
-            if n <= 0:
-                continue
-            inp[row_idx, :n] = torch.tensor(input_ids, dtype=torch.long, device=device)
-            labels[row_idx, :n] = torch.tensor(target_ids, dtype=torch.long, device=device)
-            start = max(0, prompt_len - 1)
-            loss_mask[row_idx, start:n] = True
-        return inp, labels, loss_mask
-
-    def _policy_max_sequence_length(self) -> int | None:
-        cfg = getattr(self.policy, "cfg", None)
-        for source in (cfg, getattr(self.policy, "model", None)):
-            if source is None:
-                continue
-            max_len = getattr(source, "max_len", None)
-            if isinstance(max_len, int) and max_len > 0:
-                return max_len
-        return None
-
-    def _forward_model_logits(self, inp: torch.Tensor) -> torch.Tensor:
-        out = self.policy.model(inp)  # type: ignore[attr-defined]
-        return out.logits if hasattr(out, "logits") else out
+    # ------------------------------------------------------------------
+    # SFT methods (_maybe_run_interleaved_sft, _maybe_run_bootstrap_sft,
+    # _collect_supervised_samples, _run_supervised_updates,
+    # _collate_supervised_batch, _policy_max_sequence_length,
+    # _forward_model_logits) are provided by SFTMixin.
+    # ------------------------------------------------------------------
 
 
 # NOTE: Module-level helpers moved to _rollout_helpers.py and imported above.

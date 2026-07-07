@@ -162,7 +162,6 @@ class SFTMixin:
                             max_norm=self.cfg.grad_clip,
                         )
                     self.optim.step()
-                    self._update_ema_rollout()
                     losses.append(float(loss.detach().item()))
                     n_steps += 1
         finally:

@@ -5,11 +5,31 @@ Run locally::
     pytest tests/benchmarks/ -m benchmark --benchmark-only
 
 These benchmarks use TinyCausalLM only — no GPU or HF weights required.
+
+If ``pytest-benchmark`` is not installed the tests are **skipped** (not errored)
+so that the rest of the suite can still collect and run normally.
 """
 
 from __future__ import annotations
 
 import pytest
+
+# If pytest-benchmark is missing, skip every test in this module instead of
+# raising a collection-time ``fixture 'benchmark' not found`` error.
+pytestmark: pytest.MarkDecorator = pytest.mark.benchmark
+
+try:
+    import pytest_benchmark  # noqa: F401  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover
+    def _skip_benchmark(*_args: object, **_kwargs: object) -> None:
+        pytest.skip("pytest-benchmark not installed — run pip install pytest-benchmark")
+
+    # Replace the ``benchmark`` fixture so collection succeeds.
+    @pytest.fixture  # type: ignore[misc]
+    def benchmark() -> object:  # type: ignore[misc]
+        return _skip_benchmark
+
+    pytestmark = pytest.mark.skip(reason="pytest-benchmark not installed")
 
 torch = pytest.importorskip("torch")
 
