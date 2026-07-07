@@ -11,7 +11,6 @@ from hermes_agentic_rl.envs.echo_task_env import (
     EchoTaskEnv,
     build_default_echo_dataset,
 )
-from hermes_agentic_rl.runtime.errors import RuntimeConfigurationError
 from hermes_agentic_rl.trainers.ema import EMAModel
 from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConfig
 
@@ -63,7 +62,9 @@ def test_ema_rollout_rejects_vllm_rollout_mix() -> None:
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
 
-    with pytest.raises(RuntimeConfigurationError, match="EMA rollout"):
+    # The cross-field validation in GRPOTrainerConfig.__post_init__ raises
+    # ValueError before the trainer constructor can produce its own error.
+    with pytest.raises(ValueError, match=r"ema_rollout.*incompatible"):
         GRPOTrainer(
             policy=policy,
             env=env,

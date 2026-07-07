@@ -375,7 +375,7 @@ def test_grpo_trainer_runs_interleaved_sft_when_enabled():
         reward_manager=rm,
         cfg=GRPOTrainerConfig(
             n_iters=2,
-            group_size=1,
+            group_size=2,
             prompts_per_iter=1,
             lr=1e-3,
             max_new_tokens=4,
@@ -406,7 +406,7 @@ def test_grpo_trainer_bootstrap_sft_improves_first_rollout_reward():
         reward_manager=rm,
         cfg=GRPOTrainerConfig(
             n_iters=1,
-            group_size=1,
+            group_size=2,
             prompts_per_iter=1,
             lr=1e-3,
             max_new_tokens=8,

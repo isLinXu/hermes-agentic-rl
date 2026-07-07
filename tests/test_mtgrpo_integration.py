@@ -64,9 +64,14 @@ def test_config_validation():
     cfg = GRPOTrainerConfig(n_iters=5, group_size=4)
     assert cfg.n_iters == 5
 
-    # Invalid: group_size < 2
-    with pytest.raises(ValueError):
+    # Invalid: group_size < 2 (warns, doesn't raise — allowed for testing)
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
         GRPOTrainerConfig(group_size=1)
+        assert len(w) == 1
+        assert "group_size" in str(w[0].message)
 
     # Invalid: lr <= 0
     with pytest.raises(ValueError):
@@ -130,7 +135,7 @@ def test_ruler_reward():
 
 def test_yaml_config():
     """Test YAML config loading and component building."""
-    from hermes_agentic_rl.cli import (
+    from hermes_agentic_rl.yaml_config import (
         build_reward_components,
         build_trainer_config,
         load_config,

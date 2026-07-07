@@ -4,7 +4,7 @@
 # learning and reasoning distillation.
 #
 # Dataset: https://huggingface.co/datasets/Glint-Research/Fable-5-traces
-# Usage: python -m hermes_agentic_rl.cli --config configs/fable5_grpo_smoke.yaml
+# Usage: python -m hermes_agentic_rl.yaml_config --config configs/fable5_grpo_smoke.yaml
 
 # ── Backend ──
 backend: tiny

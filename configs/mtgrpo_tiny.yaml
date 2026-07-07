@@ -1,7 +1,7 @@
 # hermes-agentic-rl Training Configuration
 # =========================================
 # This YAML config replaces the argparse-based config in train_mtgrpo.py.
-# Usage: python -m hermes_agentic_rl.cli --config configs/mtgrpo_tiny.yaml
+# Usage: python -m hermes_agentic_rl.yaml_config --config configs/mtgrpo_tiny.yaml
 
 # ── Backend ──
 backend: tiny          # tiny (testing) or hf (real training)

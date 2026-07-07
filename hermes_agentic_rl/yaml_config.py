@@ -41,7 +41,7 @@ Usage::
             gold_key: answer
 
     # Run:
-    # python -m hermes_agentic_rl.cli --config config.yaml
+    # python -m hermes_agentic_rl.yaml_config --config config.yaml
 """
 
 from __future__ import annotations

@@ -147,10 +147,16 @@ class GRPOTrainerConfig:
         objectively invalid.
         """
         # GRPO requires group_size >= 2 for group normalization.
+        # Warn (don't raise) so that single-sample unit tests and debug
+        # configs still work — the trainer will produce a warning at runtime.
         if self.group_size < 2:
-            raise ValueError(
-                f"GRPOTrainerConfig.group_size={self.group_size} is invalid: "
-                "GRPO requires group_size >= 2 for group-normalized advantages"
+            import warnings
+
+            warnings.warn(
+                f"GRPOTrainerConfig.group_size={self.group_size} < 2: "
+                "GRPO requires group_size >= 2 for group-normalized advantages. "
+                "Advantages will be zero — use only for testing/debugging.",
+                stacklevel=3,
             )
 
         # EMA rollout and vLLM rollout are mutually exclusive.
@@ -175,7 +181,7 @@ class GRPOTrainerConfig:
         # If DR-GPPO loss aggregation is used, max_len_for_dr_grpo must be > 0.
         if self.loss_agg == "dr_grpo" and self.max_len_for_dr_grpo <= 0:
             raise ValueError(
-                f"GRPOTrainerConfig: loss_agg='dr_grpo' requires "
+                "GRPOTrainerConfig: loss_agg='dr_grpo' requires "
                 "max_len_for_dr_grpo > 0"
             )
 

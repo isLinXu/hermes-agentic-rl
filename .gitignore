@@ -255,3 +255,5 @@ hermes-training-validation/
 
 # Box internal
 .box-desens/
+*.html
+create_report.js
