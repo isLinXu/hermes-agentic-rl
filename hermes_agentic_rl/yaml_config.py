@@ -190,7 +190,7 @@ def build_trainer_config(config: dict[str, Any]) -> GRPOTrainerConfig:
     for key, value in config.items():
         # Skip non-config sections
         if key in ("backend", "model_name", "rewards", "ruler", "env",
-                    "client_server", "quantization", "hparam_search"):
+                    "client_server", "quantization", "hparam_search", "prm"):
             continue
         if key in valid_fields:
             kwargs[key] = value
@@ -208,6 +208,31 @@ def build_trainer_config(config: dict[str, Any]) -> GRPOTrainerConfig:
         kwargs["output_dir"] = Path(kwargs["output_dir"])
 
     return GRPOTrainerConfig(**kwargs)
+
+
+def _build_trainer_config_typed(
+    config: dict[str, Any],
+    config_cls: type,
+) -> Any:
+    """Generic version of build_trainer_config that works with any config dataclass."""
+    from dataclasses import fields
+
+    valid_fields = {f.name for f in fields(config_cls)}
+
+    kwargs: dict[str, Any] = {}
+    for key, value in config.items():
+        if key in ("backend", "model_name", "rewards", "ruler", "env",
+                    "client_server", "quantization", "hparam_search", "algo", "prm"):
+            continue
+        if key in valid_fields:
+            kwargs[key] = value
+
+    # Handle Path-typed fields
+    for f in fields(config_cls):
+        if f.name in kwargs and f.type is Path:
+            kwargs[f.name] = Path(str(kwargs[f.name]))
+
+    return config_cls(**kwargs)
 
 
 def build_reward_components(
@@ -389,16 +414,22 @@ def run_from_config(config: dict[str, Any]) -> None:
     This is the main entry point for YAML-driven training. It:
 
     1. Builds the backend, environment, and reward components.
-    2. Creates a GRPOTrainerConfig (with curriculum if specified).
-    3. Creates a GRPOTrainer and runs ``train()``.
+    2. Creates a trainer config (GRPO/GSPO/PPO based on ``algo`` field).
+    3. Creates the appropriate trainer and runs ``train()``.
 
     Parameters
     ----------
     config : dict
         Full configuration dictionary.
+
+    The ``algo`` key selects the trainer:
+      - ``"grpo"`` (default): GRPOTrainer
+      - ``"gspo"``: GSPOTrainer (sequence-level ratio)
+      - ``"ppo"``: PPOTrainer (requires value-head backend)
     """
     from hermes_agentic_rl.rewards.composer import RewardComposer, RewardComposerConfig
-    from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer
+
+    algo_name = config.get("algo", "grpo").lower()
 
     # 1. Build components
     backend = build_backend(config)
@@ -428,11 +459,25 @@ def run_from_config(config: dict[str, Any]) -> None:
         reward_manager = RewardManager()
         logger.warning("No reward components configured — using empty RewardManager")
 
-    # 3. Build trainer config
-    trainer_cfg = build_trainer_config(config)
+    # 3. Build trainer config + select trainer class
+    if algo_name == "gspo":
+        from hermes_agentic_rl.trainers.gspo_trainer import GSPOTrainer, GSPOTrainerConfig
+
+        trainer_cfg = _build_trainer_config_typed(config, GSPOTrainerConfig)
+        trainer_cls = GSPOTrainer
+    elif algo_name == "ppo":
+        from hermes_agentic_rl.trainers.ppo_trainer import PPOTrainer, PPOTrainerConfig
+
+        trainer_cfg = _build_trainer_config_typed(config, PPOTrainerConfig)
+        trainer_cls = PPOTrainer
+    else:
+        from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer
+
+        trainer_cfg = build_trainer_config(config)
+        trainer_cls = GRPOTrainer
 
     # 4. Create and run trainer
-    trainer = GRPOTrainer(
+    trainer = trainer_cls(
         policy=backend,
         env=env,
         reward_manager=reward_manager,
@@ -444,6 +489,29 @@ def run_from_config(config: dict[str, Any]) -> None:
     if cs_pair is not None:
         # Attach the server's version counter to the trainer for observability.
         trainer._cs_pair = cs_pair  # type: ignore[attr-defined]
+
+    # 4c. Wire PRM co-training pipeline if configured.
+    prm_cfg = config.get("prm", {})
+    if prm_cfg and prm_cfg.get("enabled", False):
+        from hermes_agentic_rl.rewards.prm import ProcessRewardModel
+        from hermes_agentic_rl.trainers.prm_pipeline import PRMPipeline, PRMPipelineConfig
+
+        prm_model = ProcessRewardModel(
+            backbone=backend,
+            hidden_dim=prm_cfg.get("hidden_dim", 64),
+        )
+        pipeline = PRMPipeline(
+            prm=prm_model,
+            cfg=PRMPipelineConfig(
+                train_every=prm_cfg.get("train_every", 5),
+                samples_per_iter=prm_cfg.get("samples_per_iter", 64),
+                step_discount=prm_cfg.get("step_discount", 0.95),
+                positive_threshold=prm_cfg.get("positive_threshold", 0.5),
+                replay_capacity=prm_cfg.get("replay_capacity", 256),
+            ),
+        )
+        trainer._prm_pipeline = pipeline  # type: ignore[attr-defined]
+        logger.info(f"PRM co-training enabled: train_every={prm_cfg.get('train_every', 5)}")
 
     logger.info(f"Starting training: {trainer_cfg.n_iters} iters, "
                 f"group_size={trainer_cfg.group_size}")
