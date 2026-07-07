@@ -236,3 +236,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node.js
+node_modules/
+package.json
+package-lock.json
+
+# Generated documents
+*.docx
+
+# Session temp
+.session_tmps/
+output/
+
+# Analysis artifacts (large, not source code)
+hermes-agentic-rl-validity-*/
+hermes-training-validation/
+
+# Box internal
+.box-desens/
