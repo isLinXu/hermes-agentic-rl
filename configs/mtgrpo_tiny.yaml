@@ -1,0 +1,81 @@
+# hermes-agentic-rl Training Configuration
+# =========================================
+# This YAML config replaces the argparse-based config in train_mtgrpo.py.
+# Usage: python -m hermes_agentic_rl.cli --config configs/mtgrpo_tiny.yaml
+
+# ── Backend ──
+backend: tiny          # tiny (testing) or hf (real training)
+model_name: Qwen/Qwen2.5-1.5B-Instruct
+max_new_tokens: 256
+
+# ── Training ──
+n_iters: 20
+group_size: 4
+prompts_per_iter: 2
+lr: 0.001
+temperature: 1.0
+clip_eps: 0.2
+kl_coef: 0.0
+log_every: 1
+save_every: 0
+output_dir: output/mtgrpo
+
+# ── Multi-turn credit ──
+multi_turn: true
+multi_turn_credit:
+  mode: discounted     # shared | terminal | discounted | judge | hybrid
+  gamma: 0.9
+
+# ── Per-token advantage (REINFORCE++) ──
+per_token_advantage: true
+advantage_norm: group  # group | batch | whiten
+
+# ── Curriculum ──
+# OnPolicyTrainer creates an internal CurriculumScheduler from this dict
+# and runs observe/advance inside train() (on_policy.py:594-620, 1457-1479).
+curriculum:
+  auto_advance: true
+  min_iters_per_stage: 10
+
+# ── Environment ──
+env:
+  n_samples: 100
+  seed: 42
+
+# ── Rewards ──
+# Components are built by type name; composer config controls normalization,
+# conditional activation, and turn discount.
+rewards:
+  components:
+    - type: ToolcallReward
+      weight: 1.0
+    - type: OutcomeReward
+      weight: 1.0
+    # RULER can be added here for rule-based auto-rewards:
+    # - type: RULER
+    #   weight: 0.5
+  composer:
+    normalize:
+      toolcall_reward: true
+      outcome_reward: true
+    conditions:
+      toolcall_reward: true              # always active
+      outcome_reward: has_final_output   # only when trajectory has final_output
+    turn_discount:
+      toolcall_reward: 0.95
+    parallel: true
+
+# ── RULER (optional rule-based auto-reward) ──
+# Uncomment to enable RULER rules alongside the hand-coded rewards above.
+# ruler:
+#   rules:
+#     - name: exact_match
+#       template: exact_match
+#       weight: 2.0
+#       params:
+#         gold_key: answer
+#     - name: turn_efficiency
+#       template: turn_efficiency
+#       weight: 0.5
+#       params:
+#         max_turns: 5
