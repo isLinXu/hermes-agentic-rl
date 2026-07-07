@@ -84,6 +84,11 @@ def _populate_registry() -> None:
         _REWARD_REGISTRY["ToolcallReward"] = ToolcallReward
         _REWARD_REGISTRY["OutcomeReward"] = OutcomeReward
         _REWARD_REGISTRY["RULER"] = RULER
+        try:
+            from hermes_agentic_rl.envs.fable5_traces import Fable5TraceReward
+            _REWARD_REGISTRY["Fable5TraceReward"] = Fable5TraceReward
+        except ImportError:
+            pass
     except ImportError as e:
         logger.warning(f"Could not populate reward registry: {e}")
 
@@ -299,9 +304,26 @@ def build_backend(config: dict[str, Any]) -> Any:
 
 
 def build_env(config: dict[str, Any]) -> Any:
-    """Build a training environment from config."""
-    from hermes_agentic_rl.envs.sim_tool_env import SimToolEnv, build_sim_tool_dataset
+    """Build a training environment from config.
+
+    Supports ``env.type`` values:
+      - ``sim_tool`` (default): SimToolEnv with arithmetic tasks
+      - ``fable5_traces``: Fable5TraceEnv loading Fable-5 traces from HuggingFace
+      - ``hermes_reasoning_traces``: HermesReasoningTraceEnv
+    """
     env_cfg = config.get("env", {})
+    env_type = env_cfg.get("type", "sim_tool")
+
+    if env_type == "fable5_traces":
+        from hermes_agentic_rl.envs.fable5_traces import Fable5TraceEnv
+        return Fable5TraceEnv.from_config(env_cfg)
+
+    if env_type == "hermes_reasoning_traces":
+        from hermes_agentic_rl.envs.hermes_reasoning_traces import HermesReasoningTraceEnv
+        return HermesReasoningTraceEnv.from_hf_dataset(env_cfg)
+
+    # Default: sim_tool
+    from hermes_agentic_rl.envs.sim_tool_env import SimToolEnv, build_sim_tool_dataset
     n_samples = env_cfg.get("n_samples", 100)
     seed = env_cfg.get("seed", 42)
     dataset = build_sim_tool_dataset(n=n_samples, seed=seed)

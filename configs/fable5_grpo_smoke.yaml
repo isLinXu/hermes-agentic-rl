@@ -1,0 +1,79 @@
+# Fable-5 Agent Trace RL Training Configuration
+# ================================================
+# Trains on the Glint-Research/Fable-5-traces dataset for tool-use policy
+# learning and reasoning distillation.
+#
+# Dataset: https://huggingface.co/datasets/Glint-Research/Fable-5-traces
+# Usage: python -m hermes_agentic_rl.cli --config configs/fable5_grpo_smoke.yaml
+
+# ── Backend ──
+backend: tiny
+model_name: Qwen/Qwen2.5-1.5B-Instruct
+max_new_tokens: 256
+
+# ── Training ──
+n_iters: 10
+group_size: 4
+prompts_per_iter: 2
+lr: 0.001
+temperature: 1.0
+clip_eps: 0.2
+kl_coef: 0.0
+log_every: 1
+save_every: 0
+output_dir: output/fable5
+
+# ── Multi-turn credit ──
+multi_turn: true
+multi_turn_credit:
+  mode: discounted
+  gamma: 0.9
+
+# ── Per-token advantage ──
+per_token_advantage: true
+advantage_norm: group
+
+# ── Curriculum ──
+curriculum:
+  auto_advance: true
+  min_iters_per_stage: 5
+
+# ── Environment: Fable-5 traces ──
+env:
+  type: fable5_traces
+  # Use flat merged JSONL (efficient, default)
+  use_flat_jsonl: true
+  # Download from HuggingFace (leave flat_jsonl_path unset for auto-download)
+  # flat_jsonl_path: /path/to/local/fable5_cot_merged.jsonl
+  limit: 100
+  shuffle: true
+  seed: 42
+  max_prompt_chars: 4096
+  max_target_chars: 8192
+  min_target_chars: 10
+  include_cot_in_target: true
+  # Reward configuration
+  reward_mode: hybrid
+  tool_call_reward_weight: 0.7
+  text_reward_weight: 0.3
+  output_type_bonus: 0.1
+
+# ── Rewards ──
+rewards:
+  components:
+    - type: Fable5TraceReward
+      weight: 1.0
+      params:
+        reward_mode: hybrid
+        tool_call_reward_weight: 0.7
+        text_reward_weight: 0.3
+        output_type_bonus: 0.1
+  composer:
+    normalize:
+      fable5_trace_reward: true
+    parallel: true
+
+# ── Metrics ──
+metrics:
+  jsonl: true
+  stdout: true

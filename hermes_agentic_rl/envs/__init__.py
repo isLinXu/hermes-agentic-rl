@@ -14,6 +14,9 @@ __all__ = [
     "CurriculumState",
     "EchoRewardComponent",
     "EchoTaskEnv",
+    "Fable5TraceConfig",
+    "Fable5TraceEnv",
+    "Fable5TraceReward",
     "HermesReasoningTraceEnv",
     "HermesReasoningTraceReward",
     "HermesReasoningTracesConfig",
@@ -78,6 +81,18 @@ def __getattr__(name: str) -> Any:
         return {
             "EchoRewardComponent": EchoRewardComponent,
             "EchoTaskEnv": EchoTaskEnv,
+        }[name]
+    if name in {"Fable5TraceConfig", "Fable5TraceEnv", "Fable5TraceReward"}:
+        from hermes_agentic_rl.envs.fable5_traces import (
+            Fable5TraceConfig,
+            Fable5TraceEnv,
+            Fable5TraceReward,
+        )
+
+        return {
+            "Fable5TraceConfig": Fable5TraceConfig,
+            "Fable5TraceEnv": Fable5TraceEnv,
+            "Fable5TraceReward": Fable5TraceReward,
         }[name]
     if name in {
         "HermesReasoningTraceEnv",
