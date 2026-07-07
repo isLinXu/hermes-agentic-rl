@@ -16,6 +16,7 @@ Backward compatibility:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,8 @@ from hermes_agentic_rl.trainers.on_policy import (
 from hermes_agentic_rl.trainers.on_policy_config import (
     build_shared_on_policy_config,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -129,6 +132,67 @@ class GRPOTrainerConfig:
     pipeline_rollouts: bool = False
     replay_buffer: dict[str, Any] | None = None
     replay_mix_ratio: float = 0.25
+    # --- Curriculum scheduler (forwarded to OnPolicyTrainerConfig) ---
+    # When set, OnPolicyTrainer creates an internal CurriculumScheduler
+    # and runs observe/advance inside the training loop (on_policy.py:594-620, 1457-1479).
+    curriculum: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        """Fatal cross-field validation — catches misconfigurations that
+        would otherwise silently produce garbage gradients or crashes
+        deep in the training loop.
+
+        Non-fatal warnings are handled by ``validate_on_policy_config``;
+        the checks here are *hard* constraints that make the config
+        objectively invalid.
+        """
+        # GRPO requires group_size >= 2 for group normalization.
+        if self.group_size < 2:
+            raise ValueError(
+                f"GRPOTrainerConfig.group_size={self.group_size} is invalid: "
+                "GRPO requires group_size >= 2 for group-normalized advantages"
+            )
+
+        # EMA rollout and vLLM rollout are mutually exclusive.
+        if self.use_ema_rollout and self.vllm_rollout_model:
+            raise ValueError(
+                "GRPOTrainerConfig: use_ema_rollout=True is incompatible with "
+                "vllm_rollout_model — EMA shadow cannot sync to a separate vLLM process"
+            )
+
+        # Learning rate must be positive.
+        if self.lr <= 0:
+            raise ValueError(
+                f"GRPOTrainerConfig.lr={self.lr} must be positive"
+            )
+
+        # clip_eps must be in a sane range.
+        if not (0 < self.clip_eps < 1.0):
+            raise ValueError(
+                f"GRPOTrainerConfig.clip_eps={self.clip_eps} must be in (0, 1)"
+            )
+
+        # If DR-GPPO loss aggregation is used, max_len_for_dr_grpo must be > 0.
+        if self.loss_agg == "dr_grpo" and self.max_len_for_dr_grpo <= 0:
+            raise ValueError(
+                f"GRPOTrainerConfig: loss_agg='dr_grpo' requires "
+                "max_len_for_dr_grpo > 0"
+            )
+
+        # Gradient accumulation steps must be positive.
+        if self.grad_accum_steps < 1:
+            raise ValueError(
+                f"GRPOTrainerConfig.grad_accum_steps={self.grad_accum_steps} "
+                "must be >= 1"
+            )
+
+        # Log non-fatal warnings from the shared validator.
+        from hermes_agentic_rl.trainers.on_policy_config import (
+            validate_on_policy_config,
+        )
+        shared = build_shared_on_policy_config(self)
+        for warning in validate_on_policy_config(shared):
+            logger.warning(warning)
 
 
 # v0.2 kept this as a bespoke TrainStats; re-export the shared one for BC.
