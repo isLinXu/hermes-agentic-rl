@@ -10,6 +10,29 @@ __all__ = [
 ]
 
 try:
+    from hermes_agentic_rl.rewards.multimodal import (
+        ImageAttributeConfig,
+        ImageAttributeReward,
+        MultimodalCompositeConfig,
+        MultimodalCompositeReward,
+        VisionMatchConfig,
+        VisionMatchReward,
+    )
+
+    __all__.extend(
+        [
+            "ImageAttributeConfig",
+            "ImageAttributeReward",
+            "MultimodalCompositeConfig",
+            "MultimodalCompositeReward",
+            "VisionMatchConfig",
+            "VisionMatchReward",
+        ]
+    )
+except Exception:
+    pass
+
+try:
     from hermes_agentic_rl.rewards.next_turn_feedback import (
         NextTurnFeedbackConfig,
         NextTurnFeedbackReward,

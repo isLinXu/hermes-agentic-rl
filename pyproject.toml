@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-agentic-rl"
-version = "0.11.0"
+version = "0.12.0"
 description = "Agentic RL framework for hermes-agent (GRPO + PPO + multi-turn + curriculum + dashboard + resumable checkpoints + K3 KL + pluggable metrics)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -41,7 +41,7 @@ test = [
 ]
 # Documentation build stack. Keep upper bounds so CI docs do not unexpectedly
 # jump across major Sphinx/MyST compatibility boundaries.
-docs = ["sphinx>=7.3,<9", "sphinx-autodoc-typehints>=2.3,<3", "myst-parser>=3.0,<5"]
+docs = ["sphinx>=7.3,<9", "sphinx-autodoc-typehints>=2.3,<3", "myst-parser>=3.0,<5", "furo>=2024.8,<2025"]
 # Development tooling (CI, linting, type-checking).
 dev = [
     "pytest>=7.4",

@@ -41,7 +41,7 @@ def experimental(func: F) -> F:
     """
     if isinstance(func, type):
         # Class decorator — wrap __init__
-        original_init = func.__init__
+        original_init = func.__init__  # type: ignore[misc]
 
         @functools.wraps(original_init)
         def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -52,7 +52,7 @@ def experimental(func: F) -> F:
             )
             original_init(self, *args, **kwargs)
 
-        func.__init__ = wrapped_init  # type: ignore[method-assign]
+        func.__init__ = wrapped_init  # type: ignore[method-assign,misc]
         func._is_experimental = True  # type: ignore[attr-defined]
         return func
 

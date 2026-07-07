@@ -265,7 +265,7 @@ class HyperparameterSearch:
         trainer.train()
 
         # Extract the mean of the metric across all iterations.
-        stats_list = trainer.stats.records
+        stats_list = trainer.stats.iters
         values = [
             float(r.get(self.metric_key, 0.0))
             for r in stats_list

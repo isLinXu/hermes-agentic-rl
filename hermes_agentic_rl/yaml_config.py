@@ -406,6 +406,7 @@ def run_from_config(config: dict[str, Any]) -> None:
 
     # 2. Build reward components + composer
     components, composer_cfg = build_reward_components(config)
+    reward_manager: Any
     if components:
         if composer_cfg:
             reward_manager = RewardComposer(

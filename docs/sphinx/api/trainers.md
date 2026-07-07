@@ -1,35 +1,6 @@
-# API Reference
+# Trainers API
 
-The docs build keeps the reference surface intentionally small and focused on
-the modules that most often change during RL work.
-
-```{eval-rst}
-.. automodule:: hermes_agentic_rl.envs.hermes_reasoning_traces
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-```{eval-rst}
-.. automodule:: hermes_agentic_rl.envs.context_benchmark
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-```{eval-rst}
-.. automodule:: hermes_agentic_rl.eval.rl_eval
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-```{eval-rst}
-.. automodule:: hermes_agentic_rl.eval.benchmark_suite
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+## OnPolicyTrainer (base class)
 
 ```{eval-rst}
 .. automodule:: hermes_agentic_rl.trainers.on_policy
@@ -37,6 +8,44 @@ the modules that most often change during RL work.
    :undoc-members:
    :show-inheritance:
 ```
+
+## GRPOTrainer
+
+```{eval-rst}
+.. automodule:: hermes_agentic_rl.trainers.grpo_trainer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## Trainer Config
+
+```{eval-rst}
+.. automodule:: hermes_agentic_rl.trainers.on_policy_config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## Training Orchestrator
+
+```{eval-rst}
+.. automodule:: hermes_agentic_rl.trainers.orchestrator
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## Train Stats
+
+```{eval-rst}
+.. automodule:: hermes_agentic_rl.trainers.train_stats
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## Distributed Training
 
 ```{eval-rst}
 .. automodule:: hermes_agentic_rl.trainers.distributed

@@ -351,7 +351,7 @@ def load_fable5_traces(cfg: Fable5TraceConfig) -> list[dict[str, Any]]:
             logger.info("Downloading Fable-5 flat JSONL from HuggingFace...")
             raw_rows = _download_flat_jsonl(cfg.flat_jsonl_url, limit=cfg.limit)
 
-        items = [_flat_row_to_item(row, cfg) for row in raw_rows]
+        items: list[dict[str, Any]] = [_flat_row_to_item(row, cfg) for row in raw_rows]
         items = [item for item in items if item]
     else:
         logger.info("Loading Fable-5 via HF datasets API (config=%s)...", cfg.config_name)
@@ -365,9 +365,10 @@ def load_fable5_traces(cfg: Fable5TraceConfig) -> list[dict[str, Any]]:
             streaming=cfg.streaming,
             cache_dir=cfg.cache_dir,
         )
-        items: list[dict[str, Any]] = []
+        items_raw: list[dict[str, Any]] = []
         for row in raw_rows:
-            items.extend(_pi_agent_row_to_item(row, cfg))
+            items_raw.extend(_pi_agent_row_to_item(row, cfg))
+        items = items_raw
 
     if cfg.shuffle and items:
         rng = random.Random(cfg.seed)

@@ -90,7 +90,7 @@ def build_tokenizer_from_config(cfg: dict[str, Any]) -> Any:
         try:
             from hermes_agentic_rl.backends.tiny import TinyTokenizer as HermesTinyTokenizer
 
-            tokenizer_cls = HermesTinyTokenizer
+            tokenizer_cls: type = HermesTinyTokenizer  # type: ignore[assignment]
         except Exception:
             tokenizer_cls = TinyTokenizer
 

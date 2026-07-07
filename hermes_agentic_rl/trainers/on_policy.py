@@ -22,6 +22,7 @@ subclasses.
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import random
 from collections.abc import Callable
@@ -98,6 +99,8 @@ from hermes_agentic_rl.trainers.profiling import (
 )
 from hermes_agentic_rl.trainers.train_stats import TrainStats as _TrainStats
 from hermes_agentic_rl.utils.coerce import coerce_float
+
+_module_logger = logging.getLogger(__name__)
 
 
 class AgentLoopFactory(Protocol):
@@ -678,7 +681,7 @@ class OnPolicyTrainer:
                     sync_every=int(lora_cfg.get("sync_every", 1)),
                     shadow_device=str(lora_cfg.get("shadow_device", "cpu")),
                 )
-                logger.info(
+                _module_logger.info(
                     "LoRA hot-reload enabled: rank=%d, alpha=%.1f, sync_every=%d",
                     lora_config.r,
                     lora_config.alpha,

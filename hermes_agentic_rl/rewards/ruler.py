@@ -102,16 +102,16 @@ class RULERRule:
 # Built-in rule templates
 # ---------------------------------------------------------------------------
 
-_BUILTIN_TEMPLATES: dict[str, tuple[PredicateFn, ScorerFn]] = {}
+TemplateFactory = Callable[[dict[str, Any]], "tuple[PredicateFn, ScorerFn]"]
+
+_BUILTIN_TEMPLATES: dict[str, TemplateFactory] = {}
 
 
-def _register(template_name: str) -> Callable:
+def _register(template_name: str) -> Callable[[TemplateFactory], TemplateFactory]:
     """Decorator to register a built-in rule template."""
-    def decorator(func: Callable) -> Callable:
-        def wrapper(params: dict[str, Any]) -> tuple[PredicateFn, ScorerFn]:
-            return func(params)
-        _BUILTIN_TEMPLATES[template_name] = wrapper
-        return wrapper
+    def decorator(func: TemplateFactory) -> TemplateFactory:
+        _BUILTIN_TEMPLATES[template_name] = func
+        return func
     return decorator
 
 

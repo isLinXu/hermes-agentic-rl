@@ -15,8 +15,22 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
+    "sphinx.ext.intersphinx",
     "sphinx_autodoc_typehints",
 ]
+
+# MyST configuration
+myst_enable_extensions = [
+    "colon_fence",
+    "deflist",
+    "dollarmath",
+    "html_admonition",
+    "linkify",
+    "replacements",
+    "smartquotes",
+    "substitution",
+]
+myst_heading_anchors = 3
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
@@ -25,8 +39,24 @@ source_suffix = {
     ".rst": "restructuredtext",
 }
 
-html_theme = "alabaster"
+# Use furo theme if available, fall back to alabaster
+try:
+    import furo  # noqa: F401
+
+    html_theme = "furo"
+except ImportError:
+    html_theme = "alabaster"
+
 html_static_path = ["_static"]
+html_title = "hermes-agentic-rl Documentation"
+html_short_title = "hermes-agentic-rl"
+
+# Intersphinx links
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "torch": ("https://pytorch.org/docs/stable", None),
+    "transformers": ("https://huggingface.co/docs/transformers/en", None),
+}
 
 autodoc_mock_imports = [
     "datasets",
@@ -36,7 +66,23 @@ autodoc_mock_imports = [
     "transformers",
     "vllm",
     "wandb",
+    "optuna",
+    "pytest",
+    "pytest_benchmark",
+    "pydantic",
+    "megatron",
 ]
+
+autodoc_default_options = {
+    "members": True,
+    "undoc-members": True,
+    "show-inheritance": True,
+    "member-order": "bysource",
+}
+
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
+napoleon_include_init_with_doc = False
 
 nitpicky = False
 master_doc = "index"

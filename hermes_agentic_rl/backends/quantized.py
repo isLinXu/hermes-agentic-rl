@@ -253,10 +253,16 @@ class QuantizedRolloutBackend(LLMBackend):
         return self._engine
 
     @property
-    def tokenizer(self) -> Any:
+    def tokenizer(self) -> Any:  # type: ignore[override]
         return self._tokenizer
 
-    def generate_batch(
+    # NOTE: ``generate_batch`` is an auxiliary method not present on the
+    # base LLMBackend ABC.  The base class only requires ``generate`` and
+    # ``score``.  We keep generate_batch for internal use and for the
+    # weight-sync protocol, but type-ignore the override check since the
+    # base class does not declare it.
+
+    def generate_batch(  # type: ignore[no-untyped-def]
         self,
         prompts: list[str] | list[list[int]],
         *,
@@ -288,10 +294,12 @@ class QuantizedRolloutBackend(LLMBackend):
                 echo=False,
             )
             generated_text = output["choices"][0]["text"]
+            token_ids: list[int] = output["choices"][0].get("logprobs", {}).get("token_ids", [])
             results.append(
                 GenerationOutput(
-                    text=generated_text,
-                    token_ids=output["choices"][0].get("logprobs", {}).get("token_ids", []),
+                    response_ids=token_ids,
+                    logprobs=[],
+                    metadata={"text": generated_text},
                 )
             )
         return results
@@ -321,7 +329,13 @@ class QuantizedRolloutBackend(LLMBackend):
         for output in outputs:
             text = output.outputs[0].text
             token_ids = list(output.outputs[0].token_ids)
-            results.append(GenerationOutput(text=text, token_ids=token_ids))
+            results.append(
+                GenerationOutput(
+                    response_ids=token_ids,
+                    logprobs=[],
+                    metadata={"text": text},
+                )
+            )
         return results
 
     def sync_weights_from(self, state_dict: dict[str, Any]) -> None:
@@ -348,20 +362,29 @@ class QuantizedRolloutBackend(LLMBackend):
 
     def generate(
         self,
-        prompt: str | list[int],
-        *,
-        max_new_tokens: int = 256,
+        prompt_ids: list[int],
+        max_new_tokens: int,
         temperature: float = 1.0,
-        **kwargs: Any,
+        seed: int | None = None,
+        stop_strings: list[str] | None = None,
     ) -> GenerationOutput:
-        """Generate a response for a single prompt."""
+        """Generate a response for a single prompt (base LLMBackend interface)."""
+        # Delegate to the batch path; extract text from metadata.
+        _ = seed, stop_strings
+        # Convert token-id prompt to text for the quantized engine.
+        text_prompt = self._decode_ids(prompt_ids) if prompt_ids else ""
         results = self.generate_batch(
-            [prompt],
+            [text_prompt],  # type: ignore[list-item]
             max_new_tokens=max_new_tokens,
             temperature=temperature,
-            **kwargs,
         )
-        return results[0]
+        r = results[0]
+        # Reconstruct GenerationOutput with response_ids and logprobs.
+        return GenerationOutput(
+            response_ids=r.response_ids,
+            logprobs=r.logprobs,
+            metadata=r.metadata,
+        )
 
     def trainable_parameters(self) -> Any:
         """Return trainable parameters (none — this is a rollout-only backend)."""
@@ -376,8 +399,10 @@ class QuantizedRolloutBackend(LLMBackend):
         self,
         prompt_ids: list[int],
         response_ids: list[int],
-    ) -> tuple[list[float], list[int]]:
+        temperature: float = 1.0,
+    ) -> Any:
         """Compute per-token log-probs (not supported for quantized rollout)."""
+        _ = prompt_ids, response_ids, temperature
         raise NotImplementedError(
             "QuantizedRolloutBackend is generation-only. "
             "Use a full-precision backend for score()/score_batch()."
@@ -385,8 +410,11 @@ class QuantizedRolloutBackend(LLMBackend):
 
     def score_batch(
         self,
-        items: list[tuple[list[int], list[int]]],
-    ) -> tuple[list[list[float]], list[list[int]]]:
+        prompt_ids_list: list[list[int]],
+        response_ids_list: list[list[int]],
+        temperature: float = 1.0,
+    ) -> tuple[Any, Any]:
+        _ = prompt_ids_list, response_ids_list, temperature
         raise NotImplementedError(
             "QuantizedRolloutBackend is generation-only. "
             "Use a full-precision backend for score()/score_batch()."
