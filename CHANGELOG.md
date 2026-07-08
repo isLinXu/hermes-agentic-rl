@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.12.0 - 2026-07-08
+
+Engineering hardening milestone — production-grade foundation. Closes the P0/P1
+action items from the deep-analysis v4 report (ruff 0, mypy 0, Docker
+multi-stage, Pydantic config validation, performance benchmarks, quantized
+backends, hyperparameter search, API docs).
+
+- **`trainers/on_policy.py` refactor** (P0, −453 lines). Extracts SFT, checkpoint,
+  and train-loop operations from the ~1960-line monolith into focused modules
+  (`sft_ops.py`, `checkpoint_ops.py`, `train_loop_ops.py`). The `OnPolicyTrainer`
+  skeleton now delegates side-effects to `TrainingOrchestrator`, making the
+  training loop pure-computation and mock-testable.
+- **`config_validation.py`** (P0). Pydantic v2 schema validation for the full YAML
+  config surface — backend, training, rewards, curriculum, staleness-TIS, LoRA
+  hot-reload, quantization, client-server. Falls back to a lightweight dict-based
+  validator when pydantic is unavailable. Catches mis-typed, mis-named, or
+  structurally invalid configs before the trainer starts.
+- **`benchmarks/perf_suite.py`** (P0). 7-dimension performance benchmark suite
+  (rollout, advantage, loss+backward, full iteration, weight sync, replay buffer)
+  using `pytest-benchmark`. A dedicated CI job runs real-timing benchmarks to
+  prevent performance regressions.
+- **`tuning/hparam_search.py`** (P1). Optuna TPE + median-pruner integration for
+  declarative hyperparameter search (lr, clip_eps, kl_coef, group_size, etc.).
+  YAML-configurable `hparam_search:` block; SQLite persistence for resume and
+  analysis.
+- **`backends/quantized.py`** (P1). Unified quantized rollout backend supporting
+  GPTQ/AWQ via vLLM and GGUF via llama-cpp. Single `QuantizedRolloutBackend`
+  implements the `LLMBackend` protocol; reduces rollout memory footprint for
+  large-model deployments. GGUF sync-only generate; batch score falls back to
+  per-record loop.
+- **`cli.main` API stability markers** (P1). Core data contracts (`core/types.py`),
+  `LLMBackend` protocol, and `BaseAlgo` interface are annotated with `@stable`.
+  New CLI flag `--api-stability-report` prints the stable/unstable/experimental
+  classification.
+- **TrainingOrchestrator** (P1). Extracts all side-effects (metrics sink, env
+  snapshot, checkpoint, W&B upload, dashboard refresh) from `OnPolicyTrainer.train()`
+  into a dedicated orchestrator. `train()` is now a pure computation loop.
+- **Client-server API** (P1). YAML-configurable `client_server:` block with
+  `build_client_server()` factory; server version counter attached to the trainer
+  for observability.
+- **LoRA hot-reload** (P1). `peft/lora_hot_reload.py` — runtime LoRA adapter
+  swap without restarting the trainer.
+- **Fable-5 trace environment** (P1). `envs/fable5_traces.py` — adapter for the
+  Fable-5 agent trace dataset, expanding the eval surface.
+- **RULER reward system** (P1). `rewards/ruler.py` — declarative rule-based reward
+  templates with runtime registration via `TemplateFactory`. Users can define
+  reward rules in YAML without writing Python code.
+- **MCP tool environment** (P1). `envs/mcp_tool_env.py` — Model Context Protocol
+  (MCP) tool use environment, broadening the agent interaction surface.
+- **FSDP-aware checkpointing** (P1). `checkpoint_ops.py` — `save_model` auto-gathers
+  FSDP shards; `load_model` auto-scatters. Backend-algo compatibility checks at
+  trainer startup prevent incompatible combinations (e.g., generation-only backend
+  as learner policy).
+- **GSPO/PPO YAML routing + PRM co-training** (P1). `algo: gspo` and `algo: ppo` are
+  first-class YAML config options. PRM co-training pipeline wired into the trainer
+  when `prm.enabled: true`.
+- **Sphinx API docs** (P1). 15 API reference files under `docs/sphinx/api/`, covering
+  backends, core, trainers, rewards, envs, distributed, algos, CLI, eval, offline,
+  collectors, monitor, datasets, peft, and tools. `index.md` toctree updated.
+- **Docker multi-stage + healthcheck + non-root user** (P1). Dockerfile adds OCI
+  LABELs, HEALTHCHECK probe, `USER nobody`, and expands builder extras to
+  `[rl,test,config,data,metrics,hf]`. docker-compose adds `test` service,
+  healthchecks, and memory constraints (4G/1G). `.dockerignore` expanded.
+- **Code quality** (P0). Full repository ruff 0 errors + mypy 0 errors (194 files).
+  `scripts/` and `tests/` lint errors resolved; `RUF001` (full-width Chinese chars)
+  added to ignore list. `yaml_config.py` import-assignment type fix.
+
 ## 0.11.0 - 2026-06-07
 
 OPD reliability + process-reward parity with OpenClaw-RL. Closes the "OPD

@@ -27,12 +27,19 @@ engineering
 :caption: API Reference
 
 api/core
+api/algos
 api/trainers
+api/cli
 api/rewards
 api/envs
 api/distributed
 api/backends
 api/peft
+api/eval
+api/offline
+api/collectors
+api/monitor
+api/datasets
 api/tools
 ```
 

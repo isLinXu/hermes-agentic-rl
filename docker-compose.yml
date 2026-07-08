@@ -18,6 +18,18 @@ services:
       PYTHONPATH: /opt/hermes-agentic-rl
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     command: ["python", "-m", "hermes_agentic_rl.cli.main", "--help"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import hermes_agentic_rl; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
 
   smoke:
     build:
@@ -36,3 +48,34 @@ services:
       - configs/echo_grpo_mvp.yaml
       - --output
       - /tmp/smoke_out
+    healthcheck:
+      test: ["CMD", "python", "-c", "import hermes_agentic_rl; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+
+  test:
+    build:
+      context: .
+      target: runtime
+    image: hermes-agentic-rl:dev
+    working_dir: /opt/hermes-agentic-rl
+    volumes:
+      - .:/opt/hermes-agentic-rl
+    environment:
+      PYTHONPATH: /opt/hermes-agentic-rl
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    command: ["pytest", "tests", "-q"]
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G

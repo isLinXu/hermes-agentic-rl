@@ -1,6 +1,6 @@
 # hermes-agentic-rl Roadmap
 
-> Last updated: 2026-06-21 · Current version: **0.11.0** · Target stable: **1.0.0**
+> Last updated: 2026-07-09 · Current version: **0.12.0** · Target stable: **1.0.0**
 
 This document defines what is considered **stable API** today, what may change
 before v1.0, and the engineering milestones on the path to a production-grade
@@ -78,21 +78,33 @@ These surfaces are intended to remain stable after 1.0:
 | CI benchmark job | ✅ Done | `--benchmark-disable` in test matrix |
 | Mock-backend smoke tests | ✅ Done | `tests/test_mock_backend_core.py` |
 | API stability doc (this file) | ✅ Done | |
-| Progressive mypy strict | 🔄 In progress | `mypy-strict.ini` on 3 reward modules |
-| Sphinx API docs refresh | 📋 Planned | auto-doc remaining public modules |
+| Progressive mypy strict | ✅ Done | `mypy-strict.ini` covering all public modules |
+| Sphinx API docs refresh | 🔄 In Progress | autodoc for algos, eval, cli, offline, collectors, monitor, datasets |
 | Docker multi-stage + compose | ✅ Done | `Dockerfile`, `docker-compose.yml` |
 
 ## Phase 2 — Capability expansion (v0.16 – v0.20)
 
-- Tensor / pipeline / expert parallel for large models
-- Quantized rollout backends (GPTQ / AWQ / GGUF)
-- Fault-tolerant distributed pool auto-recovery
-- Optuna / Ray Tune hyperparameter search
-- Multimodal reward components
+| Item | Status | Notes |
+|---|---|---|
+| Tensor / pipeline / expert parallel for large models | 📋 Planned | v0.18+ target |
+| Quantized rollout backends (GPTQ / AWQ / GGUF) | ✅ Done | `backends/quantized.py`, v0.12 |
+| Fault-tolerant distributed pool auto-recovery | 🔄 In Progress | v0.17 milestone |
+| Optuna / Ray Tune hyperparameter search | ✅ Done | `tuning/`, v0.12 |
+| Multimodal reward components | 📋 Planned | v0.19+ target |
+| TrainingOrchestrator extraction | ✅ Done | `trainers/orchestrator.py`, v0.12 |
+| Pydantic v2 config validation | ✅ Done | `config_validation.py`, v0.12 |
+| Performance benchmark suite | ✅ Done | `tests/benchmarks/`, v0.12 |
+| Client-server API | ✅ Done | `client_server/`, v0.12 |
+| LoRA hot-reload | ✅ Done | `peft/lora_hot_reload.py`, v0.12 |
+| Fable-5 trace env | ✅ Done | `envs/fable5_trace.py`, v0.12 |
+| RULER reward system | ✅ Done | `rewards/ruler_reward.py`, v0.12 |
+| MCP tool environment | ✅ Done | `tools/mcp_tool_env.py`, v0.12 |
 
 ## Phase 3 — Ecosystem (v1.0+)
 
 - v1.0 release with frozen core API
+- API stability markers (decorator + deprecation warnings)
+- Sphinx API documentation completion
 - Kubernetes operator + Helm chart
 - Community tutorials and case studies
 - Optional enterprise support track
