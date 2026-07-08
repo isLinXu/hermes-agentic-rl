@@ -30,7 +30,9 @@ def get_reward_class(name: str) -> RewardFactory:
         return REWARD_REGISTRY[normalized]
     except KeyError as exc:
         known = ", ".join(sorted(REWARD_REGISTRY)) or "<none>"
-        raise ValueError(f"unknown reward component {name!r}; known rewards: {known}") from exc
+        raise ValueError(
+            f"unknown reward component {name!r}; known rewards: {known}"
+        ) from exc
 
 
 def build_reward_from_spec(spec: dict[str, Any]) -> BaseReward:
@@ -41,7 +43,10 @@ def build_reward_from_spec(spec: dict[str, Any]) -> BaseReward:
         raise ValueError("reward component spec is missing 'name'")
     cls = get_reward_class(name)
     weight = float(spec.get("weight", 1.0))
-    kwargs = {key: value for key, value in spec.items() if key not in {"name", "weight"}}
+    kwargs = {
+        key: value for key, value in spec.items()
+        if key not in {"name", "weight"}
+    }
     try:
         return cls(weight=weight, **kwargs)
     except TypeError:
@@ -63,6 +68,7 @@ def ensure_builtin_rewards_registered() -> None:
         filesystem_verifier_reward,
         next_turn_feedback,
         outcome_reward,
+        similarity_reward,
         toolcall_reward,
     )
 

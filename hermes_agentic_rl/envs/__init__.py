@@ -17,6 +17,7 @@ __all__ = [
     "Fable5TraceConfig",
     "Fable5TraceEnv",
     "Fable5TraceReward",
+    "Hermes3DatasetEnv",
     "HermesReasoningTraceEnv",
     "HermesReasoningTraceReward",
     "HermesReasoningTracesConfig",
@@ -100,6 +101,10 @@ def __getattr__(name: str) -> Any:
             "Fable5TraceEnv": Fable5TraceEnv,
             "Fable5TraceReward": Fable5TraceReward,
         }[name]
+    if name == "Hermes3DatasetEnv":
+        from hermes_agentic_rl.envs.hermes3_dataset_env import Hermes3DatasetEnv
+
+        return Hermes3DatasetEnv
     if name in {
         "HermesReasoningTraceEnv",
         "HermesReasoningTraceReward",

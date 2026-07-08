@@ -89,6 +89,15 @@ def _populate_registry() -> None:
             _REWARD_REGISTRY["Fable5TraceReward"] = Fable5TraceReward
         except ImportError:
             pass
+        try:
+            from hermes_agentic_rl.rewards.similarity_reward import (
+                CompositeSimilarityReward,
+                SimilarityReward,
+            )
+            _REWARD_REGISTRY["SimilarityReward"] = SimilarityReward
+            _REWARD_REGISTRY["CompositeSimilarityReward"] = CompositeSimilarityReward
+        except ImportError:
+            pass
     except ImportError as e:
         logger.warning(f"Could not populate reward registry: {e}")
 
@@ -336,9 +345,14 @@ def build_env(config: dict[str, Any]) -> Any:
       - ``sim_tool`` (default): SimToolEnv with arithmetic tasks
       - ``fable5_traces``: Fable5TraceEnv loading Fable-5 traces from HuggingFace
       - ``hermes_reasoning_traces``: HermesReasoningTraceEnv
+      - ``hermes3_dataset``: Hermes3DatasetEnv loading NousResearch-Hermes-3-Dataset
     """
     env_cfg = config.get("env", {})
     env_type = env_cfg.get("type", "sim_tool")
+
+    if env_type == "hermes3_dataset":
+        from hermes_agentic_rl.envs.hermes3_dataset_env import Hermes3DatasetEnv
+        return Hermes3DatasetEnv.from_config(env_cfg)
 
     if env_type == "fable5_traces":
         from hermes_agentic_rl.envs.fable5_traces import Fable5TraceEnv

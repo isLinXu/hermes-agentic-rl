@@ -1,0 +1,67 @@
+# Quick smoke-test config for agentlans/NousResearch-Hermes-3-Dataset
+# Strategy: SFT warm-start → GRPO with similarity reward
+# Run: python -m hermes_agentic_rl.cli.main train-rl --config configs/hermes3_grpo_quicktest.yaml
+
+backend:
+  type: tiny  # Switch to "transformers" for real model training
+  tiny:
+    dim: 256
+    n_heads: 8
+    n_layers: 6
+    vocab_size: 32000
+    max_seq_len: 512
+  # transformers:
+  #   model_name: "microsoft/DialoGPT-small"
+  #   device: auto
+
+env:
+  type: hermes3_dataset
+  dataset_name: "agentlans/NousResearch-Hermes-3-Dataset"
+  split: "train"
+  streaming: true
+  limit: 100  # Quick test subset
+  shuffle: true
+  seed: 42
+  max_prompt_chars: 2048
+
+reward:
+  type: composite_similarity
+  metrics:
+    - name: rouge_l
+      weight: 0.5
+    - name: bleu
+      weight: 0.3
+    - name: exact_match
+      weight: 0.2
+
+trainer:
+  type: grpo
+  n_iters: 20
+  group_size: 2
+  prompts_per_iter: 4
+  lr: 1e-4
+  clip_eps: 0.2
+  kl_coef: 0.01
+  entropy_coef: 0.01
+  update_epochs: 2
+  minibatch_size: 4
+  max_seq_len: 512
+  bootstrap_sft_rounds: 1
+  interleave_sft_every: 0
+  advantage_norm: group
+  per_token_advantage: false
+  checkpoint_every: 10
+  eval_every: 5
+  grad_clip: 1.0
+  mixed_precision: false
+  distributed_strategy: none
+
+# Curriculum learning (optional, disabled by default)
+curriculum: null
+
+# Logging
+logging:
+  log_every: 1
+  tensorboard_dir: "./runs/hermes3_grpo_quicktest"
+  wandb_project: null
+  wandb_run_name: null
