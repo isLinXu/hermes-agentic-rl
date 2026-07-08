@@ -1,0 +1,58 @@
+---
+# NetworkPolicy restricting traffic within the hermes-agentic-rl namespace.
+# - Training/eval/benchmark Pods can egress to any destination (for HF, W&B, etc.)
+# - TensorBoard only accepts ingress from the same namespace
+# - Default-deny for cross-namespace ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermes-default-deny-ingress
+  namespace: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: networkpolicy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermes-allow-same-namespace
+  namespace: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: networkpolicy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hermes-agentic-rl
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermes-allow-tensorboard-ingress
+  namespace: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: networkpolicy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: tensorboard
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hermes-agentic-rl
+      ports:
+        - protocol: TCP
+          port: 6006

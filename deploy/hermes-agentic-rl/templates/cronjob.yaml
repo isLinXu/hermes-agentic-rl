@@ -1,0 +1,122 @@
+{{- if eq .Values.workloadType "cronjob" }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "hermes-agentic-rl.fullname" . }}
+  labels:
+    {{- include "hermes-agentic-rl.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  {{- with .Values.cronjob.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
+  suspend: {{ .Values.cronjob.suspend }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  {{- if .Values.cronjob.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ .Values.cronjob.startingDeadlineSeconds }}
+  {{- end }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "hermes-agentic-rl.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if gt .Values.cronjob.jobTemplate.activeDeadlineSeconds 0 }}
+      activeDeadlineSeconds: {{ .Values.cronjob.jobTemplate.activeDeadlineSeconds }}
+      {{- end }}
+      backoffLimit: {{ .Values.cronjob.jobTemplate.backoffLimit }}
+      {{- if gt .Values.cronjob.jobTemplate.ttlSecondsAfterFinished 0 }}
+      ttlSecondsAfterFinished: {{ .Values.cronjob.jobTemplate.ttlSecondsAfterFinished }}
+      {{- end }}
+      template:
+        metadata:
+          {{- with .Values.podAnnotations }}
+          annotations:
+            checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          labels:
+            {{- include "hermes-agentic-rl.selectorLabels" . | nindent 12 }}
+        spec:
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          serviceAccountName: {{ include "hermes-agentic-rl.serviceAccountName" . }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          restartPolicy: {{ .Values.cronjob.jobTemplate.restartPolicy }}
+          {{- with .Values.initContainers }}
+          initContainers:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: {{ .Chart.Name }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                {{- include "hermes-agentic-rl.containerCommand" . | nindent 16 }}
+              env:
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                {{- with .Values.env }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              {{- with .Values.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/hermes
+                  readOnly: true
+                {{- if .Values.persistence.enabled }}
+                - name: data
+                  mountPath: {{ .Values.persistence.mountPath }}
+                {{- end }}
+                {{- with .Values.volumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          volumes:
+            - name: config
+              {{- if .Values.config.existingConfigMap }}
+              configMap:
+                name: {{ .Values.config.existingConfigMap }}
+              {{- else }}
+              configMap:
+                name: {{ include "hermes-agentic-rl.configMapName" . }}
+              {{- end }}
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              {{- if .Values.persistence.existingClaim }}
+              persistentVolumeClaim:
+                claimName: {{ .Values.persistence.existingClaim }}
+              {{- else }}
+              persistentVolumeClaim:
+                claimName: {{ include "hermes-agentic-rl.pvcName" . }}
+              {{- end }}
+            {{- end }}
+            {{- with .Values.volumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.priorityClassName }}
+          priorityClassName: {{ . }}
+          {{- end }}
+{{- end }}

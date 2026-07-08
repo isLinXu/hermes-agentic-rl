@@ -1,0 +1,96 @@
+# Kubernetes Deployment
+# 用于长期运行的服务（如 dashboard、API 服务、监控端点）
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-rl
+  namespace: default
+  labels:
+    app: hermes-agentic-rl
+    version: v1.0.0-rc1
+    component: rl-service
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: hermes-agentic-rl
+  template:
+    metadata:
+      labels:
+        app: hermes-agentic-rl
+        version: v1.0.0-rc1
+        component: rl-service
+    spec:
+      containers:
+        - name: hermes-rl
+          image: hermes-agentic-rl:0.12.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - hermes_agentic_rl.cli.main
+            - --help
+          envFrom:
+            - configMapRef:
+                name: hermes-rl-config
+          env:
+            - name: WANDB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-rl-secrets
+                  key: wandb-api-key
+                  optional: true
+            - name: NEWAPI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-rl-secrets
+                  key: newapi-api-key
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import hermes_agentic_rl; print('ok')"
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import hermes_agentic_rl; print('ok')"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: outputs
+              mountPath: /opt/hermes-agentic-rl/outputs
+            - name: checkpoints
+              mountPath: /opt/hermes-agentic-rl/checkpoints
+      volumes:
+        - name: outputs
+          emptyDir: {}
+        - name: checkpoints
+          emptyDir: {}
+      restartPolicy: Always

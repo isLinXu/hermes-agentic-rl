@@ -1,0 +1,24 @@
+apiVersion: v2
+name: hermes-agentic-rl
+description: >
+  Helm chart for hermes-agentic-rl — an Agentic RL framework
+  supporting GRPO, PPO, multi-turn training, curriculum learning,
+  and self-evolution loops. Deployable as Job, CronJob, or
+  long-running Deployment.
+type: application
+version: 1.0.0-rc1
+appVersion: "1.0.0-rc1"
+keywords:
+  - reinforcement-learning
+  - grpo
+  - ppo
+  - agentic-ai
+  - llm-training
+home: https://github.com/gatilin/hermes-agentic-rl
+sources:
+  - https://github.com/gatilin/hermes-agentic-rl
+maintainers:
+  - name: gatilin
+    email: gatilin@example.com
+annotations:
+  category: AI/ML

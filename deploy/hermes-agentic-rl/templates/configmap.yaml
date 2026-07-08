@@ -1,0 +1,11 @@
+{{- if and .Values.config.inline (not .Values.config.existingConfigMap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermes-agentic-rl.configMapName" . }}
+  labels:
+    {{- include "hermes-agentic-rl.labels" . | nindent 4 }}
+data:
+  {{ .Values.config.configMapKey }}: |
+    {{- .Values.config.inline | nindent 4 }}
+{{- end }}

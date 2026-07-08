@@ -1,0 +1,129 @@
+# Kubernetes Job
+# 用于一次性训练任务（GRPO / PPO / Eval / Benchmark）
+#
+# 使用方式：
+#   kubectl apply -f k8s-job.yaml
+#   kubectl logs -f job/hermes-rl-train
+#   kubectl delete job hermes-rl-train
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hermes-rl-train
+  namespace: default
+  labels:
+    app: hermes-agentic-rl
+    version: v1.0.0-rc1
+    task: train
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: hermes-agentic-rl
+        task: train
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: train
+          image: hermes-agentic-rl:0.12.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - hermes_agentic_rl.cli.main
+            - train-rl
+            - --config
+            - configs/echo_grpo_mvp.yaml
+            - --output
+            - /opt/hermes-agentic-rl/outputs/k8s-train
+          envFrom:
+            - configMapRef:
+                name: hermes-rl-config
+          env:
+            - name: WANDB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-rl-secrets
+                  key: wandb-api-key
+                  optional: true
+            - name: NEWAPI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-rl-secrets
+                  key: newapi-api-key
+                  optional: true
+          resources:
+            limits:
+              cpu: "4000m"
+              memory: "8Gi"
+            requests:
+              cpu: "1000m"
+              memory: "2Gi"
+          volumeMounts:
+            - name: outputs
+              mountPath: /opt/hermes-agentic-rl/outputs
+            - name: checkpoints
+              mountPath: /opt/hermes-agentic-rl/checkpoints
+      volumes:
+        - name: outputs
+          emptyDir: {}
+        - name: checkpoints
+          emptyDir: {}
+
+---
+# Eval 任务示例
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hermes-rl-eval
+  namespace: default
+  labels:
+    app: hermes-agentic-rl
+    version: v1.0.0-rc1
+    task: eval
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: hermes-agentic-rl
+        task: eval
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: eval
+          image: hermes-agentic-rl:0.12.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - hermes_agentic_rl.cli.main
+            - eval-rl
+            - --config
+            - configs/hermes_reasoning_traces_eval_rl.yaml
+          envFrom:
+            - configMapRef:
+                name: hermes-rl-config
+          env:
+            - name: WANDB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-rl-secrets
+                  key: wandb-api-key
+                  optional: true
+          resources:
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: outputs
+              mountPath: /opt/hermes-agentic-rl/outputs
+      volumes:
+        - name: outputs
+          emptyDir: {}

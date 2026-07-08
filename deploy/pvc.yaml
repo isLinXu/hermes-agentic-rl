@@ -1,0 +1,17 @@
+---
+# PersistentVolumeClaim for training outputs, checkpoints, and datasets
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hermes-data
+  namespace: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: ""

@@ -1,0 +1,49 @@
+---
+# Kustomize base for hermes-agentic-rl v1.0.0-rc1 Kubernetes deployment.
+# Usage:
+#   kubectl apply -k deploy/
+#   # or with Kustomize:
+#   kustomize build deploy/ | kubectl apply -f -
+#
+# To override image tag or resource limits, create an overlay directory
+# (e.g. deploy/overlays/prod/kustomization.yaml) and reference this base.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hermes-agentic-rl
+
+commonLabels:
+  app.kubernetes.io/name: hermes-agentic-rl
+  app.kubernetes.io/version: "1.0.0-rc1"
+
+commonAnnotations:
+  app.kubernetes.io/managed-by: kustomize
+  deployment.hermes-agentic-rl.io/docs: "https://github.com/gatilin/hermes-agentic-rl"
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - secret.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - job-training-grpo.yaml
+  - job-training-mtgrpo.yaml
+  - job-eval.yaml
+  - job-benchmark.yaml
+  - cronjob-curriculum.yaml
+  - deployment-tensorboard.yaml
+  - service-tensorboard.yaml
+  - hpa.yaml
+  - networkpolicy.yaml
+
+# Default image transformation — override in overlays for prod/staging.
+images:
+  - name: hermes-agentic-rl
+    newTag: "1.0.0-rc1"
+
+# Example configMapGenerator override (uncomment and adapt as needed):
+# configMapGenerator:
+#   - name: hermes-configs
+#     behavior: merge
+#     files:
+#       - configs/custom_grpo.yaml
