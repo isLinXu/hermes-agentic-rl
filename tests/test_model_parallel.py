@@ -27,7 +27,6 @@ from hermes_agentic_rl.distributed.model_parallel import (
     compute_parallel_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # ModelParallelConfig tests
 # ---------------------------------------------------------------------------
@@ -241,13 +240,13 @@ class TestApplyModelParallel:
     def test_tp_only_returns_tp_strategy(self):
         cfg = ModelParallelConfig(tensor_parallel_size=2)
         model = MagicMock()
-        wrapped, strategy = apply_model_parallel(model, cfg)
+        _wrapped, strategy = apply_model_parallel(model, cfg)
         assert isinstance(strategy, TensorParallelStrategy)
 
     def test_pp_only_returns_pp_strategy(self):
         cfg = ModelParallelConfig(pipeline_parallel_size=2)
         model = MagicMock()
-        wrapped, strategy = apply_model_parallel(model, cfg)
+        _wrapped, strategy = apply_model_parallel(model, cfg)
         assert isinstance(strategy, PipelineParallelStrategy)
 
     def test_tp_and_pp_returns_hybrid_strategy(self):
@@ -256,14 +255,14 @@ class TestApplyModelParallel:
             pipeline_parallel_size=2,
         )
         model = MagicMock()
-        wrapped, strategy = apply_model_parallel(model, cfg)
+        _wrapped, strategy = apply_model_parallel(model, cfg)
         assert isinstance(strategy, HybridParallelStrategy)
 
     def test_strategy_gather_state_dict_works(self):
         cfg = ModelParallelConfig()
         model = MagicMock()
         model.state_dict.return_value = {"w": "v"}
-        wrapped, strategy = apply_model_parallel(model, cfg)
+        _wrapped, strategy = apply_model_parallel(model, cfg)
         result = strategy.gather_state_dict(model)
         assert result == {"w": "v"}
 

@@ -66,7 +66,7 @@ def collate_and_pad(batch):
 # ---------------------------------------------------------------------------
 
 def main():
-    from hermes_agentic_rl.backends.hf import HFCausalLMBackend, HFBackendConfig
+    from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
     from hermes_agentic_rl.core.reward_manager import RewardManager
     from hermes_agentic_rl.envs.letter_counting import LetterCountingEnv, LetterCountingReward
     from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConfig
@@ -88,7 +88,7 @@ def main():
     print(f"  Loaded in {time.time() - t0:.1f}s, params={total:,}")
 
     # ---- 2. SFT Warmup ----
-    print(f"\n[2] SFT warmup ({SFT_SAMPLES} samples × {SFT_EPOCHS} epochs)...")
+    print(f"\n[2] SFT warmup ({SFT_SAMPLES} samples x {SFT_EPOCHS} epochs)...")
     env = LetterCountingEnv()
     asyncio.get_event_loop().run_until_complete(env.setup())
 
@@ -180,7 +180,7 @@ def main():
     print(f"  Last reward:  {stats.last_reward():.4f}")
     print(f"  Best reward:  {stats.best_reward():.4f}")
     print(f"  Delta:        {stats.mean_reward_delta():+.4f}")
-    print(f"\n  Reward curve:")
+    print("\n  Reward curve:")
     for rec in stats.iters:
         if rec["iter"] % 5 == 0:
             r = rec["mean_reward"]
@@ -197,7 +197,10 @@ def main():
         "last_reward": stats.last_reward(),
         "best_reward": stats.best_reward(),
         "delta": stats.mean_reward_delta(),
-        "curve": [{"iter": r["iter"], "reward": r["mean_reward"], "loss": r.get("loss", 0)} for r in stats.iters],
+        "curve": [
+            {"iter": r["iter"], "reward": r["mean_reward"], "loss": r.get("loss", 0)}
+            for r in stats.iters
+        ],
     }
     (OUTPUT / "summary.json").write_text(json.dumps(summary, indent=2))
     torch.save(backend.model.state_dict(), OUTPUT / "policy_final.pt")

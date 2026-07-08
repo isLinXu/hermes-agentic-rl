@@ -1,17 +1,17 @@
 """训练验证脚本 — 端到端训练实验
 
 覆盖范围：
-  1. GRPO + Echo（最小 baseline，验证损失/奖励下降）
-  2. PPO  + Echo（对比实验）
-  3. GRPO + Echo，开启 normalize_reward + adaptive_kl（v0.9 特性验证）
-  4. GRPO + Echo，K3 KL estimator + checkpoint（v0.6 特性验证）
-  5. GRPO + sim_tool（多工具环境）
-  6. GRPO + curriculum（简单 → echo 两级课程）
-  7. GRPO + Echo，per_token_advantage（REINFORCE++ 路径）
+  1. GRPO + Echo(最小 baseline，验证损失/奖励下降)
+  2. PPO  + Echo(对比实验)
+  3. GRPO + Echo，开启 normalize_reward + adaptive_kl(v0.9 特性验证)
+  4. GRPO + Echo，K3 KL estimator + checkpoint(v0.6 特性验证)
+  5. GRPO + sim_tool(多工具环境)
+  6. GRPO + curriculum(简单 → echo 两级课程)
+  7. GRPO + Echo，per_token_advantage(REINFORCE++ 路径)
 
 运行方式：
-    python scripts/training_validation.py            # 全量（~5分钟）
-    python scripts/training_validation.py --smoke    # 快速冒烟（~30秒）
+    python scripts/training_validation.py            # 全量(~5分钟)
+    python scripts/training_validation.py --smoke    # 快速冒烟(~30秒)
     python scripts/training_validation.py --case 1  # 单跑某个 case
 """
 
@@ -30,21 +30,20 @@ from typing import Any
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
-from hermes_agentic_rl.core.reward_manager import RewardManager
-from hermes_agentic_rl.envs.echo_task_env import (
+from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend  # noqa: E402
+from hermes_agentic_rl.core.reward_manager import RewardManager  # noqa: E402
+from hermes_agentic_rl.envs.echo_task_env import (  # noqa: E402
     EchoRewardComponent,
     EchoTaskEnv,
     build_default_echo_dataset,
 )
-from hermes_agentic_rl.envs.sim_tool_env import (
+from hermes_agentic_rl.envs.sim_tool_env import (  # noqa: E402
     SimToolEnv,
     SimToolRewardComponent,
     build_sim_tool_dataset,
 )
-from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConfig
-from hermes_agentic_rl.trainers.ppo_trainer import PPOTrainer, PPOTrainerConfig
-
+from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConfig  # noqa: E402
+from hermes_agentic_rl.trainers.ppo_trainer import PPOTrainer, PPOTrainerConfig  # noqa: E402
 
 # ──────────────────────────────────────────────
 # 工具函数
@@ -61,11 +60,17 @@ def _tiny_backend(seed: int = 0, value_head: bool = False) -> TinyCausalLMBacken
 
 
 def _echo_env_and_rm() -> tuple[EchoTaskEnv, RewardManager]:
-    return EchoTaskEnv(build_default_echo_dataset()), RewardManager([EchoRewardComponent(weight=1.0)])
+    return (
+        EchoTaskEnv(build_default_echo_dataset()),
+        RewardManager([EchoRewardComponent(weight=1.0)]),
+    )
 
 
 def _sim_env_and_rm(n: int = 8) -> tuple[SimToolEnv, RewardManager]:
-    return SimToolEnv(build_sim_tool_dataset(n=n, seed=42)), RewardManager([SimToolRewardComponent(weight=1.0)])
+    return (
+        SimToolEnv(build_sim_tool_dataset(n=n, seed=42)),
+        RewardManager([SimToolRewardComponent(weight=1.0)]),
+    )
 
 
 def _fmt_reward(val: float) -> str:
@@ -77,7 +82,7 @@ def _fmt_reward(val: float) -> str:
 # 结果收集
 # ──────────────────────────────────────────────
 
-@dataclass
+@dataclass(slots=True)
 class CaseResult:
     name: str
     passed: bool
@@ -163,7 +168,8 @@ def case_1_grpo_echo_baseline(smoke: bool = False) -> CaseResult:
         passed = all("FAIL" not in a for a in assertions)
         return CaseResult(
             name=name, passed=passed, duration_s=time.time() - t0,
-            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters, last_reward=stats.last_reward(),
+            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters,
+            last_reward=stats.last_reward(),
             best_reward=stats.best_reward(), reward_delta=stats.mean_reward_delta(),
             reward_history=[e.get("mean_reward", 0.0) for e in metric_log if "mean_reward" in e],
             assertions=assertions,
@@ -204,7 +210,8 @@ def case_2_ppo_echo(smoke: bool = False) -> CaseResult:
         passed = all("FAIL" not in a for a in assertions)
         return CaseResult(
             name=name, passed=passed, duration_s=time.time() - t0,
-            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters, last_reward=stats.last_reward(),
+            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters,
+            last_reward=stats.last_reward(),
             best_reward=stats.best_reward(), reward_delta=stats.mean_reward_delta(),
             reward_history=[e.get("mean_reward", 0.0) for e in metric_log if "mean_reward" in e],
             assertions=assertions,
@@ -248,7 +255,7 @@ def case_3_grpo_normalize_adaptive_kl(smoke: bool = False) -> CaseResult:
 
         assertions = _assert_reward_improves(stats, threshold=-0.05)
         assertions += _assert_no_nan_in_metrics(metric_log)
-        # 检查 kl_coef 字段是否出现（adaptive_kl 应写入 metrics）
+        # 检查 kl_coef 字段是否出现(adaptive_kl 应写入 metrics)
         kl_coef_logged = any("kl_coef" in e for e in metric_log)
         if kl_coef_logged:
             assertions.append("✓ adaptive_kl: kl_coef logged in metrics (PASS)")
@@ -257,7 +264,8 @@ def case_3_grpo_normalize_adaptive_kl(smoke: bool = False) -> CaseResult:
         passed = all("FAIL" not in a for a in assertions)
         return CaseResult(
             name=name, passed=passed, duration_s=time.time() - t0,
-            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters, last_reward=stats.last_reward(),
+            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters,
+            last_reward=stats.last_reward(),
             best_reward=stats.best_reward(), reward_delta=stats.mean_reward_delta(),
             reward_history=[e.get("mean_reward", 0.0) for e in metric_log if "mean_reward" in e],
             assertions=assertions,
@@ -267,7 +275,9 @@ def case_3_grpo_normalize_adaptive_kl(smoke: bool = False) -> CaseResult:
                           error=traceback.format_exc(), assertions=[f"✗ EXCEPTION: {e}"])
 
 
-def case_4_grpo_checkpoint_resume(smoke: bool = False, output_dir: Path | None = None) -> CaseResult:
+def case_4_grpo_checkpoint_resume(
+    smoke: bool = False, output_dir: Path | None = None
+) -> CaseResult:
     """Case 4: v0.6 — checkpoint 保存 + auto_resume 续训"""
     name = "GRPO+checkpoint+resume"
     t0 = time.time()
@@ -294,13 +304,15 @@ def case_4_grpo_checkpoint_resume(smoke: bool = False, output_dir: Path | None =
         trainer_a = GRPOTrainer(policy=backend_a, env=env, reward_manager=rm, cfg=cfg_a)
         stats_a = trainer_a.train()
 
-        # 验证 checkpoint 目录存在（格式：iter_XXXXX/）
+        # 验证 checkpoint 目录存在(格式：iter_XXXXX/)
         ckpt_dir = output_dir / "checkpoints"
         ckpt_dirs = list(ckpt_dir.glob("iter_*")) if ckpt_dir.exists() else []
 
         assertions: list[str] = []
         if ckpt_dirs:
-            assertions.append(f"✓ checkpoint saved: {len(ckpt_dirs)} iter dir(s) in {ckpt_dir} (PASS)")
+            assertions.append(
+                f"✓ checkpoint saved: {len(ckpt_dirs)} iter dir(s) in {ckpt_dir} (PASS)"
+            )
         else:
             assertions.append(f"✗ no checkpoint dirs found in {ckpt_dir} (FAIL)")
 
@@ -337,7 +349,7 @@ def case_4_grpo_checkpoint_resume(smoke: bool = False, output_dir: Path | None =
         trainer_b = GRPOTrainer(policy=backend_b, env=env2, reward_manager=rm2, cfg=cfg_b)
         stats_b = trainer_b.train()
 
-        # 续训后 len(iters) >= 10（从 checkpoint 10 继续，最多补 10 iter）
+        # 续训后 len(iters) >= 10(从 checkpoint 10 继续，最多补 10 iter)
         n_iters_b = len(stats_b.iters) if isinstance(stats_b.iters, list) else stats_b.iters
         if n_iters_b >= 1:
             assertions.append(f"✓ resumed: ran {n_iters_b} additional iter(s) (PASS)")
@@ -384,7 +396,8 @@ def case_5_grpo_sim_tool(smoke: bool = False) -> CaseResult:
         passed = all("FAIL" not in a for a in assertions)
         return CaseResult(
             name=name, passed=passed, duration_s=time.time() - t0,
-            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters, last_reward=stats.last_reward(),
+            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters,
+            last_reward=stats.last_reward(),
             best_reward=stats.best_reward(), reward_delta=stats.mean_reward_delta(),
             reward_history=[e.get("mean_reward", 0.0) for e in metric_log if "mean_reward" in e],
             assertions=assertions,
@@ -395,14 +408,14 @@ def case_5_grpo_sim_tool(smoke: bool = False) -> CaseResult:
 
 
 def case_6_grpo_curriculum(smoke: bool = False) -> CaseResult:
-    """Case 6: GRPO + CurriculumEnv（两个 Echo 级别）"""
+    """Case 6: GRPO + CurriculumEnv(两个 Echo 级别)"""
     name = "GRPO+Curriculum(2-level Echo)"
     t0 = time.time()
     metric_log: list[dict] = []
     try:
         from hermes_agentic_rl.envs.curriculum import CurriculumEnv
 
-        # 两个 Echo level（相同任务，验证 curriculum 机制不崩溃）
+        # 两个 Echo level(相同任务，验证 curriculum 机制不崩溃)
         env_l0 = EchoTaskEnv(build_default_echo_dataset())
         env_l1 = EchoTaskEnv(build_default_echo_dataset())
         rm_l0 = RewardManager([EchoRewardComponent(weight=1.0)])
@@ -443,7 +456,8 @@ def case_6_grpo_curriculum(smoke: bool = False) -> CaseResult:
         passed = all("FAIL" not in a for a in assertions)
         return CaseResult(
             name=name, passed=passed, duration_s=time.time() - t0,
-            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters, last_reward=stats.last_reward(),
+            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters,
+            last_reward=stats.last_reward(),
             best_reward=stats.best_reward(), reward_delta=stats.mean_reward_delta(),
             reward_history=[e.get("mean_reward", 0.0) for e in metric_log if "mean_reward" in e],
             assertions=assertions,
@@ -483,7 +497,8 @@ def case_7_grpo_per_token_advantage(smoke: bool = False) -> CaseResult:
         passed = all("FAIL" not in a for a in assertions)
         return CaseResult(
             name=name, passed=passed, duration_s=time.time() - t0,
-            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters, last_reward=stats.last_reward(),
+            iters=len(stats.iters) if isinstance(stats.iters, list) else stats.iters,
+            last_reward=stats.last_reward(),
             best_reward=stats.best_reward(), reward_delta=stats.mean_reward_delta(),
             reward_history=[e.get("mean_reward", 0.0) for e in metric_log if "mean_reward" in e],
             assertions=assertions,
@@ -559,8 +574,8 @@ CASES = {
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="hermes-agentic-rl 训练验证")
-    parser.add_argument("--smoke", action="store_true", help="快速冒烟（少量 iter）")
-    parser.add_argument("--case", type=int, default=None, help="只跑某个 case（1-7）")
+    parser.add_argument("--smoke", action="store_true", help="快速冒烟(少量 iter)")
+    parser.add_argument("--case", type=int, default=None, help="只跑某个 case(1-7)")
     parser.add_argument(
         "--output-json",
         type=str,

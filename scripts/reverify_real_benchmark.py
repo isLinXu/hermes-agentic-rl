@@ -1,15 +1,14 @@
 """一键复验真实 benchmark 的辅助脚本。"""
-# ruff: noqa: T201
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import os
 import shlex
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -64,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset",
         type=Path,
         default=None,
-        help="可选：真实 train.parquet 路径。提供后会链接到默认数据入口。",
+        help="可选:真实 train.parquet 路径。提供后会链接到默认数据入口。",
     )
     parser.add_argument(
         "--skip-preflight",
@@ -74,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="只打印将要执行的动作和命令，不实际执行。",
+        help="只打印将要执行的动作和命令,不实际执行。",
     )
     parser.add_argument(
         "--hf-repo-id",
@@ -128,11 +127,11 @@ def ensure_dataset_link(repo_root: Path, dataset_override: Path | None) -> Path:
     if dataset_override is None:
         if default_dataset.exists():
             return default_dataset
-        raise FileNotFoundError(f"缺少数据文件：{default_dataset}")
+        raise FileNotFoundError(f"缺少数据文件:{default_dataset}")
 
     source = dataset_override.expanduser().resolve()
     if not source.exists():
-        raise FileNotFoundError(f"指定的数据文件不存在：{source}")
+        raise FileNotFoundError(f"指定的数据文件不存在:{source}")
 
     default_dataset.parent.mkdir(parents=True, exist_ok=True)
     if default_dataset.exists() or default_dataset.is_symlink():
@@ -149,10 +148,10 @@ def resolve_data_source(args: argparse.Namespace, repo_root: Path) -> RuntimePla
     if args.dataset is not None:
         source = args.dataset.expanduser().resolve()
         if not source.exists():
-            raise FileNotFoundError(f"指定的数据文件不存在：{source}")
+            raise FileNotFoundError(f"指定的数据文件不存在:{source}")
         return RuntimePlan(
             mode="parquet",
-            description=f"显式数据文件：{source}",
+            description=f"显式数据文件:{source}",
             dataset_path=default_dataset,
             dataset_override=source,
             hf_repo_id=args.hf_repo_id,
@@ -164,7 +163,7 @@ def resolve_data_source(args: argparse.Namespace, repo_root: Path) -> RuntimePla
     if default_dataset.exists():
         return RuntimePlan(
             mode="parquet",
-            description=f"默认数据文件：{default_dataset}",
+            description=f"默认数据文件:{default_dataset}",
             dataset_path=default_dataset,
             dataset_override=None,
             hf_repo_id=args.hf_repo_id,
@@ -175,7 +174,7 @@ def resolve_data_source(args: argparse.Namespace, repo_root: Path) -> RuntimePla
         )
     return RuntimePlan(
         mode="hf",
-        description=f"HF 数据源：{args.hf_repo_id}/{args.hf_config_name}/{args.hf_split}",
+        description=f"HF 数据源:{args.hf_repo_id}/{args.hf_config_name}/{args.hf_split}",
         dataset_path=None,
         dataset_override=None,
         hf_repo_id=args.hf_repo_id,
@@ -266,7 +265,7 @@ def main() -> int:
 
         if plan.mode == "parquet":
             resolved_dataset = ensure_dataset_link(PROJECT_ROOT, plan.dataset_override)
-            print(f"[DATASET] 已就绪：{resolved_dataset}")
+            print(f"[DATASET] 已就绪:{resolved_dataset}")
         else:
             print(f"[DATASET] 已切换到 {plan.description}")
         return run_commands(PROJECT_ROOT, commands)
@@ -274,7 +273,7 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 2
     except subprocess.CalledProcessError as exc:
-        print(f"命令执行失败，退出码={exc.returncode}: {exc.cmd}", file=sys.stderr)
+        print(f"命令执行失败,退出码={exc.returncode}: {exc.cmd}", file=sys.stderr)
         return exc.returncode or 1
 
 

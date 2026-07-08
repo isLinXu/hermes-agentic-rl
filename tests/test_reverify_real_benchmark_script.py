@@ -187,5 +187,11 @@ def test_materialize_runtime_configs_rewrites_benchmark_suite_config_paths(
     payload = module._load_yaml(runtime.benchmark_suite_config_path)
     config_paths = [item["config_path"] for item in payload["benchmark_suite"]["benchmarks"]]
 
-    assert str(runtime.eval_config_path) in config_paths or str(runtime.stage2_eval_config_path) in config_paths
-    assert "configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml" not in config_paths
+    assert (
+        str(runtime.eval_config_path) in config_paths
+        or str(runtime.stage2_eval_config_path) in config_paths
+    )
+    assert (
+        "configs/hermes_reasoning_traces_eval_rl_terminal_command_stage2.yaml"
+        not in config_paths
+    )

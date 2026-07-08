@@ -8,8 +8,7 @@ sys.path.insert(0, str(PROJECT))
 
 
 def main():
-    import torch
-    from hermes_agentic_rl.backends.hf import HFCausalLMBackend, HFBackendConfig
+    from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
     from hermes_agentic_rl.peft.lora import LoRAConfig, inject_lora
 
     MODEL = "HuggingFaceTB/SmolLM2-360M-Instruct"

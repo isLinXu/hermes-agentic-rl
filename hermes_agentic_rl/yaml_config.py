@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 try:
     import yaml
 except ImportError:
-    yaml = None
+    yaml = None  # type: ignore[assignment]
     logger.warning("PyYAML not installed — YAML config loading will fail")
 
 
@@ -460,6 +460,7 @@ def run_from_config(config: dict[str, Any]) -> None:
         logger.warning("No reward components configured — using empty RewardManager")
 
     # 3. Build trainer config + select trainer class
+    trainer_cls: type[Any]
     if algo_name == "gspo":
         from hermes_agentic_rl.trainers.gspo_trainer import GSPOTrainer, GSPOTrainerConfig
 
@@ -488,7 +489,7 @@ def run_from_config(config: dict[str, Any]) -> None:
     cs_pair = build_client_server(config, backend)
     if cs_pair is not None:
         # Attach the server's version counter to the trainer for observability.
-        trainer._cs_pair = cs_pair  # type: ignore[attr-defined]
+        trainer._cs_pair = cs_pair  # type: ignore[union-attr]
 
     # 4c. Wire PRM co-training pipeline if configured.
     prm_cfg = config.get("prm", {})
@@ -497,8 +498,8 @@ def run_from_config(config: dict[str, Any]) -> None:
         from hermes_agentic_rl.trainers.prm_pipeline import PRMPipeline, PRMPipelineConfig
 
         prm_model = ProcessRewardModel(
-            backbone=backend,
-            hidden_dim=prm_cfg.get("hidden_dim", 64),
+            backend=backend,
+            freeze_base=prm_cfg.get("freeze_base", True),
         )
         pipeline = PRMPipeline(
             prm=prm_model,
@@ -510,7 +511,7 @@ def run_from_config(config: dict[str, Any]) -> None:
                 replay_capacity=prm_cfg.get("replay_capacity", 256),
             ),
         )
-        trainer._prm_pipeline = pipeline  # type: ignore[attr-defined]
+        trainer._prm_pipeline = pipeline  # type: ignore[union-attr]
         logger.info(f"PRM co-training enabled: train_every={prm_cfg.get('train_every', 5)}")
 
     logger.info(f"Starting training: {trainer_cfg.n_iters} iters, "

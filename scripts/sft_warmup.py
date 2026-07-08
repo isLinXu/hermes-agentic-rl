@@ -69,7 +69,7 @@ def generate_samples(env, backend, n: int = 200) -> list[tuple[list[int], list[i
 
 
 def main():
-    from hermes_agentic_rl.backends.hf import HFCausalLMBackend, HFBackendConfig
+    from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
     from hermes_agentic_rl.envs.letter_counting import LetterCountingEnv
 
     device = "cpu"

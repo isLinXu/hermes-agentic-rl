@@ -19,7 +19,7 @@ import pytest
 pytestmark: pytest.MarkDecorator = pytest.mark.benchmark
 
 try:
-    import pytest_benchmark  # noqa: F401  # type: ignore[import-not-found]
+    import pytest_benchmark  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover
     def _skip_benchmark(*_args: object, **_kwargs: object) -> None:
         pytest.skip("pytest-benchmark not installed — run pip install pytest-benchmark")

@@ -26,7 +26,7 @@ GRPO_ENTROPY = 0.05
 
 
 def main():
-    from hermes_agentic_rl.backends.hf import HFCausalLMBackend, HFBackendConfig
+    from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
     from hermes_agentic_rl.core.reward_manager import RewardManager
     from hermes_agentic_rl.envs.letter_counting import LetterCountingEnv, LetterCountingReward
     from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConfig
@@ -89,7 +89,7 @@ def main():
     print(f"  First: {stats.iters[0]['mean_reward']:.4f}  Last: {stats.last_reward():.4f}")
     print(f"  Best: {stats.best_reward():.4f}  Delta: {stats.mean_reward_delta():+.4f}")
 
-    print(f"\n  Reward curve:")
+    print("\n  Reward curve:")
     for rec in stats.iters:
         if rec["iter"] % 5 == 0:
             r = rec["mean_reward"]

@@ -151,6 +151,7 @@ ignore = [
     "SIM105", # contextlib.suppress vs try/except pass (both fine)
     "RUF002", # full-width unicode in docstrings (Chinese comments are fine)
     "RUF003", # full-width unicode in comments (Chinese comments are fine)
+    "RUF001", # full-width unicode in strings (Chinese text is fine)
     "RUF005", # `[*x, y]` vs `x + [y]` (style)
     "SIM118", # `k in d.keys()` (explicit form OK)
     "SIM102", # nested if (clearer in some spots)
