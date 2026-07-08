@@ -137,7 +137,7 @@ class CosineEntropySchedule:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(slots=True)
 class TargetEntropyPID:
     """PID-style controller that drives policy entropy toward a target.
 
