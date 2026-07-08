@@ -1,22 +1,26 @@
-"""Multimodal reward components for vision/image-based reward signals.
+"""Multimodal reward components for vision, image, and audio-based reward signals.
 
 This module provides reward components that evaluate agent outputs against
-visual criteria — e.g. checking if a generated image description matches
-ground-truth visual attributes, or scoring tool-call outputs that produce
-visual artifacts.
+visual and auditory criteria — e.g. checking if a generated image description
+matches ground-truth visual attributes, or if a transcribed audio description
+matches ground-truth audio attributes.
 
 Design:
 - :class:`VisionMatchReward` — compares text descriptions to image
   ground-truth using CLIP similarity (lazy import).
 - :class:`ImageAttributeReward` — scores based on presence/absence of
   expected visual attributes in the agent's output.
+- :class:`AudioMatchReward` — compares text descriptions to audio
+  ground-truth using Wav2Vec2 similarity (lazy import) or text fallback.
+- :class:`AudioAttributeReward` — scores based on presence/absence of
+  expected audio attributes in the agent's output.
 - :class:`MultimodalCompositeReward` — combines multiple modal reward
   components with configurable weights.
 
 All components follow the :class:`BaseReward` interface so they integrate
 seamlessly with :class:`RewardManager`.
 
-When optional dependencies (torch, transformers/CLIP) are missing, the
+When optional dependencies (torch, transformers/CLIP/Wav2Vec2) are missing, the
 components gracefully degrade to text-matching heuristics.
 """
 
@@ -306,6 +310,250 @@ class ImageAttributeReward(BaseReward):
 
 
 # ---------------------------------------------------------------------------
+# Audio match reward
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class AudioMatchConfig:
+    """Configuration for :class:`AudioMatchReward`.
+
+    Attributes
+    ----------
+    similarity_threshold:
+        Minimum audio/text similarity (0–1) for a positive reward.
+
+    positive_reward:
+        Reward when similarity >= threshold.
+
+    negative_reward:
+        Reward when similarity < threshold.
+
+    use_audio_model:
+        When True, use Wav2Vec2 embeddings (requires transformers). When
+        False, fall back to text-level Jaccard similarity.
+
+    audio_model_name:
+        Wav2Vec2 model name for transformers (e.g. "facebook/wav2vec2-base-960h").
+    """
+
+    similarity_threshold: float = 0.7
+    positive_reward: float = 1.0
+    negative_reward: float = 0.0
+    use_audio_model: bool = False
+    audio_model_name: str = "facebook/wav2vec2-base-960h"
+
+
+class AudioMatchReward(BaseReward):
+    """Reward based on similarity between agent output and audio ground-truth.
+
+    When ``use_audio_model`` is True and transformers is available, computes
+    Wav2Vec2 cosine similarity between the agent's text output and the item's
+    ``audio_description`` field. Otherwise falls back to text-level Jaccard
+    similarity.
+
+    Item fields used:
+    - ``audio_description``: ground-truth description of the target audio
+    - ``audio_path``: optional path to actual audio (for Wav2Vec2 audio encoder)
+    """
+
+    name = "audio_match_reward"
+
+    def __init__(
+        self,
+        weight: float = 1.0,
+        cfg: AudioMatchConfig | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.weight = weight
+        self.cfg = cfg or AudioMatchConfig()
+        self._audio_model: Any = None
+        self._audio_processor: Any = None
+
+    async def evaluate(
+        self,
+        item: dict[str, Any],
+        trajectory: Trajectory,
+        tool_context: Any,
+    ) -> RewardResult:
+        ground_truth = item.get("audio_description") or item.get("audio_attributes")
+        agent_output = trajectory.final_output or ""
+
+        if not ground_truth:
+            return RewardResult(
+                name=self.name,
+                score=0.0,
+                reason="no audio_description in item; cannot compute audio match",
+                weight=self.weight,
+            )
+
+        similarity = self._compute_similarity(agent_output, ground_truth, item)
+
+        if similarity >= self.cfg.similarity_threshold:
+            score = self.cfg.positive_reward
+            reason = (
+                f"similarity={similarity:.3f} >= threshold={self.cfg.similarity_threshold}"
+            )
+        else:
+            score = self.cfg.negative_reward
+            reason = (
+                f"similarity={similarity:.3f} < threshold={self.cfg.similarity_threshold}"
+            )
+
+        return RewardResult(
+            name=self.name,
+            score=score,
+            reason=reason,
+            weight=self.weight,
+            metadata={"similarity": similarity, "method": self._method_name()},
+        )
+
+    def _compute_similarity(
+        self,
+        text_a: str,
+        text_b: str,
+        item: dict[str, Any],
+    ) -> float:
+        if self.cfg.use_audio_model and self._try_load_audio_model():
+            return self._audio_model_similarity(text_a, text_b, item)
+        return _cosine_text_similarity(text_a, text_b)
+
+    def _method_name(self) -> str:
+        if self.cfg.use_audio_model and self._audio_model is not None:
+            return "wav2vec2"
+        return "text_jaccard"
+
+    def _try_load_audio_model(self) -> bool:
+        """Lazy-load Wav2Vec2 model. Returns True if available."""
+        if self._audio_model is not None:
+            return True
+        try:
+            from transformers import AutoModel, AutoProcessor  # type: ignore[import-untyped]
+
+            self._audio_model = AutoModel.from_pretrained(self.cfg.audio_model_name)
+            self._audio_processor = AutoProcessor.from_pretrained(self.cfg.audio_model_name)
+            return True
+        except Exception:
+            return False
+
+    def _audio_model_similarity(
+        self,
+        text_a: str,
+        text_b: str,
+        item: dict[str, Any],
+    ) -> float:
+        """Compute Wav2Vec2 cosine similarity between two text descriptions."""
+        import torch  # local import
+
+        inputs_a = self._audio_processor(
+            text=[text_a], return_tensors="pt", padding=True, truncation=True,
+        )
+        inputs_b = self._audio_processor(
+            text=[text_b], return_tensors="pt", padding=True, truncation=True,
+        )
+
+        with torch.no_grad():
+            feat_a = self._audio_model(**inputs_a).last_hidden_state.mean(dim=1)
+            feat_b = self._audio_model(**inputs_b).last_hidden_state.mean(dim=1)
+
+        feat_a = feat_a / feat_a.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        feat_b = feat_b / feat_b.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        return float((feat_a @ feat_b.T).item())
+
+
+# ---------------------------------------------------------------------------
+# Audio attribute reward
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class AudioAttributeConfig:
+    """Configuration for :class:`AudioAttributeReward`.
+
+    Attributes
+    ----------
+    expected_attributes:
+        List of audio attribute keywords that should appear in the agent output.
+        Examples: "speech", "music", "noise", "silence".
+
+    attribute_reward:
+        Reward per matched expected attribute.
+
+    missing_penalty:
+        Penalty for each expected attribute that is missing.
+
+    max_reward:
+        Cap on total positive reward.
+    """
+
+    expected_attributes: list[str] = field(default_factory=list)
+    attribute_reward: float = 0.25
+    missing_penalty: float = 0.0
+    max_reward: float = 1.0
+
+
+class AudioAttributeReward(BaseReward):
+    """Reward based on presence/absence of expected audio attributes.
+
+    Checks the agent's text output for expected audio attribute keywords
+    (e.g. "speech", "music", "noise", "silence").
+
+    Item fields used:
+    - ``expected_audio_attributes``: list of attribute strings (overrides config)
+    """
+
+    name = "audio_attribute_reward"
+
+    def __init__(
+        self,
+        weight: float = 1.0,
+        cfg: AudioAttributeConfig | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.weight = weight
+        self.cfg = cfg or AudioAttributeConfig()
+
+    async def evaluate(
+        self,
+        item: dict[str, Any],
+        trajectory: Trajectory,
+        tool_context: Any,
+    ) -> RewardResult:
+        expected = item.get("expected_audio_attributes", self.cfg.expected_attributes)
+        text = (trajectory.final_output or "").lower()
+
+        matched = [attr for attr in expected if attr.lower() in text]
+        missing = [attr for attr in expected if attr.lower() not in text]
+
+        positive = len(matched) * self.cfg.attribute_reward
+        negative = len(missing) * self.cfg.missing_penalty
+        score = max(0.0, min(self.cfg.max_reward, positive - negative))
+
+        reason_parts: list[str] = []
+        if matched:
+            reason_parts.append(f"matched: {', '.join(matched)}")
+        if missing:
+            reason_parts.append(f"missing: {', '.join(missing)}")
+        if not reason_parts:
+            reason_parts.append("no audio attributes expected")
+
+        return RewardResult(
+            name=self.name,
+            score=score,
+            reason="; ".join(reason_parts),
+            weight=self.weight,
+            metadata={
+                "matched": matched,
+                "missing": missing,
+                "positive_score": positive,
+                "negative_score": negative,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
 # Multimodal composite reward
 # ---------------------------------------------------------------------------
 
@@ -317,13 +565,13 @@ class MultimodalCompositeConfig:
     Attributes
     ----------
     vision_weight:
-        Weight for the vision-match component.
+        Weight for the vision-match component (when using legacy constructor).
 
     attribute_weight:
-        Weight for the image-attribute component.
+        Weight for the image-attribute component (when using legacy constructor).
 
     text_weight:
-        Weight for a text-exact-match fallback component.
+        Weight for a text-exact-match fallback component (when using legacy constructor).
 
     aggregation:
         How to combine component scores: "weighted_sum" or "max".
@@ -336,11 +584,12 @@ class MultimodalCompositeConfig:
 
 
 class MultimodalCompositeReward(BaseReward):
-    """Combines vision match and image attribute rewards.
+    """Combines arbitrary :class:`BaseReward` components into a single score.
 
-    This is a convenience composite that wraps :class:`VisionMatchReward`
-    and :class:`ImageAttributeReward` with a text-match fallback, producing
-    a single weighted score.
+    Accepts any list of reward instances (vision, audio, text, etc.) and
+    aggregates their scores using ``aggregation`` mode. When no components are
+    provided, falls back to a built-in vision + image-attribute + text-match
+    composite for backward compatibility.
     """
 
     name = "multimodal_composite_reward"
@@ -348,6 +597,7 @@ class MultimodalCompositeReward(BaseReward):
     def __init__(
         self,
         weight: float = 1.0,
+        components: list[BaseReward] | None = None,
         vision_cfg: VisionMatchConfig | None = None,
         attr_cfg: ImageAttributeConfig | None = None,
         composite_cfg: MultimodalCompositeConfig | None = None,
@@ -355,9 +605,15 @@ class MultimodalCompositeReward(BaseReward):
     ) -> None:
         super().__init__(**kwargs)
         self.weight = weight
-        self._vision = VisionMatchReward(weight=1.0, cfg=vision_cfg)
-        self._attr = ImageAttributeReward(weight=1.0, cfg=attr_cfg)
         self.composite_cfg = composite_cfg or MultimodalCompositeConfig()
+        if components is not None:
+            self._components = components
+        else:
+            # Legacy backward-compatible default: vision + image-attribute + text fallback
+            self._components = [
+                VisionMatchReward(weight=1.0, cfg=vision_cfg),
+                ImageAttributeReward(weight=1.0, cfg=attr_cfg),
+            ]
 
     async def evaluate(
         self,
@@ -365,39 +621,39 @@ class MultimodalCompositeReward(BaseReward):
         trajectory: Trajectory,
         tool_context: Any,
     ) -> RewardResult:
-        vision_result = await self._vision.evaluate(item, trajectory, tool_context)
-        attr_result = await self._attr.evaluate(item, trajectory, tool_context)
+        results: list[RewardResult] = []
+        for comp in self._components:
+            results.append(await comp.evaluate(item, trajectory, tool_context))
 
-        # Text exact match fallback
+        # Text exact-match fallback (always included as an implicit component)
         expected = item.get("expected_output") or ""
         text_score = 1.0 if expected and trajectory.final_output == expected else 0.0
 
         if self.composite_cfg.aggregation == "max":
             score = max(
-                vision_result.score * self.composite_cfg.vision_weight,
-                attr_result.score * self.composite_cfg.attribute_weight,
+                *(r.score * r.weight for r in results),
                 text_score * self.composite_cfg.text_weight,
             )
         else:
             score = (
-                vision_result.score * self.composite_cfg.vision_weight
-                + attr_result.score * self.composite_cfg.attribute_weight
+                sum(r.score * r.weight for r in results)
                 + text_score * self.composite_cfg.text_weight
             )
+
+        reason_parts = [f"{r.name}={r.score:.3f} ({r.reason})" for r in results]
+        reason_parts.append(f"text={text_score:.3f}")
+
+        metadata: dict[str, Any] = {
+            "aggregation": self.composite_cfg.aggregation,
+            "text_score": text_score,
+        }
+        for r in results:
+            metadata[f"{r.name}_score"] = r.score
 
         return RewardResult(
             name=self.name,
             score=score,
-            reason=(
-                f"vision={vision_result.score:.3f} ({vision_result.reason}), "
-                f"attr={attr_result.score:.3f} ({attr_result.reason}), "
-                f"text={text_score:.3f}"
-            ),
+            reason=", ".join(reason_parts),
             weight=self.weight,
-            metadata={
-                "vision_score": vision_result.score,
-                "attribute_score": attr_result.score,
-                "text_score": text_score,
-                "aggregation": self.composite_cfg.aggregation,
-            },
+            metadata=metadata,
         )

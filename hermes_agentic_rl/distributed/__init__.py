@@ -17,7 +17,9 @@ from hermes_agentic_rl.distributed.fault_tolerant_pool import (
     FaultTolerantRolloutPool,
 )
 from hermes_agentic_rl.distributed.model_parallel import (
+    DeepSpeedIntegration,
     HybridParallelStrategy,
+    MegatronIntegration,
     ModelParallelConfig,
     ModelParallelStrategy,
     PipelineParallelStrategy,
@@ -32,12 +34,14 @@ from hermes_agentic_rl.distributed.mp_pool import (
 )
 
 __all__ = [
+    "DeepSpeedIntegration",
     "ElasticScalingConfig",
     "FaultTolerantPoolConfig",
     "FaultTolerantRolloutPool",
     "HybridParallelStrategy",
     "MPRolloutPool",
     "MPRolloutPoolConfig",
+    "MegatronIntegration",
     "ModelParallelConfig",
     "ModelParallelStrategy",
     "PipelineParallelStrategy",

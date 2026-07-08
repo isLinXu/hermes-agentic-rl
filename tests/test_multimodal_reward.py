@@ -17,6 +17,10 @@ import pytest
 
 from hermes_agentic_rl.core.types import Trajectory
 from hermes_agentic_rl.rewards.multimodal import (
+    AudioAttributeConfig,
+    AudioAttributeReward,
+    AudioMatchConfig,
+    AudioMatchReward,
     ImageAttributeConfig,
     ImageAttributeReward,
     MultimodalCompositeConfig,
@@ -27,7 +31,6 @@ from hermes_agentic_rl.rewards.multimodal import (
     _jaccard_similarity,
     _tokenize_text,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -341,7 +344,7 @@ class TestMultimodalCompositeReward:
         )
         assert result.score > 0.0
         assert result.metadata["aggregation"] == "weighted_sum"
-        assert "vision_score" in result.metadata
+        assert "vision_match_reward_score" in result.metadata
 
     def test_max_aggregation(self):
         composite_cfg = MultimodalCompositeConfig(
@@ -421,9 +424,45 @@ class TestMultimodalCompositeReward:
                 None,
             )
         )
-        assert "vision=" in result.reason
-        assert "attr=" in result.reason
+        assert "vision_match_reward=" in result.reason
+        assert "image_attribute_reward=" in result.reason
         assert "text=" in result.reason
+
+    def test_custom_components_list(self):
+        audio_cfg = AudioMatchConfig(similarity_threshold=0.1, use_audio_model=False)
+        audio_attr_cfg = AudioAttributeConfig(
+            expected_attributes=["speech"],
+            attribute_reward=1.0,
+        )
+        components = [
+            AudioMatchReward(weight=0.4, cfg=audio_cfg),
+            AudioAttributeReward(weight=0.6, cfg=audio_attr_cfg),
+        ]
+        composite_cfg = MultimodalCompositeConfig(
+            text_weight=0.0,
+            aggregation="weighted_sum",
+        )
+        reward = MultimodalCompositeReward(
+            components=components,
+            composite_cfg=composite_cfg,
+        )
+        traj = _make_trajectory("speech segment with music and noise")
+        result = _run_async(
+            reward.evaluate(
+                {
+                    "task_id": "t1",
+                    "audio_description": "speech segment",
+                    "expected_audio_attributes": ["speech"],
+                },
+                traj,
+                None,
+            )
+        )
+        assert result.score > 0.0
+        assert "audio_match_reward=" in result.reason
+        assert "audio_attribute_reward=" in result.reason
+        assert result.metadata["audio_match_reward_score"] > 0.0
+        assert result.metadata["audio_attribute_reward_score"] > 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -462,3 +501,225 @@ class TestConfigs:
         )
         assert len(cfg.expected_attributes) == 2
         assert len(cfg.penalty_attributes) == 1
+
+
+# ---------------------------------------------------------------------------
+# AudioMatchReward tests
+# ---------------------------------------------------------------------------
+
+
+class TestAudioMatchReward:
+    def test_missing_audio_description_returns_zero(self):
+        reward = AudioMatchReward()
+        traj = _make_trajectory("speech segment")
+        result = _run_async(
+            reward.evaluate({"task_id": "t1"}, traj, None)
+        )
+        assert result.score == 0.0
+        assert "no audio_description" in result.reason
+
+    def test_high_similarity_positive_reward(self):
+        cfg = AudioMatchConfig(
+            similarity_threshold=0.3,
+            positive_reward=1.0,
+            negative_reward=0.0,
+            use_audio_model=False,
+        )
+        reward = AudioMatchReward(cfg=cfg)
+        traj = _make_trajectory("speech segment with background noise")
+        result = _run_async(
+            reward.evaluate(
+                {"task_id": "t1", "audio_description": "speech segment with noise"},
+                traj,
+                None,
+            )
+        )
+        assert result.score == 1.0
+        assert "threshold" in result.reason
+        assert result.metadata["method"] == "text_jaccard"
+
+    def test_low_similarity_negative_reward(self):
+        cfg = AudioMatchConfig(
+            similarity_threshold=0.9,
+            positive_reward=1.0,
+            negative_reward=0.0,
+            use_audio_model=False,
+        )
+        reward = AudioMatchReward(cfg=cfg)
+        traj = _make_trajectory("hello world")
+        result = _run_async(
+            reward.evaluate(
+                {"task_id": "t1", "audio_description": "speech segment"},
+                traj,
+                None,
+            )
+        )
+        assert result.score == 0.0
+
+    def test_audio_model_disabled_by_default(self):
+        reward = AudioMatchReward()
+        assert reward.cfg.use_audio_model is False
+        assert reward._audio_model is None
+
+    def test_audio_model_load_failure_falls_back_to_text(self):
+        cfg = AudioMatchConfig(use_audio_model=True, audio_model_name="nonexistent/model")
+        reward = AudioMatchReward(cfg=cfg)
+        traj = _make_trajectory("speech segment")
+        result = _run_async(
+            reward.evaluate(
+                {"task_id": "t1", "audio_description": "speech segment"},
+                traj,
+                None,
+            )
+        )
+        assert result.metadata["method"] == "text_jaccard"
+
+    def test_audio_attributes_alias(self):
+        reward = AudioMatchReward()
+        traj = _make_trajectory("speech segment")
+        result = _run_async(
+            reward.evaluate(
+                {"task_id": "t1", "audio_attributes": "speech segment"},
+                traj,
+                None,
+            )
+        )
+        assert result.score > 0.0
+
+    def test_weight_forwarded(self):
+        reward = AudioMatchReward(weight=0.5)
+        assert reward.weight == 0.5
+
+
+# ---------------------------------------------------------------------------
+# AudioAttributeReward tests
+# ---------------------------------------------------------------------------
+
+
+class TestAudioAttributeReward:
+    def test_matched_expected_attributes(self):
+        cfg = AudioAttributeConfig(
+            expected_attributes=["speech", "music", "noise"],
+            attribute_reward=0.33,
+            max_reward=1.0,
+        )
+        reward = AudioAttributeReward(cfg=cfg)
+        traj = _make_trajectory("segment contains speech music and noise")
+        result = _run_async(
+            reward.evaluate({"task_id": "t1"}, traj, None)
+        )
+        assert result.score > 0.0
+        assert "speech" in result.metadata["matched"]
+        assert "music" in result.metadata["matched"]
+        assert "noise" in result.metadata["matched"]
+
+    def test_missing_attributes_penalty(self):
+        cfg = AudioAttributeConfig(
+            expected_attributes=["speech", "silence"],
+            attribute_reward=0.5,
+            missing_penalty=0.3,
+            max_reward=1.0,
+        )
+        reward = AudioAttributeReward(cfg=cfg)
+        traj = _make_trajectory("segment contains speech")
+        result = _run_async(
+            reward.evaluate({"task_id": "t1"}, traj, None)
+        )
+        # 0.5 (speech) - 0.3 (silence missing) = 0.2
+        assert result.score == 0.2
+        assert "silence" in result.metadata["missing"]
+
+    def test_no_attributes_expected(self):
+        cfg = AudioAttributeConfig(
+            expected_attributes=[],
+        )
+        reward = AudioAttributeReward(cfg=cfg)
+        traj = _make_trajectory("hello world")
+        result = _run_async(
+            reward.evaluate({"task_id": "t1"}, traj, None)
+        )
+        assert result.score == 0.0
+        assert "no audio attributes expected" in result.reason
+
+    def test_max_reward_cap(self):
+        cfg = AudioAttributeConfig(
+            expected_attributes=["a", "b", "c", "d", "e"],
+            attribute_reward=0.5,
+            max_reward=1.0,
+        )
+        reward = AudioAttributeReward(cfg=cfg)
+        traj = _make_trajectory("a b c d e")
+        result = _run_async(
+            reward.evaluate({"task_id": "t1"}, traj, None)
+        )
+        assert result.score == 1.0  # capped
+
+    def test_item_overrides_config_attributes(self):
+        cfg = AudioAttributeConfig(
+            expected_attributes=["speech"],
+        )
+        reward = AudioAttributeReward(cfg=cfg)
+        traj = _make_trajectory("music and noise")
+        result = _run_async(
+            reward.evaluate(
+                {"task_id": "t1", "expected_audio_attributes": ["music", "noise"]},
+                traj,
+                None,
+            )
+        )
+        assert result.score > 0.0
+        assert "music" in result.metadata["matched"]
+
+    def test_case_insensitive_matching(self):
+        cfg = AudioAttributeConfig(
+            expected_attributes=["SPEECH", "MUSIC"],
+        )
+        reward = AudioAttributeReward(cfg=cfg)
+        traj = _make_trajectory("a speech music segment")
+        result = _run_async(
+            reward.evaluate({"task_id": "t1"}, traj, None)
+        )
+        assert result.score > 0.0
+
+    def test_empty_output(self):
+        cfg = AudioAttributeConfig(
+            expected_attributes=["speech"],
+        )
+        reward = AudioAttributeReward(cfg=cfg)
+        traj = _make_trajectory("")
+        result = _run_async(
+            reward.evaluate({"task_id": "t1"}, traj, None)
+        )
+        assert result.score == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Audio config dataclass tests
+# ---------------------------------------------------------------------------
+
+
+class TestAudioConfigs:
+    def test_audio_match_config_defaults(self):
+        cfg = AudioMatchConfig()
+        assert cfg.similarity_threshold == 0.7
+        assert cfg.positive_reward == 1.0
+        assert cfg.negative_reward == 0.0
+        assert cfg.use_audio_model is False
+        assert "wav2vec2" in cfg.audio_model_name
+
+    def test_audio_attribute_config_defaults(self):
+        cfg = AudioAttributeConfig()
+        assert cfg.expected_attributes == []
+        assert cfg.attribute_reward == 0.25
+        assert cfg.missing_penalty == 0.0
+        assert cfg.max_reward == 1.0
+
+    def test_audio_attribute_config_with_attributes(self):
+        cfg = AudioAttributeConfig(
+            expected_attributes=["speech", "music"],
+            attribute_reward=0.5,
+            missing_penalty=0.2,
+        )
+        assert len(cfg.expected_attributes) == 2
+        assert cfg.attribute_reward == 0.5
+        assert cfg.missing_penalty == 0.2
