@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from hermes_agentic_rl._compat import stable
 
+
+@stable
 @dataclass(slots=True)
 class RolloutStep:
     turn_index: int
@@ -14,6 +17,7 @@ class RolloutStep:
     metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+@stable
 @dataclass(slots=True)
 class Trajectory:
     task_id: str
@@ -25,6 +29,7 @@ class Trajectory:
     metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+@stable
 @dataclass(slots=True)
 class RewardResult:
     name: str
@@ -34,6 +39,7 @@ class RewardResult:
     metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+@stable
 @dataclass(slots=True)
 class RewardSummary:
     final_score: float
@@ -41,6 +47,7 @@ class RewardSummary:
     metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+@stable
 @dataclass(slots=True)
 class TrainSample:
     task_id: str
@@ -51,5 +58,6 @@ class TrainSample:
     metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+@stable
 def dataclass_to_dict(value: Any) -> dict[str, Any]:
     return asdict(value)

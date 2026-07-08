@@ -27,10 +27,11 @@ import math
 import random
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, TypeAlias, cast
 
 import torch
 
+from hermes_agentic_rl._compat import stable
 from hermes_agentic_rl.agent_loop.base import BaseAgentLoop
 from hermes_agentic_rl.agent_loop.policy_loop import PolicyAgentLoop
 from hermes_agentic_rl.algos.base import (
@@ -199,7 +200,7 @@ def _scheduled_scalar(
 
 
 # TrainStats is defined in train_stats.py; re-export here for backward compat.
-TrainStats = _TrainStats
+TrainStats: TypeAlias = _TrainStats
 
 
 class OnPolicyTrainer(SFTMixin):
@@ -218,6 +219,7 @@ class OnPolicyTrainer(SFTMixin):
     algo_name: str = "on_policy"
     _reward_shaping_fn: Callable[[list[RolloutRecord]], list[RolloutRecord]] | None = None
 
+    @stable
     def __init__(
         self,
         policy: LLMBackend,
@@ -1472,6 +1474,7 @@ class OnPolicyTrainer(SFTMixin):
             agg.extra["replay_n_in_batch"] = float(n_replayed)
         return agg
 
+    @stable
     def train(self) -> TrainStats:
         start = int(getattr(self, "_start_iter", 0))
         if start == 0:

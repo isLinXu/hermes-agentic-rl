@@ -3,9 +3,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from hermes_agentic_rl._compat import stable
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
 
 
+@stable
 class BaseReward(ABC):
     name: str
 
