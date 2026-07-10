@@ -216,9 +216,26 @@ class SFTMixin:
         for source in (cfg, getattr(self.policy, "model", None)):
             if source is None:
                 continue
-            max_len = getattr(source, "max_len", None)
-            if isinstance(max_len, int) and max_len > 0:
-                return max_len
+            for attr in ("max_len", "max_new_tokens", "n_positions", "max_position_embeddings"):
+                max_len = getattr(source, attr, None)
+                if isinstance(max_len, int) and max_len > 0:
+                    return max_len
+            # Check model.config for HF models
+            model_config = getattr(source, "config", None)
+            if model_config is not None:
+                for attr in ("n_positions", "max_position_embeddings", "max_length"):
+                    max_len = getattr(model_config, attr, None)
+                    if isinstance(max_len, int) and max_len > 0:
+                        return max_len
+        return None
+        cfg = getattr(self.policy, "cfg", None)
+        for source in (cfg, getattr(self.policy, "model", None)):
+            if source is None:
+                continue
+            for attr in ("max_len", "max_new_tokens", "n_positions", "max_position_embeddings"):
+                max_len = getattr(source, attr, None)
+                if isinstance(max_len, int) and max_len > 0:
+                    return max_len
         return None
 
     def _forward_model_logits(self, inp: torch.Tensor) -> torch.Tensor:

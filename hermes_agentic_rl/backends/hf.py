@@ -39,13 +39,18 @@ from hermes_agentic_rl.backends.base import (
 
 @dataclass(slots=True)
 class HFBackendConfig:
-    model_name_or_path: str = "sshleifer/tiny-gpt2"  # tiny default that real tests can replace
+    model_name_or_path: str = "sshleifer/tiny-gpt2"
     device: str = "cpu"
     dtype: str = "float32"
     with_value_head: bool = False
-    value_head_dim: int | None = None  # inferred from hidden_size if None
+    value_head_dim: int | None = None
     trust_remote_code: bool = False
     flash_attention: bool = False
+    use_lora: bool = False
+    lora_r: int = 8
+    lora_alpha: int = 16
+    lora_dropout: float = 0.0
+    lora_target_modules: list[str] | None = None
     extra_model_kwargs: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -98,7 +103,7 @@ class HFCausalLMBackend(LLMBackend):
             raise BackendUnavailableError("HFCausalLMBackend requires torch")
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer
-        except Exception as exc:  # pragma: no cover — exercised only when transformers absent
+        except Exception as exc:
             raise BackendUnavailableError(
                 "HFCausalLMBackend requires `transformers`. Install with: pip install -e '.[hf]'"
             ) from exc
@@ -115,12 +120,36 @@ class HFCausalLMBackend(LLMBackend):
         extra_kw = dict(self.cfg.extra_model_kwargs)
         if self.cfg.flash_attention:
             extra_kw["attn_implementation"] = "flash_attention_2"
-        self.model = AutoModelForCausalLM.from_pretrained(  # type: ignore[call-arg]
+        self.model = AutoModelForCausalLM.from_pretrained(
             self.cfg.model_name_or_path,
             torch_dtype=dtype,
             trust_remote_code=self.cfg.trust_remote_code,
             **extra_kw,
         ).to(device=torch.device(self.cfg.device))
+
+        # Apply LoRA if configured
+        if self.cfg.use_lora:
+            try:
+                from peft import LoraConfig, get_peft_model
+            except ImportError as exc:
+                raise BackendUnavailableError(
+                    "HFCausalLMBackend: use_lora=True requires `peft`. "
+                    "Install with: pip install peft"
+                ) from exc
+            target_modules = self.cfg.lora_target_modules
+            if target_modules is None:
+                target_modules = ["c_attn", "c_proj"]
+            lora_config = LoraConfig(
+                r=self.cfg.lora_r,
+                lora_alpha=self.cfg.lora_alpha,
+                lora_dropout=self.cfg.lora_dropout,
+                target_modules=target_modules,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            self.model = get_peft_model(self.model, lora_config)
+            self.model.print_trainable_parameters()
+
         self._gradient_checkpointing_enabled = False
         self._gradient_checkpointing_prev_use_cache: Any = None
 
@@ -135,22 +164,12 @@ class HFCausalLMBackend(LLMBackend):
             hidden = int(cast(int | str | float, inferred_hidden))
             self.value_head = nn.Linear(hidden, 1, bias=True).to(self.cfg.device)
 
-    # ---- helpers ----
-
     def _to_tensor(self, ids: list[int]) -> torch.Tensor:
         return torch.tensor(ids, dtype=torch.long, device=self.cfg.device)
 
     def set_gradient_checkpointing(self, enabled: bool) -> bool:
-        """Toggle HF activation checkpointing and preserve ``use_cache``.
-
-        Transformers models generally require ``config.use_cache=False`` while
-        gradient checkpointing is enabled. Generation/rollout is faster and
-        safer with the original cache setting, so the trainer toggles this
-        around the update path.
-        """
         if not hasattr(self.model, "gradient_checkpointing_enable"):
             return False
-
         config = getattr(self.model, "config", None)
         if enabled:
             if self._gradient_checkpointing_enabled:
@@ -167,7 +186,6 @@ class HFCausalLMBackend(LLMBackend):
                     pass
             self._gradient_checkpointing_enabled = True
             return True
-
         if not self._gradient_checkpointing_enabled:
             return True
         disable = getattr(self.model, "gradient_checkpointing_disable", None)
@@ -183,8 +201,6 @@ class HFCausalLMBackend(LLMBackend):
         self._gradient_checkpointing_enabled = False
         return True
 
-    # ---- LLMBackend API ----
-
     @torch.no_grad() if _HAS_TORCH else (lambda f: f)
     def generate(
         self,
@@ -195,10 +211,6 @@ class HFCausalLMBackend(LLMBackend):
         stop_strings: list[str] | None = None,
     ) -> GenerationOutput:
         self.model.eval()
-        # MPS: torch.Generator(device='mps') is broken (RuntimeError: Placeholder
-        # storage not allocated). Use global torch.manual_seed() which is
-        # reproducible on MPS for multinomial. For CUDA/CPU we also prefer this
-        # for simplicity.
         if seed is not None:
             torch.manual_seed(int(seed))
         ids = list(prompt_ids)
@@ -234,20 +246,12 @@ class HFCausalLMBackend(LLMBackend):
         )
 
     def _set_mode(self) -> None:
-        """Put the model in train() when grad is enabled, eval() otherwise.
-
-        This makes dropout/LayerNorm behavior consistent between ``score``
-        (GRPO) and ``score_with_value`` (PPO), and aligns with the caller's
-        autograd context (e.g. ``@torch.no_grad`` → eval, training path →
-        train).
-        """
         self.model.train(torch.is_grad_enabled())
 
     def _forward_with_hidden(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return (logits [B,T,V], last_hidden_state [B,T,D])."""
         self._set_mode()
         out = self.model(ids, output_hidden_states=True)
-        hidden = out.hidden_states[-1]  # type: ignore[union-attr]
+        hidden = out.hidden_states[-1]
         return out.logits, hidden
 
     def score(
@@ -275,7 +279,6 @@ class HFCausalLMBackend(LLMBackend):
         response_ids_list: list[list[int]],
         temperature: float = 1.0,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """True batched score: one forward over a [B, T_in] padded batch."""
         logp, _ent, _val, mask = self._score_core_batch(
             prompt_ids_list,
             response_ids_list,
@@ -354,16 +357,16 @@ class HFCausalLMBackend(LLMBackend):
             if self.value_head is None:
                 raise RuntimeError("value head is required for value scoring")
             out = self.model(inp, attention_mask=attn_mask, output_hidden_states=True)
-            logits = out.logits  # [B, T_in, V]
-            hidden = out.hidden_states[-1]  # [B, T_in, D]
+            logits = out.logits
+            hidden = out.hidden_states[-1]
             values_full = self.value_head(hidden).squeeze(-1)
         else:
-            logits = self.model(inp, attention_mask=attn_mask).logits  # [B, T_in, V]
+            logits = self.model(inp, attention_mask=attn_mask).logits
             values_full = torch.zeros(B, T_in, dtype=logits.dtype, device=device)
 
         policy_logits = _logprob_logits(logits, temperature)
         logp_all = torch.log_softmax(policy_logits, dim=-1)
-        per_tok_logp = logp_all.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)  # [B, T_in]
+        per_tok_logp = logp_all.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)
         if need_entropy:
             probs = torch.softmax(policy_logits, dim=-1)
             ent_all = -(probs * logp_all).sum(dim=-1)
