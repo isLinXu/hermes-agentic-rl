@@ -244,6 +244,65 @@ class Hermes3DatasetEnv(BaseEnv):
         )
 
     @classmethod
+    def from_local_json(
+        cls,
+        json_path: str,
+        *,
+        limit: int | None = None,
+        shuffle: bool = True,
+        seed: int = 42,
+        max_prompt_chars: int = 2048,
+        val_fraction: float = 0.05,
+        reward_weight: float = 1.0,
+    ) -> Hermes3DatasetEnv:
+        """Load from a local JSON file (list of dicts with 'conversations')."""
+        import json
+        with open(json_path, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+        if limit is not None:
+            rows = rows[:limit]
+        items: list[dict[str, Any]] = []
+        for row_idx, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            conversations = row.get("conversations")
+            if not isinstance(conversations, list):
+                continue
+            extracted = _extract_instruction_and_reference(conversations)
+            if extracted is None:
+                continue
+            instruction, reference, messages = extracted
+            instruction = _truncate_instruction(
+                instruction, max_prompt_chars=max_prompt_chars
+            )
+            items.append(
+                {
+                    "task_id": f"hermes3::local::{row_idx}",
+                    "instruction": instruction,
+                    "reference_response": reference,
+                    "messages": messages,
+                    "max_prompt_chars": max_prompt_chars,
+                    "dataset_name": "local_json",
+                    "split": "train",
+                }
+            )
+        if not items:
+            raise ValueError(f"No valid items extracted from {json_path}")
+        if val_fraction > 0 and len(items) > 1:
+            rng = random.Random(seed)
+            shuffled = list(items)
+            rng.shuffle(shuffled)
+            val_size = max(1, int(len(shuffled) * val_fraction))
+            train_items = shuffled[val_size:]
+            val_items = shuffled[:val_size]
+            for it in train_items:
+                it["_split"] = "train"
+            for it in val_items:
+                it["_split"] = "val"
+            items = train_items
+        return cls(items, reward_weight=reward_weight)
+
+    @classmethod
     def from_hf_dataset(
         cls,
         dataset_name: str = DEFAULT_REPO_ID,
