@@ -66,7 +66,7 @@ from hermes_agentic_rl.backends.base import LLMBackend
 # ---------------------------------------------------------------------------
 
 HINT_START = "[HINT_START]"
-HINT_END   = "[HINT_END]"
+HINT_END = "[HINT_END]"
 
 
 def wrap_hint(hint: str) -> str:
@@ -77,9 +77,8 @@ def wrap_hint(hint: str) -> str:
 def extract_hint_text(text: str) -> str | None:
     """Parse [HINT_START]...[HINT_END] from judge output."""
     import re
-    m = re.search(
-        r"\[HINT_START\](.*?)\[HINT_END\]", text, re.DOTALL
-    )
+
+    m = re.search(r"\[HINT_START\](.*?)\[HINT_END\]", text, re.DOTALL)
     return m.group(1).strip() if m else None
 
 
@@ -100,9 +99,7 @@ class OPDJudge:
     def __init__(self, judge_fn: Any) -> None:
         self._fn = judge_fn
 
-    async def extract_hint(
-        self, response: str, next_state: str
-    ) -> str | None:
+    async def extract_hint(self, response: str, next_state: str) -> str | None:
         raw = await self._fn(response, next_state)
         if raw is None:
             return None
@@ -136,8 +133,8 @@ class OPDConfig:
 
     kl_coef: float = 0.02
     clip_eps: float = 0.2
-    clip_eps_high: float = 0.28   # asymmetric upper clip (OpenClaw-RL §3.1)
-    adv_diff_clip: float = 1.0    # OpenClaw-RL Eq.6 log-prob-diff clip
+    clip_eps_high: float = 0.28  # asymmetric upper clip (OpenClaw-RL §3.1)
+    adv_diff_clip: float = 1.0  # OpenClaw-RL Eq.6 log-prob-diff clip
     skip_missing_hints: bool = False
     kl_estimator: Literal["k1", "k2", "k3"] = "k3"
 
@@ -176,8 +173,13 @@ class OPDAlgo(BaseAlgo):
         if not records:
             zero = torch.zeros((), dtype=torch.float32)
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
+                mean_reward=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
                 n_records=0,
                 extra={"algo": "opd", "n_with_hints": 0},
             )
@@ -200,7 +202,10 @@ class OPDAlgo(BaseAlgo):
         cache_hit_opd = False
         if with_hints:
             opd_loss, kl, cf, n, cache_hit_opd = self._opd_loss(
-                policy, ref_policy, with_hints, batch=batch,
+                policy,
+                ref_policy,
+                with_hints,
+                batch=batch,
             )
             total_loss = total_loss + opd_loss
             total_kl += kl
@@ -210,7 +215,10 @@ class OPDAlgo(BaseAlgo):
         # ── KL-only loss for records without hints ───────────────────────
         if without_hints and ref_policy is not None:
             kl_loss, kl_v = self._kl_only_loss(
-                policy, ref_policy, without_hints, batch=batch,
+                policy,
+                ref_policy,
+                without_hints,
+                batch=batch,
             )
             total_loss = total_loss + cfg.kl_coef * kl_loss
             total_kl += kl_v
@@ -264,7 +272,7 @@ class OPDAlgo(BaseAlgo):
         """
         cfg = self.cfg
         prompt_ids_list = [r.prompt_ids for r in records]
-        resp_ids_list   = [r.response_ids for r in records]
+        resp_ids_list = [r.response_ids for r in records]
 
         # New logprobs from current policy (or from the hybrid shared cache).
         cache_hit = False
@@ -274,14 +282,15 @@ class OPDAlgo(BaseAlgo):
             and batch.shared_logprobs_temperature is not None
             and abs(float(batch.shared_logprobs_temperature) - 1.0) < 1e-9
         ):
+            shared_cache = batch.shared_new_logprobs
+            assert shared_cache is not None
             new_logp, mask = stack_cached_logprobs(
-                batch.shared_new_logprobs, records  # type: ignore[arg-type]
+                shared_cache,
+                records,  # type: ignore[arg-type]
             )
             cache_hit = True
         else:
-            new_logp, mask = policy.score_batch(
-                prompt_ids_list, resp_ids_list, temperature=1.0
-            )
+            new_logp, mask = policy.score_batch(prompt_ids_list, resp_ids_list, temperature=1.0)
         B, T = new_logp.shape
         dtype = new_logp.dtype
         device = new_logp.device
@@ -293,7 +302,10 @@ class OPDAlgo(BaseAlgo):
             if R > 0 and rec.old_logprobs:
                 R_eff = min(R, len(rec.old_logprobs))
                 old_logp[i, :R_eff] = old_logprobs_tensor(
-                    rec, length=R_eff, dtype=dtype, device=device,
+                    rec,
+                    length=R_eff,
+                    dtype=dtype,
+                    device=device,
                 )
 
         # Teacher logprobs (pre-computed by judge/teacher model)
@@ -303,9 +315,7 @@ class OPDAlgo(BaseAlgo):
             R = int(mask[i].sum().item())
             if R > 0 and t_lp:
                 chunk = t_lp[-R:]
-                teacher_logp[i, :len(chunk)] = torch.tensor(
-                    chunk, dtype=dtype, device=device
-                )
+                teacher_logp[i, : len(chunk)] = torch.tensor(chunk, dtype=dtype, device=device)
 
         # OPD token-level advantage: A_t = clip(log π_T - log π_old, ±adv_diff_clip)
         raw_adv = teacher_logp - old_logp
@@ -318,7 +328,8 @@ class OPDAlgo(BaseAlgo):
         # cares about. Absent the key the scale is a no-op (1.0).
         adv_scale = torch.tensor(
             [float(r.metadata.get("opd_adv_scale", 1.0)) for r in records],
-            dtype=dtype, device=device,
+            dtype=dtype,
+            device=device,
         ).unsqueeze(1)
         if not torch.allclose(adv_scale, torch.ones_like(adv_scale)):
             adv = adv * adv_scale
@@ -333,10 +344,7 @@ class OPDAlgo(BaseAlgo):
         policy_loss = (pg * m).sum() / m.sum().clamp(min=1)
 
         clip_frac = float(
-            ((ratio - 1.0).abs() > max(cfg.clip_eps, cfg.clip_eps_high))
-            .float()
-            .mean()
-            .item()
+            ((ratio - 1.0).abs() > max(cfg.clip_eps, cfg.clip_eps_high)).float().mean().item()
         )
 
         # KL regularisation vs reference (uses the shared, configurable
@@ -372,7 +380,7 @@ class OPDAlgo(BaseAlgo):
     ) -> tuple[torch.Tensor, float]:
         """Plain KL(π_θ ‖ π_ref) for records without teacher hints."""
         prompt_ids_list = [r.prompt_ids for r in records]
-        resp_ids_list   = [r.response_ids for r in records]
+        resp_ids_list = [r.response_ids for r in records]
 
         if (
             batch is not None
@@ -380,17 +388,16 @@ class OPDAlgo(BaseAlgo):
             and batch.shared_logprobs_temperature is not None
             and abs(float(batch.shared_logprobs_temperature) - 1.0) < 1e-9
         ):
+            shared_cache = batch.shared_new_logprobs
+            assert shared_cache is not None
             new_logp, mask = stack_cached_logprobs(
-                batch.shared_new_logprobs, records  # type: ignore[arg-type]
+                shared_cache,
+                records,  # type: ignore[arg-type]
             )
         else:
-            new_logp, mask = policy.score_batch(
-                prompt_ids_list, resp_ids_list, temperature=1.0
-            )
+            new_logp, mask = policy.score_batch(prompt_ids_list, resp_ids_list, temperature=1.0)
         with torch.no_grad():
-            ref_logp, _ = ref_policy.score_batch(
-                prompt_ids_list, resp_ids_list, temperature=1.0
-            )
+            ref_logp, _ = ref_policy.score_batch(prompt_ids_list, resp_ids_list, temperature=1.0)
         T = min(new_logp.shape[1], ref_logp.shape[1])
         kl_loss = kl_from_logprobs_batched(
             new_logp[:, :T],

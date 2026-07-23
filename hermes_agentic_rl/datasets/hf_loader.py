@@ -130,11 +130,7 @@ def load_hf_dataset(
     if shuffle and hasattr(dataset, "shuffle"):
         dataset = dataset.shuffle(seed=seed)
 
-    rows_iter: Iterable[dict[str, Any]]
-    if streaming:
-        rows_iter = dataset
-    else:
-        rows_iter = [dict(row) for row in dataset]
+    rows_iter: Iterable[dict[str, Any]] = dataset if streaming else [dict(row) for row in dataset]
 
     if limit is not None:
         if streaming:

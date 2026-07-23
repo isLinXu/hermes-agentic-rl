@@ -39,7 +39,7 @@ def test_online_self_evolve_cli_runs_cycle_and_skill_export(
                             }
                         ],
                     },
-                    {"role": "tool", "name": "write_file", "content": "{\"ok\": true}"},
+                    {"role": "tool", "name": "write_file", "content": '{"ok": true}'},
                     {"role": "user", "content": "great, thanks"},
                 ],
             }

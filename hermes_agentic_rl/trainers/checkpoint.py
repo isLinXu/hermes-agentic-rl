@@ -102,9 +102,7 @@ def _atomic_save(obj: Any, path: Path, serializer: str = "torch") -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     # Use suffix-style temp name that torch.save accepts (no leading dot).
-    fd, tmp = tempfile.mkstemp(
-        dir=str(path.parent), prefix=f"tmp_{path.name}_", suffix=".partial"
-    )
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f"tmp_{path.name}_", suffix=".partial")
     try:
         if serializer == "torch":
             os.close(fd)  # let torch manage its own handle
@@ -246,11 +244,7 @@ class CheckpointManager:
     def list_checkpoints(self) -> list[int]:
         """List available checkpoint iterations."""
         dirs = sorted(self.base_dir.glob("iter_*"))
-        return [
-            int(d.name.replace("iter_", ""))
-            for d in dirs
-            if d.name.startswith("iter_")
-        ]
+        return [int(d.name.replace("iter_", "")) for d in dirs if d.name.startswith("iter_")]
 
     def _load_from_dir(self, ckpt_dir: Path) -> CheckpointState | None:
         if not ckpt_dir.exists():
@@ -274,13 +268,9 @@ class CheckpointManager:
         # load fails. Source is our own atomic write, so this is safe.
         if optimizer_path.exists():
             try:
-                optimizer_state = torch.load(
-                    optimizer_path, map_location="cpu", weights_only=True
-                )
+                optimizer_state = torch.load(optimizer_path, map_location="cpu", weights_only=True)
             except Exception:
-                optimizer_state = torch.load(
-                    optimizer_path, map_location="cpu", weights_only=False
-                )
+                optimizer_state = torch.load(optimizer_path, map_location="cpu", weights_only=False)
         else:
             optimizer_state = None
         # RNG state contains numpy._reconstruct which is NOT whitelisted under
@@ -316,13 +306,9 @@ class CheckpointManager:
         prm_head_state: dict[str, Any] | None = None
         if prm_path.exists():
             try:
-                prm_head_state = torch.load(
-                    prm_path, map_location="cpu", weights_only=True
-                )
+                prm_head_state = torch.load(prm_path, map_location="cpu", weights_only=True)
             except Exception:
-                prm_head_state = torch.load(
-                    prm_path, map_location="cpu", weights_only=False
-                )
+                prm_head_state = torch.load(prm_path, map_location="cpu", weights_only=False)
 
         return CheckpointState(
             iteration=trainer_state["iteration"],

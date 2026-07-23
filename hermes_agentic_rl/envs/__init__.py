@@ -14,16 +14,26 @@ __all__ = [
     "CurriculumState",
     "EchoRewardComponent",
     "EchoTaskEnv",
+    "Fable5TraceConfig",
+    "Fable5TraceEnv",
+    "Fable5TraceReward",
+    "Hermes3DatasetEnv",
     "HermesReasoningTraceEnv",
     "HermesReasoningTraceReward",
     "HermesReasoningTracesConfig",
     "LetterCountingConfig",
     "LetterCountingEnv",
     "LetterCountingReward",
+    "MCPToolEnv",
+    "MCPToolRegistry",
+    "MCPToolReward",
+    "MCPToolSpec",
+    "MCPToolTask",
     "SimToolEnv",
     "SimToolRewardComponent",
     "TerminalTaskEnv",
     "build_context_benchmark_dataset",
+    "build_mcp_tool_dataset",
     "build_sim_tool_dataset",
     "calc_tool",
     "load_hermes_reasoning_trace_turns",
@@ -79,6 +89,22 @@ def __getattr__(name: str) -> Any:
             "EchoRewardComponent": EchoRewardComponent,
             "EchoTaskEnv": EchoTaskEnv,
         }[name]
+    if name in {"Fable5TraceConfig", "Fable5TraceEnv", "Fable5TraceReward"}:
+        from hermes_agentic_rl.envs.fable5_traces import (
+            Fable5TraceConfig,
+            Fable5TraceEnv,
+            Fable5TraceReward,
+        )
+
+        return {
+            "Fable5TraceConfig": Fable5TraceConfig,
+            "Fable5TraceEnv": Fable5TraceEnv,
+            "Fable5TraceReward": Fable5TraceReward,
+        }[name]
+    if name == "Hermes3DatasetEnv":
+        from hermes_agentic_rl.envs.hermes3_dataset_env import Hermes3DatasetEnv
+
+        return Hermes3DatasetEnv
     if name in {
         "HermesReasoningTraceEnv",
         "HermesReasoningTraceReward",
@@ -139,4 +165,29 @@ def __getattr__(name: str) -> Any:
         from hermes_agentic_rl.envs.terminal_task_env import TerminalTaskEnv
 
         return TerminalTaskEnv
+    if name in {
+        "MCPToolEnv",
+        "MCPToolRegistry",
+        "MCPToolReward",
+        "MCPToolSpec",
+        "MCPToolTask",
+        "build_mcp_tool_dataset",
+    }:
+        from hermes_agentic_rl.envs.mcp_tool_env import (
+            MCPToolEnv,
+            MCPToolRegistry,
+            MCPToolReward,
+            MCPToolSpec,
+            MCPToolTask,
+            build_mcp_tool_dataset,
+        )
+
+        return {
+            "MCPToolEnv": MCPToolEnv,
+            "MCPToolRegistry": MCPToolRegistry,
+            "MCPToolReward": MCPToolReward,
+            "MCPToolSpec": MCPToolSpec,
+            "MCPToolTask": MCPToolTask,
+            "build_mcp_tool_dataset": build_mcp_tool_dataset,
+        }[name]
     raise AttributeError(name)

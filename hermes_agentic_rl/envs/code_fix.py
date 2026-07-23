@@ -39,9 +39,11 @@ from hermes_agentic_rl.rewards.base import BaseReward
 # Bug database (curriculum levels 0-4)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CodeBug:
     """A single bug-fixing task."""
+
     bug_id: str
     level: int  # 0=easy (typo), 1=medium (missing line), 2=hard (logic), 3=very hard
     description: str
@@ -328,15 +330,17 @@ class CodeFixEnv(BaseEnv):
 
         for i in range(self._n_samples):
             bug = self._rng.choice(available)
-            items.append({
-                "id": f"bug_{i:04d}",
-                "bug_id": bug.bug_id,
-                "level": bug.level,
-                "description": bug.description,
-                "buggy_code": bug.buggy_code,
-                "test_code": bug.test_code,
-                "expected_keywords": bug.expected_keywords,
-            })
+            items.append(
+                {
+                    "id": f"bug_{i:04d}",
+                    "bug_id": bug.bug_id,
+                    "level": bug.level,
+                    "description": bug.description,
+                    "buggy_code": bug.buggy_code,
+                    "test_code": bug.test_code,
+                    "expected_keywords": bug.expected_keywords,
+                }
+            )
         return items
 
     async def get_next_item(self) -> dict[str, Any]:
@@ -347,11 +351,11 @@ class CodeFixEnv(BaseEnv):
         You are a code-fixing assistant. Below is a buggy Python function.
         Output ONLY the corrected function code inside <code>...</code> tags.
 
-        Description: {item['description']}
+        Description: {item["description"]}
 
         Buggy code:
         ```
-        {item['buggy_code'].strip()}
+        {item["buggy_code"].strip()}
         ```
 
         Please output the fixed code:
@@ -381,9 +385,7 @@ class CodeFixEnv(BaseEnv):
             )
         ]
 
-    def compute_sequence_reward(
-        self, item: dict[str, Any], sequence: str
-    ) -> dict[str, Any]:
+    def compute_sequence_reward(self, item: dict[str, Any], sequence: str) -> dict[str, Any]:
         reward = self.score_response(item, sequence)
         return {
             "reward": reward,
@@ -443,8 +445,7 @@ def _score_codefix_response(
         m = re.search(r"```(?:python)?\s*(.*?)```", response, re.DOTALL)
     if not m:
         kw_bonus = sum(
-            0.1 for kw in item.get("expected_keywords", [])
-            if kw.lower() in response.lower()
+            0.1 for kw in item.get("expected_keywords", []) if kw.lower() in response.lower()
         )
         score = min(kw_bonus, 0.3)
         return score, "no code block found", {"keyword_bonus": score}
@@ -467,9 +468,7 @@ def _score_codefix_response(
 
     passed = 0
     for test_line in test_lines:
-        all_pass_single, _ = _run_tests_in_sandbox(
-            fixed_code, test_line, timeout=3.0
-        )
+        all_pass_single, _ = _run_tests_in_sandbox(fixed_code, test_line, timeout=3.0)
         if all_pass_single:
             passed += 1
     score = passed / max(len(test_lines), 1)

@@ -19,7 +19,7 @@ def rollout_score_temperature(records: list[RolloutRecord]) -> float:
             raw = record.metadata.get("temperature")
         if raw is None or isinstance(raw, bool):
             continue
-        if isinstance(raw, (int, float)):
+        if isinstance(raw, int | float):
             value = float(raw)
             if not math.isfinite(value):
                 raise RuntimeError(f"non-finite rollout temperature: {raw!r}")

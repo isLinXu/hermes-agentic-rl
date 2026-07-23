@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 
-def load_jsonl_records_best_effort(path: str | Path) -> tuple[list[Any], list[dict[str, Any]], dict[str, Any]]:
+def load_jsonl_records_best_effort(
+    path: str | Path,
+) -> tuple[list[Any], list[dict[str, Any]], dict[str, Any]]:
     target = Path(path)
     records: list[Any] = []
     rejected: list[dict[str, Any]] = []
@@ -101,6 +103,11 @@ def apply_record_quality_filters(
     max_prompt_tokens = max(0, int(config.get("max_prompt_tokens", 0)))
     max_response_tokens = max(0, int(config.get("max_response_tokens", 0)))
     max_abs_reward = float(config.get("max_abs_reward", 0.0))
+    min_reward = _optional_float(config.get("min_reward"))
+    max_reward = _optional_float(config.get("max_reward"))
+    min_unique_response_tokens = max(0, int(config.get("min_unique_response_tokens", 0)))
+    max_response_token_repetition = float(config.get("max_response_token_repetition", 0.0))
+    require_metadata_keys = _normalize_string_list(config.get("require_metadata_keys"))
     dedupe_within_scan = bool(config.get("dedupe_within_scan", False))
 
     valid: list[dict[str, Any]] = []
@@ -121,6 +128,19 @@ def apply_record_quality_filters(
             reason = "response_too_long"
         elif max_abs_reward > 0 and abs(reward) > max_abs_reward:
             reason = "reward_out_of_range"
+        elif min_reward is not None and reward < min_reward:
+            reason = "reward_below_min"
+        elif max_reward is not None and reward > max_reward:
+            reason = "reward_above_max"
+        elif min_unique_response_tokens > 0 and len(set(response_ids)) < min_unique_response_tokens:
+            reason = "response_low_token_diversity"
+        elif (
+            max_response_token_repetition > 0
+            and _max_token_repetition_ratio(response_ids) > max_response_token_repetition
+        ):
+            reason = "response_repetition_too_high"
+        elif require_metadata_keys and not _metadata_has_keys(record, require_metadata_keys):
+            reason = "missing_required_metadata"
         elif dedupe_within_scan:
             fingerprint = record_fingerprint(record)
             if fingerprint in seen_fingerprints:
@@ -180,3 +200,41 @@ def _normalize_token_ids(value: Any) -> list[int] | None:
             return None
         out.append(int(item))
     return out
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _max_token_repetition_ratio(token_ids: list[int]) -> float:
+    if not token_ids:
+        return 0.0
+    counts = Counter(token_ids)
+    return max(counts.values()) / len(token_ids)
+
+
+def _metadata_has_keys(record: dict[str, Any], required_keys: list[str]) -> bool:
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    for key in required_keys:
+        current: Any = metadata
+        for part in key.split("."):
+            if not isinstance(current, dict) or part not in current:
+                return False
+            current = current[part]
+        if current is None or current == "":
+            return False
+    return True

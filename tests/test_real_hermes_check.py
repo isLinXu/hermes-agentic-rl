@@ -47,7 +47,9 @@ def test_build_overall_status_uses_error_over_warning():
 
 
 def test_check_run_agent_import_reports_missing_module():
-    result = check_run_agent_import(importer=lambda: (_ for _ in ()).throw(ImportError("missing run_agent")))
+    result = check_run_agent_import(
+        importer=lambda: (_ for _ in ()).throw(ImportError("missing run_agent"))
+    )
 
     assert result["status"] == "error"
     assert "missing run_agent" in result["details"]
@@ -144,7 +146,10 @@ def test_run_checks_builds_report_and_strips_imported_module(monkeypatch):
     monkeypatch.setattr(
         module,
         "check_path_exists",
-        lambda path, label: {"status": "warning" if label == "sample_dataset" else "ok", "details": f"{label}:{path.name}"},
+        lambda path, label: {
+            "status": "warning" if label == "sample_dataset" else "ok",
+            "details": f"{label}:{path.name}",
+        },
     )
 
     report = run_checks()

@@ -28,9 +28,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -45,7 +43,10 @@ def parse_args():
     p.add_argument("--iters", type=int, default=100, help="Training iterations")
     p.add_argument("--device", type=str, default="mps", choices=["cpu", "mps", "cuda"])
     p.add_argument("--model", type=str, default="gpt2", help="HF model name")
-    p.add_argument("--env", type=str, default="letter_counting", choices=["letter_counting", "code_fix"])
+    p.add_argument(
+        "--env", type=str, default="letter_counting",
+        choices=["letter_counting", "code_fix"]
+    )
     p.add_argument("--lr", type=float, default=5e-5, help="Learning rate")
     p.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature")
     p.add_argument("--batch-size", type=int, default=2, help="Prompts per iter")
@@ -53,12 +54,27 @@ def parse_args():
     p.add_argument("--max-new-tokens", type=int, default=128, help="Max generation tokens")
     p.add_argument("--kl-coef", type=float, default=0.04, help="KL penalty coefficient")
     p.add_argument("--entropy-coef", type=float, default=0.02, help="Entropy bonus")
-    p.add_argument("--interleave-sft", type=int, default=10, help="Interleave SFT every N iters (0=off)")
+    p.add_argument(
+        "--interleave-sft", type=int, default=10,
+        help="Interleave SFT every N iters (0=off)"
+    )
     p.add_argument("--per-token-adv", action="store_true", default=True, help="Per-token advantage")
-    p.add_argument("--no-per-token-adv", action="store_false", dest="per_token_adv", help="Disable per-token adv")
-    p.add_argument("--advantage-norm", type=str, default="whiten", choices=["group", "batch", "whiten"])
-    p.add_argument("--batch-generate", action="store_true", default=True, help="Use KV-cache batch generate")
-    p.add_argument("--no-batch-generate", action="store_false", dest="batch_generate", help="Disable batch generate")
+    p.add_argument(
+        "--no-per-token-adv", action="store_false", dest="per_token_adv",
+        help="Disable per-token adv"
+    )
+    p.add_argument(
+        "--advantage-norm", type=str, default="whiten",
+        choices=["group", "batch", "whiten"]
+    )
+    p.add_argument(
+        "--batch-generate", action="store_true", default=True,
+        help="Use KV-cache batch generate"
+    )
+    p.add_argument(
+        "--no-batch-generate", action="store_false", dest="batch_generate",
+        help="Disable batch generate"
+    )
     p.add_argument("--output-dir", type=str, default=None)
     p.add_argument("--resume", type=str, default=None, help="Resume from checkpoint iteration")
     p.add_argument("--dashboard", action="store_true", default=False, help="Enable live dashboard")
@@ -158,7 +174,7 @@ def build_trainer(
         grad_clip=1.0,
     )
 
-    algo = GRPO(
+    GRPO(
         GRPOConfig(
             clip_eps=cfg.clip_eps,
             kl_coef=cfg.kl_coef,
@@ -201,7 +217,7 @@ async def main():
     # Build components
     env, reward_manager = await build_env(args.env, args.device, args.seed)
     backend = build_backend(args.model, args.device, args.seed)
-    trainer, cfg = build_trainer(backend, env, reward_manager, args, output_dir)
+    trainer, _cfg = build_trainer(backend, env, reward_manager, args, output_dir)
 
     # Dashboard
     dashboard = None

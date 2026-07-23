@@ -106,7 +106,7 @@ class RewardModel(nn.Module):
             device = next(model.parameters()).device
             ids = torch.tensor(full, dtype=torch.long, device=device).unsqueeze(0)
             h = model._trunk(ids)  # [1, T, D]
-            return h[0, -1, :]     # [D]
+            return h[0, -1, :]  # [D]
         # HF path
         model = getattr(self.backend, "model", None)
         if model is None:

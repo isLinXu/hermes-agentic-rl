@@ -58,6 +58,7 @@ torch = pytest.importorskip("torch")
 try:  # the env-level tier also needs this — guarded separately below
     from atroposlib.envs.base import BaseEnv as _AtroposBase
     from atroposlib.envs.base import BaseEnvConfig as _AtroposBaseEnvCfg
+
     _HAS_BASEENV = True
 except Exception:
     _HAS_BASEENV = False
@@ -77,9 +78,7 @@ def hf_tokenizer():
 
 @pytest.fixture
 def tiny_backend():
-    return TinyCausalLMBackend(
-        TinyBackendConfig(seed=0, dim=16, n_heads=2, n_layers=1, max_len=64)
-    )
+    return TinyCausalLMBackend(TinyBackendConfig(seed=0, dim=16, n_heads=2, n_layers=1, max_len=64))
 
 
 # --- HermesAPIServer ---------------------------------------------------------
@@ -118,7 +117,11 @@ def test_hermes_api_server_tokens_and_logprobs_alignment(tiny_backend, hf_tokeni
     )
     pt, ot, olp, fr = asyncio.run(
         srv._tokens_and_logprobs_completion_wrapper(
-            prompt="Q: 2+2=?", n=2, max_tokens=4, temperature=1.0, seed=7,
+            prompt="Q: 2+2=?",
+            n=2,
+            max_tokens=4,
+            temperature=1.0,
+            seed=7,
         )
     )
     assert isinstance(pt, list) and len(pt) >= 1
@@ -134,9 +137,7 @@ def test_hermes_api_server_tokens_and_logprobs_alignment(tiny_backend, hf_tokeni
 
 
 def test_hermes_api_server_classic_completion(tiny_backend, hf_tokenizer):
-    srv = HermesAPIServer(
-        backend=tiny_backend, hf_tokenizer=hf_tokenizer, max_new_tokens=3
-    )
+    srv = HermesAPIServer(backend=tiny_backend, hf_tokenizer=hf_tokenizer, max_new_tokens=3)
     resp = asyncio.run(
         srv._completion_wrapper(prompt="once upon a", n=1, max_tokens=3, temperature=0.0)
     )
@@ -258,9 +259,7 @@ def test_atropos_reward_component_plugs_into_reward_manager(tiny_backend, hf_tok
         env_cls=KeywordEnv,
         env_config=cfg,
         backend=tiny_backend,
-        adapter_config=AtroposEnvAdapterConfig(
-            max_new_tokens=4, override_tokenizer=hf_tokenizer
-        ),
+        adapter_config=AtroposEnvAdapterConfig(max_new_tokens=4, override_tokenizer=hf_tokenizer),
     )
     asyncio.run(adapter.setup())
     item = asyncio.run(adapter.get_next_item())
@@ -268,13 +267,21 @@ def test_atropos_reward_component_plugs_into_reward_manager(tiny_backend, hf_tok
     rm = RewardManager([AtroposRewardComponent(adapter, weight=1.0)])
 
     traj_hit = Trajectory(
-        task_id=item["task_id"], prompt=item["instruction"], steps=[],
-        final_output="an apple a day", finished_naturally=True, turns_used=1,
+        task_id=item["task_id"],
+        prompt=item["instruction"],
+        steps=[],
+        final_output="an apple a day",
+        finished_naturally=True,
+        turns_used=1,
         metadata={},
     )
     traj_miss = Trajectory(
-        task_id=item["task_id"], prompt=item["instruction"], steps=[],
-        final_output="banana", finished_naturally=True, turns_used=1,
+        task_id=item["task_id"],
+        prompt=item["instruction"],
+        steps=[],
+        final_output="banana",
+        finished_naturally=True,
+        turns_used=1,
         metadata={},
     )
     s_hit = asyncio.run(rm.evaluate(item, traj_hit, tool_context=None)).final_score

@@ -62,7 +62,7 @@ def test_train_cli_overrides_dataset_and_export(tmp_path: Path, monkeypatch):
             "    - name: filesystem_verifier_reward\n"
             "      weight: 1.0\n"
             "trainer:\n"
-            f"  export_training_path: {tmp_path/'outputs'/'default.jsonl'}\n"
+            f"  export_training_path: {tmp_path / 'outputs' / 'default.jsonl'}\n"
             f"  workdir_base: {workdir_base}\n"
         ),
         encoding="utf-8",

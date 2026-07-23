@@ -1,0 +1,13 @@
+{{- if and .Values.deployment.podDisruptionBudget.enabled (eq .Values.workloadType "deployment") }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hermes-agentic-rl.fullname" . }}
+  labels:
+    {{- include "hermes-agentic-rl.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.deployment.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "hermes-agentic-rl.selectorLabels" . | nindent 6 }}
+{{- end }}

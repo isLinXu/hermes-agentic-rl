@@ -53,7 +53,11 @@ from hermes_agentic_rl.trainers.token_budget import (
 def _backend(seed: int = 0) -> TinyCausalLMBackend:
     return TinyCausalLMBackend(
         TinyBackendConfig(
-            seed=seed, dim=16, n_heads=2, n_layers=1, max_len=64,
+            seed=seed,
+            dim=16,
+            n_heads=2,
+            n_layers=1,
+            max_len=64,
         )
     )
 
@@ -198,8 +202,8 @@ def test_grpo_group_of_one_falls_back_to_batch_norm() -> None:
     # (positive variance).
     records = [
         _make_record(backend, "a", "yes", reward=1.0, group_id="g0"),
-        _make_record(backend, "b", "no",  reward=-1.0, group_id="g1"),
-        _make_record(backend, "c", "yo",  reward=0.5, group_id="g2"),
+        _make_record(backend, "b", "no", reward=-1.0, group_id="g1"),
+        _make_record(backend, "c", "yo", reward=0.5, group_id="g2"),
     ]
     batch = RolloutBatch(records=records)
     algo = GRPO(GRPOConfig(advantage_norm="group", kl_coef=0.0))
@@ -215,7 +219,7 @@ def test_grpo_normal_groups_do_not_engage_fallback() -> None:
     backend = _backend(seed=5)
     records = [
         _make_record(backend, "a", "yes", reward=1.0, group_id="g0"),
-        _make_record(backend, "a", "no",  reward=-1.0, group_id="g0"),
+        _make_record(backend, "a", "no", reward=-1.0, group_id="g0"),
     ]
     batch = RolloutBatch(records=records)
     algo = GRPO(GRPOConfig(advantage_norm="group", kl_coef=0.0))
@@ -402,7 +406,7 @@ def test_gspo_consumes_shared_logprobs_cache() -> None:
     backend = _backend(seed=8)
     records = [
         _make_record(backend, "a", "yes", reward=1.0, group_id="g0"),
-        _make_record(backend, "a", "no",  reward=-1.0, group_id="g0"),
+        _make_record(backend, "a", "no", reward=-1.0, group_id="g0"),
     ]
     # Pre-compute and inject the cache so GSPO short-circuits the
     # forward pass.
@@ -430,7 +434,7 @@ def test_gspo_falls_back_when_no_cache() -> None:
     backend = _backend(seed=9)
     records = [
         _make_record(backend, "a", "yes", reward=1.0, group_id="g0"),
-        _make_record(backend, "a", "no",  reward=-1.0, group_id="g0"),
+        _make_record(backend, "a", "no", reward=-1.0, group_id="g0"),
     ]
     batch = RolloutBatch(records=records)
     algo = GSPO(GSPOConfig(advantage_norm="group", kl_coef=0.0))

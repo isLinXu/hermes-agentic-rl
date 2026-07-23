@@ -186,14 +186,10 @@ def run_online_cycle_config(
         )
 
     replay_stage_cfg = cycle_cfg.get("session_replay") or prepared_cfg.get("session_replay")
-    worker_stage_cfg = (
-        cycle_cfg.get("session_train_worker")
-        or prepared_cfg.get("session_train_worker")
+    worker_stage_cfg = cycle_cfg.get("session_train_worker") or prepared_cfg.get(
+        "session_train_worker"
     )
-    eval_stage_cfg = (
-        cycle_cfg.get("session_eval_export")
-        or prepared_cfg.get("session_eval_export")
-    )
+    eval_stage_cfg = cycle_cfg.get("session_eval_export") or prepared_cfg.get("session_eval_export")
 
     total_items = 0
     total_positive = 0
@@ -267,16 +263,12 @@ def run_online_cycle_config(
         worker_save_path = ""
         if isinstance(worker_stage_cfg, dict):
             worker_save_path = str(
-                worker_stage_cfg.get("save_path")
-                or worker_stage_cfg.get("head_path")
-                or ""
+                worker_stage_cfg.get("save_path") or worker_stage_cfg.get("head_path") or ""
             )
         eval_output_path = ""
         if isinstance(eval_stage_cfg, dict):
             eval_output_path = str(
-                eval_stage_cfg.get("output_path")
-                or eval_stage_cfg.get("output_dir")
-                or ""
+                eval_stage_cfg.get("output_path") or eval_stage_cfg.get("output_dir") or ""
             )
         print(
             "[online-cycle] "

@@ -219,7 +219,10 @@ class VLLMRolloutBackend(LLMBackend):
         # can silently corrupt special tokens on some tokenizers.
         try:
             from vllm.inputs import TokensPrompt  # vLLM ≥0.5
-            prompts_input: list[Any] = [TokensPrompt(prompt_token_ids=p_ids) for p_ids in prompt_ids_list]
+
+            prompts_input: list[Any] = [
+                TokensPrompt(prompt_token_ids=p_ids) for p_ids in prompt_ids_list
+            ]
         except ImportError:
             # Pre-0.5 fallback: pass decoded strings (lossy but compatible).
             prompts_input = [self.tokenizer.decode(p_ids) for p_ids in prompt_ids_list]
@@ -263,7 +266,9 @@ class VLLMRolloutBackend(LLMBackend):
                     metadata={
                         "finish_reason": completion.finish_reason,
                         "temperature": temperature or self.cfg.temperature,
-                        "stop_reason": str(completion.stop_reason) if completion.stop_reason else None,
+                        "stop_reason": str(completion.stop_reason)
+                        if completion.stop_reason
+                        else None,
                     },
                 )
             )
@@ -326,14 +331,14 @@ class VLLMRolloutBackend(LLMBackend):
                 raise AttributeError(
                     "Cannot find a supported weight-sync path on "
                     f"{type(executor).__name__}. Supported: apply_model_updates, "
-                    "collective_rpc (vLLM ≥0.7), or driver_worker (vLLM 0.4–0.6)."
+                    "collective_rpc (vLLM >=0.7), or driver_worker (vLLM 0.4-0.6)."
                 )
         except Exception as exc:
             raise RuntimeError(
                 "vLLM weight sync failed. "
                 "This usually means a version mismatch. "
                 "Supported paths: apply_model_updates | collective_rpc (vLLM ≥0.7) | "
-                "driver_worker.model_runner.model (vLLM 0.4–0.6). "
+                "driver_worker.model_runner.model (vLLM 0.4-0.6). "
                 "Original error: " + str(exc)
             ) from exc
 
@@ -369,8 +374,7 @@ class VLLMRolloutBackend(LLMBackend):
         temperature: float = 1.0,
     ) -> tuple[Any, Any, Any]:
         raise NotImplementedError(
-            "VLLMRolloutBackend is generation-only. Use HFCausalLMBackend for "
-            "score_with_value()."
+            "VLLMRolloutBackend is generation-only. Use HFCausalLMBackend for score_with_value()."
         )
 
     def score_with_value_batch(

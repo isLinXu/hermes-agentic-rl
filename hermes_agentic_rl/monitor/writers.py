@@ -97,7 +97,7 @@ class TensorBoardMetricsWriter:
         self._step = step + 1
         try:
             for key, value in record.items():
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if isinstance(value, int | float) and not isinstance(value, bool):
                     self._sw.add_scalar(f"train/{key}", float(value), step)
         except Exception:
             pass
@@ -226,11 +226,11 @@ class MultiMetricsWriter:
 
 def _to_json_safe(obj: Any) -> Any:
     """Best-effort: convert an arbitrary object to JSON-serializable form."""
-    if obj is None or isinstance(obj, (bool, int, float, str)):
+    if obj is None or isinstance(obj, bool | int | float | str):
         return obj
     if isinstance(obj, dict):
         return {str(key): _to_json_safe(value) for key, value in obj.items()}
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, list | tuple):
         return [_to_json_safe(value) for value in obj]
     if isinstance(obj, Path):
         return str(obj)
@@ -248,7 +248,7 @@ def _flatten_numeric_fields(obj: Any, *, prefix: str = "") -> dict[str, Any]:
         return out
     if isinstance(obj, bool):
         return {prefix: obj} if prefix else {}
-    if isinstance(obj, (int, float)):
+    if isinstance(obj, int | float):
         return {prefix: float(obj)} if prefix else {}
     return {}
 

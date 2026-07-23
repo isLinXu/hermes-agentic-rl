@@ -58,7 +58,7 @@ def safe_eval(expr: str) -> str:
         if isinstance(node, ast.Expression):
             return _walk(node.body)
         if isinstance(node, ast.Constant):
-            if isinstance(node.value, (int, float)):
+            if isinstance(node.value, int | float):
                 return node.value
             raise ValueError(f"bad_literal:{type(node.value).__name__}")
         if isinstance(node, ast.BinOp) and type(node.op) in SAFE_OPS:
@@ -98,9 +98,7 @@ def build_sim_tool_dataset(n: int = 16, *, seed: int = 0) -> list[dict[str, Any]
         items.append(
             {
                 "task_id": f"calc-{i}",
-                "instruction": (
-                    f"What is {a} {sym} {b}? Use calc tool, then answer as: answer=N"
-                ),
+                "instruction": (f"What is {a} {sym} {b}? Use calc tool, then answer as: answer=N"),
                 "expr": f"{a} {sym} {b}",
                 "target": target,
             }

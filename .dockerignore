@@ -21,3 +21,29 @@ notes
 *.zip
 *.pt
 *.pth
+# additional caches / env files / IDE artifacts
+.env
+.env.*
+*.env
+.coverage
+.coverage.*
+htmlcov
+.tox
+.hypothesis
+.dmypy.json
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+# build artifacts
+dist
+build
+*.spec
+# logs and databases
+*.log
+*.db
+*.sqlite
+*.sqlite3

@@ -34,9 +34,9 @@ from hermes_agentic_rl.trainers.on_policy import AgentLoopFactory
 class EvalConfig:
     n_rollouts: int = 32
     max_new_tokens: int = 16
-    temperature: float = 0.0           # greedy by default for reproducibility
+    temperature: float = 0.0  # greedy by default for reproducibility
     seed_base: int | None = 0
-    success_threshold: float = 0.5     # reward ≥ threshold counts as success
+    success_threshold: float = 0.5  # reward ≥ threshold counts as success
 
 
 @dataclass(slots=True)
@@ -97,9 +97,11 @@ class EvalHarness:
             summary = await self.reward_manager.evaluate(item, traj, tool_context=None)
             rewards.append(float(summary.final_score))
             turns_used.append(int(traj.turns_used))
-            rl = (traj.metadata.get("runtime") or {}).get("rl") if isinstance(
-                traj.metadata.get("runtime"), dict
-            ) else None
+            rl = (
+                (traj.metadata.get("runtime") or {}).get("rl")
+                if isinstance(traj.metadata.get("runtime"), dict)
+                else None
+            )
             if rl:
                 response_lens.append(len(rl.get("response_ids") or []))
             for comp in summary.components:
@@ -108,11 +110,9 @@ class EvalHarness:
         n = max(1, len(rewards))
         mean = sum(rewards) / n
         var = sum((r - mean) ** 2 for r in rewards) / n
-        std = var ** 0.5
+        std = var**0.5
         success = sum(1 for r in rewards if r >= self.cfg.success_threshold) / n
-        comp_means = {
-            k: component_sums[k] / max(1, component_counts[k]) for k in component_sums
-        }
+        comp_means = {k: component_sums[k] / max(1, component_counts[k]) for k in component_sums}
         return EvalReport(
             name=self.name,
             n_rollouts=len(rewards),

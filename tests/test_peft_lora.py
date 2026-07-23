@@ -16,7 +16,8 @@ def test_inject_lora_freezes_base_and_returns_trainable_subset():
     backend = TinyCausalLMBackend(TinyBackendConfig(seed=0, dim=32, n_heads=4, n_layers=2))
     n_base = sum(p.numel() for p in backend.model.parameters())
     adapter = inject_lora(
-        backend.model, LoRAConfig(r=4, alpha=8, target_patterns=("qkv", "proj", "ff.0", "ff.2", "head"))
+        backend.model,
+        LoRAConfig(r=4, alpha=8, target_patterns=("qkv", "proj", "ff.0", "ff.2", "head")),
     )
     assert adapter.num_parameters() > 0
     assert adapter.num_parameters() < n_base  # strictly fewer params
@@ -80,5 +81,5 @@ def test_lora_merge_then_unmerge_is_identity():
 
 def test_inject_lora_rejects_empty_pattern():
     backend = TinyCausalLMBackend(TinyBackendConfig(seed=0, dim=32, n_heads=4, n_layers=2))
-    with pytest.raises(ValueError, match="no nn.Linear matched"):
+    with pytest.raises(ValueError, match=r"no nn.Linear matched"):
         inject_lora(backend.model, LoRAConfig(r=4, target_patterns=("does_not_exist",)))

@@ -1,0 +1,83 @@
+---
+# Training configs mounted into pods at /opt/hermes-agentic-rl/configs/
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-configs
+  namespace: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: config
+data:
+  echo_grpo_mvp.yaml: |
+    # MVP GRPO configuration — echo task on TinyCausalLM (CPU-friendly).
+    # Run:  python -m hermes_agentic_rl.cli.main train-rl --config configs/echo_grpo_mvp.yaml
+    backend:
+      name: tiny
+      dim: 32
+      n_heads: 4
+      n_layers: 2
+      max_len: 128
+      seed: 0
+    environment:
+      type: echo
+    train_rl:
+      n_iters: 60
+      group_size: 8
+      prompts_per_iter: 2
+      lr: 0.005
+      max_new_tokens: 8
+      temperature: 1.0
+      update_epochs: 2
+      minibatch_size: 8
+      clip_eps: 0.2
+      kl_coef: 0.0
+      entropy_coef: 0.0
+      use_reference: false
+      log_every: 10
+      save_every: 0
+      seed: 123
+
+  mtgrpo_tiny.yaml: |
+    # MTGRPO tiny config — multi-turn + per-token advantage (CPU-friendly).
+    backend: tiny
+    model_name: Qwen/Qwen2.5-1.5B-Instruct
+    max_new_tokens: 256
+    n_iters: 20
+    group_size: 4
+    prompts_per_iter: 2
+    lr: 0.001
+    temperature: 1.0
+    clip_eps: 0.2
+    kl_coef: 0.0
+    log_every: 1
+    save_every: 0
+    output_dir: output/mtgrpo
+    multi_turn: true
+    multi_turn_credit:
+      mode: discounted
+      gamma: 0.9
+    per_token_advantage: true
+    advantage_norm: group
+    curriculum:
+      auto_advance: true
+      min_iters_per_stage: 10
+    env:
+      n_samples: 100
+      seed: 42
+    rewards:
+      components:
+        - type: ToolcallReward
+          weight: 1.0
+        - type: OutcomeReward
+          weight: 1.0
+      composer:
+        normalize:
+          toolcall_reward: true
+          outcome_reward: true
+        conditions:
+          toolcall_reward: true
+          outcome_reward: has_final_output
+        turn_discount:
+          toolcall_reward: 0.95
+        parallel: true

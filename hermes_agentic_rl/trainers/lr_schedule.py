@@ -75,7 +75,7 @@ class LinearLR:
 
     lr: float = 1e-3
     warmup_steps: int = 0
-    total_steps: int = 0            # 0 = no decay after warmup
+    total_steps: int = 0  # 0 = no decay after warmup
     warmup_start_lr: float = 0.0
     end_lr: float = 0.0
 

@@ -6,9 +6,11 @@ from typing import Any
 
 import torch
 
+from hermes_agentic_rl._compat import stable
 from hermes_agentic_rl.backends.base import LLMBackend
 
 
+@stable
 @dataclass(slots=True)
 class RolloutRecord:
     """One (prompt, sampled-response, reward) tuple with frozen old logprobs."""
@@ -21,6 +23,7 @@ class RolloutRecord:
     metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+@stable
 @dataclass(slots=True)
 class RolloutBatch:
     records: list[RolloutRecord]
@@ -46,6 +49,7 @@ class RolloutBatch:
         return all(id(rec) in cache for rec in records)
 
 
+@stable
 def stack_cached_logprobs(
     cache: dict[int, torch.Tensor],
     records: list[RolloutRecord],
@@ -82,6 +86,7 @@ def stack_cached_logprobs(
     return logp, mask
 
 
+@stable
 def old_logprobs_tensor(
     record: RolloutRecord,
     *,
@@ -97,7 +102,7 @@ def old_logprobs_tensor(
             return src[-length:]
         out = torch.zeros(length, dtype=dtype, device=device)
         if src.numel() > 0:
-            out[-src.numel():] = src
+            out[-src.numel() :] = src
         return out
 
     vals = record.old_logprobs[-length:] if record.old_logprobs else []
@@ -108,6 +113,7 @@ def old_logprobs_tensor(
     return out
 
 
+@stable
 @dataclass(slots=True)
 class AlgoUpdateStats:
     loss: float
@@ -134,6 +140,7 @@ class AlgoUpdateStats:
         }
 
 
+@stable
 class BaseAlgo(ABC):
     """Pure-function algorithm: takes a policy + batch, returns loss tensor + stats.
 

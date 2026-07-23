@@ -105,9 +105,9 @@ benchmark_suite:
     assert scorecard["status_counts"] == {"failed": 1, "passed": 1}
     assert scorecard["benchmarks"][0]["promotion"]["recommendation"] == "promote"
     assert scorecard["benchmarks"][1]["failed_checks"] == ["min_score"]
-    assert "| tool-call-validity | passed |" in (
-        suite_output / "scorecard.md"
-    ).read_text(encoding="utf-8")
+    assert "| tool-call-validity | passed |" in (suite_output / "scorecard.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_benchmark_suite_cli_fails_on_required_threshold_failure(

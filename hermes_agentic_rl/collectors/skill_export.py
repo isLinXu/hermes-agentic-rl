@@ -109,11 +109,17 @@ def _normalize_skill_export_config(raw: dict[str, Any] | None) -> dict[str, Any]
         "min_examples_per_skill": max(1, int(cfg.get("min_examples_per_skill", 1))),
         "max_examples_per_skill": max(1, int(cfg.get("max_examples_per_skill", 8))),
         "quality_min_examples": max(1, int(cfg.get("quality_min_examples", 2))),
-        "quality_min_mean_reward": float(cfg.get("quality_min_mean_reward", cfg.get("min_reward", 0.0))),
+        "quality_min_mean_reward": float(
+            cfg.get("quality_min_mean_reward", cfg.get("min_reward", 0.0))
+        ),
         "quality_min_mean_usefulness": float(cfg.get("quality_min_mean_usefulness", 0.5)),
         "quality_min_axis_consistency": float(cfg.get("quality_min_axis_consistency", 0.6)),
-        "quality_min_validation_examples": max(1, int(cfg.get("quality_min_validation_examples", 1))),
-        "quality_max_negative_signal_ratio": float(cfg.get("quality_max_negative_signal_ratio", 0.25)),
+        "quality_min_validation_examples": max(
+            1, int(cfg.get("quality_min_validation_examples", 1))
+        ),
+        "quality_max_negative_signal_ratio": float(
+            cfg.get("quality_max_negative_signal_ratio", 0.25)
+        ),
         "quality_ready_min_score": float(cfg.get("quality_ready_min_score", 0.75)),
         "quality_blocked_max_score": float(cfg.get("quality_blocked_max_score", 0.35)),
         "include_full_records": bool(cfg.get("include_full_records", False)),
@@ -209,15 +215,9 @@ def _write_skill_candidate(
         reverse=True,
     )[: int(config["max_examples_per_skill"])]
     axis_counts = Counter(
-        axis
-        for record in selected
-        for axis in _axes(_metadata(record), _mining(_metadata(record)))
+        axis for record in selected for axis in _axes(_metadata(record), _mining(_metadata(record)))
     )
-    use_counts = Counter(
-        use
-        for record in selected
-        for use in _uses(_mining(_metadata(record)))
-    )
+    use_counts = Counter(use for record in selected for use in _uses(_mining(_metadata(record))))
     skill_name = _slugify(f"{config['name_prefix']}-{group_key}-candidate")
     skill_dir = output_dir / skill_name
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -314,7 +314,8 @@ def _skill_markdown(
         "",
         "## When To Use",
         "",
-        f"Use this candidate when a Hermes agent task matches `{group_key}` behavior and needs a reusable procedure backed by replay evidence.",
+        f"Use this candidate when a Hermes agent task matches `{group_key}` "
+        "behavior and needs a reusable procedure backed by replay evidence.",
         "",
         "## Procedure",
         "",
@@ -348,7 +349,8 @@ def _skill_markdown(
             "",
             "## Validation",
             "",
-            "Use `validation.jsonl` beside this file as the first benchmark slice before promoting this candidate into the active Hermes Skill set.",
+            "Use `validation.jsonl` beside this file as the first benchmark "
+            "slice before promoting this candidate into the active Hermes Skill set.",
             "",
             "## Mining Metadata",
             "",
@@ -428,8 +430,7 @@ def _skill_quality(
     sample_count = len(records)
     rewards = [_record_reward(record) for record in records]
     usefulness_scores = [
-        _usefulness(_mining(_metadata(record)), _record_reward(record))
-        for record in records
+        _usefulness(_mining(_metadata(record)), _record_reward(record)) for record in records
     ]
     negative_signals = sum(
         1
@@ -437,24 +438,14 @@ def _skill_quality(
         if _has_negative_signal(_mining(_metadata(record)), _metadata(record))
     )
     mean_reward = (sum(rewards) / len(rewards)) if rewards else 0.0
-    mean_usefulness = (
-        sum(usefulness_scores) / len(usefulness_scores)
-        if usefulness_scores
-        else 0.0
-    )
+    mean_usefulness = sum(usefulness_scores) / len(usefulness_scores) if usefulness_scores else 0.0
     # Capability traces are multi-label. A good candidate may consistently include
     # one dominant axis while also carrying skill-learning/self-evolution signals.
     axis_consistency = (
-        min(1.0, max(axis_counts.values()) / sample_count)
-        if sample_count and axis_counts
-        else 0.0
+        min(1.0, max(axis_counts.values()) / sample_count) if sample_count and axis_counts else 0.0
     )
     validation_examples = len(examples)
-    negative_signal_ratio = (
-        negative_signals / sample_count
-        if sample_count
-        else 1.0
-    )
+    negative_signal_ratio = negative_signals / sample_count if sample_count else 1.0
 
     checks: dict[str, dict[str, Any]] = {
         "min_examples": {
@@ -499,11 +490,7 @@ def _skill_quality(
         status = "ready_for_review"
     else:
         status = "draft"
-    reasons = [
-        name
-        for name, payload in checks.items()
-        if bool(payload["passed"])
-    ]
+    reasons = [name for name, payload in checks.items() if bool(payload["passed"])]
     return {
         "status": status,
         "score": round(score, 6),
@@ -535,18 +522,20 @@ def _has_negative_signal(mining: dict[str, Any], metadata: dict[str, Any]) -> bo
         feedback_messages = metadata.get("feedback_messages")
     if isinstance(feedback_messages, list):
         joined = " ".join(
-            _message_content(message)
-            for message in feedback_messages
-            if isinstance(message, dict)
+            _message_content(message) for message in feedback_messages if isinstance(message, dict)
         ).lower()
-        return any(keyword in joined for keyword in ("wrong", "error", "failed", "不对", "错误", "失败"))
+        return any(
+            keyword in joined for keyword in ("wrong", "error", "failed", "不对", "错误", "失败")
+        )
     return False
 
 
 def _record_to_example(record: dict[str, Any]) -> dict[str, Any]:
     metadata = _metadata(record)
     mining = _mining(metadata)
-    source_turn = metadata.get("source_turn", {}) if isinstance(metadata.get("source_turn"), dict) else {}
+    source_turn = (
+        metadata.get("source_turn", {}) if isinstance(metadata.get("source_turn"), dict) else {}
+    )
     prompt_messages = _message_list(source_turn.get("prompt_messages"))
     assistant_message = source_turn.get("assistant_message")
     feedback_messages = _message_list(
@@ -559,7 +548,9 @@ def _record_to_example(record: dict[str, Any]) -> dict[str, Any]:
 
     task_input = _first_message_content(prompt_messages, role="user")
     if not task_input:
-        task_input = str(metadata.get("task_id") or metadata.get("session_id") or "Hermes replay task")
+        task_input = str(
+            metadata.get("task_id") or metadata.get("session_id") or "Hermes replay task"
+        )
 
     assistant_response = _message_content(assistant_message)
     feedback = " ".join(_message_content(message) for message in feedback_messages).strip()
@@ -570,7 +561,9 @@ def _record_to_example(record: dict[str, Any]) -> dict[str, Any]:
         "reward": _record_reward(record),
         "usefulness_score": _usefulness(mining, _record_reward(record)),
         "axes": sorted(_axes(metadata, mining)),
-        "reasons": list(mining.get("reasons", [])) if isinstance(mining.get("reasons"), list) else [],
+        "reasons": list(mining.get("reasons", []))
+        if isinstance(mining.get("reasons"), list)
+        else [],
         "recommended_uses": sorted(_uses(mining)),
         "task_input": _truncate(task_input, 800),
         "assistant_response": _truncate(assistant_response, 1000),
@@ -640,7 +633,9 @@ def _usefulness(mining: dict[str, Any], reward: float) -> float:
 
 
 def _message_list(value: Any) -> list[dict[str, Any]]:
-    return [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+    return (
+        [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+    )
 
 
 def _first_message_content(messages: list[dict[str, Any]], *, role: str) -> str:
@@ -662,7 +657,8 @@ def _message_content(message: dict[str, Any]) -> str:
 def _procedure_for_axis(axis: str) -> str:
     return AXIS_PROCEDURES.get(
         axis,
-        "Follow the successful replay pattern, preserve the user's constraints, and verify the result before finalizing.",
+        "Follow the successful replay pattern, preserve the user's "
+        "constraints, and verify the result before finalizing.",
     )
 
 

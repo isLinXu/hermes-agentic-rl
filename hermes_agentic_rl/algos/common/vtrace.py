@@ -68,9 +68,7 @@ def importance_weights(
     detached advantage; gradients flow through the policy term, not the weight).
     Masked positions are set to 0.
     """
-    log_ratio = (new_logprobs - behavior_logprobs).clamp(
-        min=-log_ratio_clip, max=log_ratio_clip
-    )
+    log_ratio = (new_logprobs - behavior_logprobs).clamp(min=-log_ratio_clip, max=log_ratio_clip)
     rho = torch.exp(log_ratio)
     if rho_floor > 0:
         rho = rho.clamp(min=rho_floor)

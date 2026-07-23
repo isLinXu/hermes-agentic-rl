@@ -37,26 +37,86 @@ from hermes_agentic_rl.rewards.base import BaseReward
 # ---------------------------------------------------------------------------
 
 DIFFICULTY_TIERS = {
-    1: {"min_word_length": 3, "max_word_length": 8, "multi_letter_probability": 0.0,
-        "min_letters_to_count": 1, "max_letters_to_count": 1, "use_random_string": False},
-    2: {"min_word_length": 5, "max_word_length": 12, "multi_letter_probability": 0.5,
-        "min_letters_to_count": 1, "max_letters_to_count": 2, "use_random_string": False},
-    3: {"min_word_length": 8, "max_word_length": 16, "multi_letter_probability": 0.7,
-        "min_letters_to_count": 1, "max_letters_to_count": 3, "use_random_string": False},
-    4: {"min_word_length": 12, "max_word_length": 20, "multi_letter_probability": 0.9,
-        "min_letters_to_count": 2, "max_letters_to_count": 4, "use_random_string": False},
-    5: {"min_word_length": 16, "max_word_length": 30, "multi_letter_probability": 1.0,
-        "min_letters_to_count": 2, "max_letters_to_count": 5, "use_random_string": False},
-    6: {"min_word_length": 20, "max_word_length": 40, "multi_letter_probability": 1.0,
-        "min_letters_to_count": 3, "max_letters_to_count": 6, "use_random_string": True},
-    7: {"min_word_length": 30, "max_word_length": 60, "multi_letter_probability": 1.0,
-        "min_letters_to_count": 4, "max_letters_to_count": 8, "use_random_string": True},
-    8: {"min_word_length": 50, "max_word_length": 100, "multi_letter_probability": 1.0,
-        "min_letters_to_count": 5, "max_letters_to_count": 10, "use_random_string": True},
-    9: {"min_word_length": 80, "max_word_length": 200, "multi_letter_probability": 1.0,
-        "min_letters_to_count": 8, "max_letters_to_count": 15, "use_random_string": True},
-    10: {"min_word_length": 150, "max_word_length": 500, "multi_letter_probability": 1.0,
-         "min_letters_to_count": 10, "max_letters_to_count": 50, "use_random_string": True},
+    1: {
+        "min_word_length": 3,
+        "max_word_length": 8,
+        "multi_letter_probability": 0.0,
+        "min_letters_to_count": 1,
+        "max_letters_to_count": 1,
+        "use_random_string": False,
+    },
+    2: {
+        "min_word_length": 5,
+        "max_word_length": 12,
+        "multi_letter_probability": 0.5,
+        "min_letters_to_count": 1,
+        "max_letters_to_count": 2,
+        "use_random_string": False,
+    },
+    3: {
+        "min_word_length": 8,
+        "max_word_length": 16,
+        "multi_letter_probability": 0.7,
+        "min_letters_to_count": 1,
+        "max_letters_to_count": 3,
+        "use_random_string": False,
+    },
+    4: {
+        "min_word_length": 12,
+        "max_word_length": 20,
+        "multi_letter_probability": 0.9,
+        "min_letters_to_count": 2,
+        "max_letters_to_count": 4,
+        "use_random_string": False,
+    },
+    5: {
+        "min_word_length": 16,
+        "max_word_length": 30,
+        "multi_letter_probability": 1.0,
+        "min_letters_to_count": 2,
+        "max_letters_to_count": 5,
+        "use_random_string": False,
+    },
+    6: {
+        "min_word_length": 20,
+        "max_word_length": 40,
+        "multi_letter_probability": 1.0,
+        "min_letters_to_count": 3,
+        "max_letters_to_count": 6,
+        "use_random_string": True,
+    },
+    7: {
+        "min_word_length": 30,
+        "max_word_length": 60,
+        "multi_letter_probability": 1.0,
+        "min_letters_to_count": 4,
+        "max_letters_to_count": 8,
+        "use_random_string": True,
+    },
+    8: {
+        "min_word_length": 50,
+        "max_word_length": 100,
+        "multi_letter_probability": 1.0,
+        "min_letters_to_count": 5,
+        "max_letters_to_count": 10,
+        "use_random_string": True,
+    },
+    9: {
+        "min_word_length": 80,
+        "max_word_length": 200,
+        "multi_letter_probability": 1.0,
+        "min_letters_to_count": 8,
+        "max_letters_to_count": 15,
+        "use_random_string": True,
+    },
+    10: {
+        "min_word_length": 150,
+        "max_word_length": 500,
+        "multi_letter_probability": 1.0,
+        "min_letters_to_count": 10,
+        "max_letters_to_count": 50,
+        "use_random_string": True,
+    },
 }
 
 
@@ -70,12 +130,37 @@ def _load_word_list() -> list[str]:
             pass
     # fallback: hardcoded common words
     return [
-        "hello", "world", "python", "elephant", "computer", "language",
-        "mathematics", "algorithm", "structure", "development", "engineering",
-        "artificial", "intelligence", "reinforcement", "learning", "training",
-        "model", "parameter", "gradient", "optimization", "transformer",
-        "attention", "mechanism", "encoding", "decoding", "embedding",
-        "tokenizer", "vocabulary", "sentence", "paragraph", "document",
+        "hello",
+        "world",
+        "python",
+        "elephant",
+        "computer",
+        "language",
+        "mathematics",
+        "algorithm",
+        "structure",
+        "development",
+        "engineering",
+        "artificial",
+        "intelligence",
+        "reinforcement",
+        "learning",
+        "training",
+        "model",
+        "parameter",
+        "gradient",
+        "optimization",
+        "transformer",
+        "attention",
+        "mechanism",
+        "encoding",
+        "decoding",
+        "embedding",
+        "tokenizer",
+        "vocabulary",
+        "sentence",
+        "paragraph",
+        "document",
     ]
 
 
@@ -207,6 +292,7 @@ class LetterCountingEnv(BaseEnv):
     ) -> list[RewardResult]:
         """Default: delegate to a LetterCountingReward(weight=1.0)."""
         from hermes_agentic_rl.envs.letter_counting import LetterCountingReward as _LC
+
         reward = _LC(weight=1.0)
         return [await reward.evaluate(item, trajectory, tool_context)]
 
@@ -261,7 +347,9 @@ class LetterCountingReward(BaseReward):
             try:
                 pred = int(content)
             except (ValueError, TypeError):
-                return RewardResult(name=self.name, score=0.0, weight=self.weight, reason=f"not int: {content!r}")
+                return RewardResult(
+                    name=self.name, score=0.0, weight=self.weight, reason=f"not int: {content!r}"
+                )
             expected = correct[targets[0]]
             ok = pred == expected
             return RewardResult(
@@ -274,9 +362,13 @@ class LetterCountingReward(BaseReward):
             try:
                 pred_dict = json.loads(content)
             except (json.JSONDecodeError, TypeError):
-                return RewardResult(name=self.name, score=0.0, weight=self.weight, reason=f"bad json: {content!r}")
+                return RewardResult(
+                    name=self.name, score=0.0, weight=self.weight, reason=f"bad json: {content!r}"
+                )
             if not isinstance(pred_dict, dict):
-                return RewardResult(name=self.name, score=0.0, weight=self.weight, reason=f"not dict: {content!r}")
+                return RewardResult(
+                    name=self.name, score=0.0, weight=self.weight, reason=f"not dict: {content!r}"
+                )
             ok = all(pred_dict.get(ch, -1) == correct[ch] for ch in targets)
             return RewardResult(
                 name=self.name,
@@ -361,16 +453,10 @@ class LetterCountingNextStateReward(BaseReward):
         # Build the next-state feedback string + directive hint.
         if ok:
             next_state = "The environment accepted your answer."
-            hint = (
-                f"The correct answer is {expected}."
-                if self.emit_hint_on_correct
-                else None
-            )
+            hint = f"The correct answer is {expected}." if self.emit_hint_on_correct else None
         else:
             said = f" (you said {predicted!r})" if predicted is not None else ""
-            next_state = (
-                f"Wrong answer{said}. The correct answer was {expected}."
-            )
+            next_state = f"Wrong answer{said}. The correct answer was {expected}."
             # Directive hint: tell the policy how the answer should differ.
             hint = f"The correct answer is {expected}."
 

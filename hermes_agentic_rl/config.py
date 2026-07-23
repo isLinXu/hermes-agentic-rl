@@ -5,10 +5,21 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
+try:
+    from hermes_agentic_rl.config_models import (
+        HermesRLConfigModel,
+        validate_config_model,
+    )
+
+    _PYDANTIC_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised when optional dep missing
+    _PYDANTIC_AVAILABLE = False
+    HermesRLConfigModel = None  # type: ignore[misc, assignment]
+
 # ---------------------------------------------------------------------------
 # Known integration names for config validation.
 # ---------------------------------------------------------------------------
-_KNOWN_INTEGRATIONS = {"fake", "hf", "vllm", "sglang", "openai", "anthropic"}
+_KNOWN_INTEGRATIONS = {"fake", "hermes", "hf", "vllm", "sglang", "openai", "anthropic"}
 
 
 class ConfigValidationError(ValueError):
@@ -19,6 +30,7 @@ def validate_config(
     cfg: dict[str, Any],
     *,
     strict: bool = True,
+    use_pydantic: bool | None = None,
 ) -> list[str]:
     """Validate a config dict and return a list of error messages.
 
@@ -26,13 +38,43 @@ def validate_config(
     any errors are found. If *strict* is False, return the error list silently
     so callers can inspect individual issues.
 
-    Validated fields:
+    When Pydantic is installed (``pip install 'hermes-agentic-rl[config]'``)
+    and *use_pydantic* is not ``False``, schema validation runs first and
+    produces field-level error messages. Otherwise a lightweight dict check
+    is used for backward compatibility.
+
+    Validated fields (dict fallback):
 
     * ``runtime.integration`` — must be one of the known integrations.
     * ``runtime.max_agent_turns`` — must be a positive integer.
     * ``trainer.n_iters`` — must be a positive integer (if present).
     * ``trainer.lr`` — must be a positive float (if present).
     """
+    if use_pydantic is not False and _PYDANTIC_AVAILABLE:
+        return _validate_config_pydantic(cfg, strict=strict)
+
+    return _validate_config_dict(cfg, strict=strict)
+
+
+def _validate_config_pydantic(cfg: dict[str, Any], *, strict: bool) -> list[str]:
+    from pydantic import ValidationError
+
+    try:
+        validate_config_model(cfg)
+        return []
+    except ValidationError as exc:
+        errors = [
+            f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
+            for err in exc.errors(include_url=False)
+        ]
+        if strict and errors:
+            raise ConfigValidationError(
+                "Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+            ) from exc
+        return errors
+
+
+def _validate_config_dict(cfg: dict[str, Any], *, strict: bool) -> list[str]:
     errors: list[str] = []
 
     runtime = cfg.get("runtime", {})
@@ -45,9 +87,7 @@ def validate_config(
 
     max_turns = runtime.get("max_agent_turns", 20)
     if not isinstance(max_turns, int) or max_turns < 1:
-        errors.append(
-            f"runtime.max_agent_turns must be a positive integer, got {max_turns!r}"
-        )
+        errors.append(f"runtime.max_agent_turns must be a positive integer, got {max_turns!r}")
 
     trainer = cfg.get("trainer", {})
     n_iters = trainer.get("n_iters")
@@ -55,7 +95,7 @@ def validate_config(
         errors.append(f"trainer.n_iters must be a positive integer, got {n_iters!r}")
 
     lr = trainer.get("lr")
-    if lr is not None and (not isinstance(lr, (int, float)) or lr <= 0):
+    if lr is not None and (not isinstance(lr, int | float) or lr <= 0):
         errors.append(f"trainer.lr must be a positive number, got {lr!r}")
 
     if strict and errors:
@@ -80,9 +120,11 @@ def load_config(path: str | Path) -> dict[str, Any]:
     reward = config.setdefault("reward", {})
     reward.setdefault("aggregator", "weighted_sum")
 
-    return {
+    config = {
         "runtime": runtime,
         "environment": environment,
         "reward": reward,
         "trainer": trainer,
     }
+    validate_config(config)
+    return config

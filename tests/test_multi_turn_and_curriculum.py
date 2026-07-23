@@ -95,11 +95,7 @@ def test_multi_turn_loop_attaches_tool_calls_to_assistant_messages():
         def generate(self, prompt_ids, max_new_tokens, temperature=1.0, seed=None, **kwargs):
             del prompt_ids, max_new_tokens, temperature, seed, kwargs
             self.calls += 1
-            text = (
-                "<tool_call>calc(1 + 2)</tool_call>"
-                if self.calls == 1
-                else "answer=3"
-            )
+            text = "<tool_call>calc(1 + 2)</tool_call>" if self.calls == 1 else "answer=3"
             response_ids = self.tokenizer.encode(text)
             return type(
                 "Gen",
@@ -162,7 +158,12 @@ def test_multi_turn_credit_hybrid_uses_local_tool_feedback():
         trajectory,
         final_reward=1.0,
         n_turns=2,
-        cfg={"mode": "hybrid", "gamma": 0.9},
+        cfg={
+            "mode": "hybrid",
+            "gamma": 0.9,
+            "final_reward_weight": 0.4,
+            "local_reward_weight": 0.6,
+        },
     )
 
     assert len(turn_rewards) == 2
@@ -285,7 +286,12 @@ def test_grpo_trainer_multi_turn_credit_flows_into_batch():
             log_every=100,
             seed=0,
             multi_turn=True,
-            multi_turn_credit={"mode": "hybrid", "gamma": 0.9},
+            multi_turn_credit={
+                "mode": "hybrid",
+                "gamma": 0.9,
+                "final_reward_weight": 0.4,
+                "local_reward_weight": 0.6,
+            },
         ),
         agent_loop_factory=lambda backend, seed: FakeLoop(),  # type: ignore[arg-type]
     )
@@ -315,7 +321,9 @@ def test_grpo_trainer_multi_turn_credit_flows_into_batch():
     first_batch = seen_batches[0]
     assert len(first_batch) == 4
     assert all(mode == "hybrid" for _turn, _reward, mode, _prompt_gid, _turn_gid in first_batch)
-    assert all(prompt_gid == "calc-1" for _turn, _reward, _mode, prompt_gid, _turn_gid in first_batch)
+    assert all(
+        prompt_gid == "calc-1" for _turn, _reward, _mode, prompt_gid, _turn_gid in first_batch
+    )
     assert first_batch[0][0] == 0 and first_batch[1][0] == 1
     assert first_batch[0][1] > first_batch[1][1]
     assert first_batch[2][1] > first_batch[3][1]
@@ -334,9 +342,8 @@ def test_multi_turn_credit_config_rejects_invalid_gamma():
 
 def test_turn_specific_grouping_avoids_cross_turn_grpo_bias():
     shared_adv = group_normalize_advantage([0.93, 0.70, 0.93, 0.70], eps=1e-6)
-    split_adv = (
-        group_normalize_advantage([0.93, 0.93], eps=1e-6)
-        + group_normalize_advantage([0.70, 0.70], eps=1e-6)
+    split_adv = group_normalize_advantage([0.93, 0.93], eps=1e-6) + group_normalize_advantage(
+        [0.70, 0.70], eps=1e-6
     )
 
     assert shared_adv[0] > 0.0
@@ -360,9 +367,7 @@ def test_sim_tool_env_builds_teacher_turn_samples():
 
 
 def test_grpo_trainer_runs_interleaved_sft_when_enabled():
-    env = EchoTaskEnv(
-        [{"task_id": "echo-1", "instruction": "Say: hello", "target": "hello"}]
-    )
+    env = EchoTaskEnv([{"task_id": "echo-1", "instruction": "Say: hello", "target": "hello"}])
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
     trainer = GRPOTrainer(
         policy=_tiny(),
@@ -370,7 +375,7 @@ def test_grpo_trainer_runs_interleaved_sft_when_enabled():
         reward_manager=rm,
         cfg=GRPOTrainerConfig(
             n_iters=2,
-            group_size=1,
+            group_size=2,
             prompts_per_iter=1,
             lr=1e-3,
             max_new_tokens=4,
@@ -393,9 +398,7 @@ def test_grpo_trainer_runs_interleaved_sft_when_enabled():
 
 
 def test_grpo_trainer_bootstrap_sft_improves_first_rollout_reward():
-    env = EchoTaskEnv(
-        [{"task_id": "echo-1", "instruction": "Say: hello", "target": "hello"}]
-    )
+    env = EchoTaskEnv([{"task_id": "echo-1", "instruction": "Say: hello", "target": "hello"}])
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
     trainer = GRPOTrainer(
         policy=_tiny(),
@@ -403,7 +406,7 @@ def test_grpo_trainer_bootstrap_sft_improves_first_rollout_reward():
         reward_manager=rm,
         cfg=GRPOTrainerConfig(
             n_iters=1,
-            group_size=1,
+            group_size=2,
             prompts_per_iter=1,
             lr=1e-3,
             max_new_tokens=8,
@@ -435,6 +438,7 @@ def test_sim_tool_reward_when_answer_matches():
         item = await env.get_next_item()
         # fabricate a "perfect" trajectory by using the env's expected answer
         from hermes_agentic_rl.core.types import RolloutStep, Trajectory
+
         traj = Trajectory(
             task_id=item["task_id"],
             prompt=item["instruction"],
@@ -479,7 +483,10 @@ def test_curriculum_demote_optional():
     l0 = EchoTaskEnv(build_default_echo_dataset())
     l1 = SimToolEnv(build_sim_tool_dataset(n=4, seed=0))
     env = CurriculumEnv(
-        levels=[l0, l1], window=4, promote_threshold=0.5, allow_demote=True,
+        levels=[l0, l1],
+        window=4,
+        promote_threshold=0.5,
+        allow_demote=True,
         demote_threshold=0.1,
     )
     # promote

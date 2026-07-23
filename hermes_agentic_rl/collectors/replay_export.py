@@ -14,6 +14,52 @@ from hermes_agentic_rl.collectors.trajectory_adapter import (
 )
 from hermes_agentic_rl.core.trajectory import trajectory_from_dict
 
+_DEFAULT_TINY_TOKENIZER_CHARS = (
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?:;'\"()[]{}<>/_-+=\n\t"
+)
+
+
+class TinyTokenizer:
+    """Torch-free fallback tokenizer for session/replay conversion."""
+
+    def __init__(self, extra_chars: str = "") -> None:
+        specials = ["<pad>", "<bos>", "<eos>", "<unk>"]
+        chars = list(_DEFAULT_TINY_TOKENIZER_CHARS + extra_chars)
+        seen: set[str] = set()
+        uniq_chars: list[str] = []
+        for char in chars:
+            if char in seen:
+                continue
+            seen.add(char)
+            uniq_chars.append(char)
+        tokens = specials + uniq_chars
+        self._stoi = {token: index for index, token in enumerate(tokens)}
+        self._itos = tokens
+        self.pad_id = self._stoi["<pad>"]
+        self.bos_id = self._stoi["<bos>"]
+        self.eos_id = self._stoi["<eos>"]
+        self.unk_id = self._stoi["<unk>"]
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self._itos)
+
+    def encode(self, text: str, add_eos: bool = False) -> list[int]:
+        ids = [self._stoi.get(char, self.unk_id) for char in text]
+        if add_eos:
+            ids.append(self.eos_id)
+        return ids
+
+    def decode(self, ids: list[int]) -> str:
+        out: list[str] = []
+        for token_id in ids:
+            if 0 <= int(token_id) < len(self._itos):
+                token = self._itos[int(token_id)]
+                if token in {"<pad>", "<bos>", "<eos>", "<unk>"}:
+                    continue
+                out.append(token)
+        return "".join(out)
+
 
 class HFTokenizerAdapter:
     def __init__(self, hf_tok: Any) -> None:
@@ -25,9 +71,7 @@ class HFTokenizerAdapter:
             else (hf_tok.eos_token_id if hf_tok.eos_token_id is not None else 0)
         )
         self.eos_id = int(hf_tok.eos_token_id) if hf_tok.eos_token_id is not None else self.pad_id
-        self.bos_id = int(
-            hf_tok.bos_token_id if hf_tok.bos_token_id is not None else self.pad_id
-        )
+        self.bos_id = int(hf_tok.bos_token_id if hf_tok.bos_token_id is not None else self.pad_id)
 
     def encode(self, text: str, add_eos: bool = False) -> list[int]:
         ids = list(self._tok.encode(text, add_special_tokens=False))
@@ -43,9 +87,14 @@ def build_tokenizer_from_config(cfg: dict[str, Any]) -> Any:
     backend_cfg = cfg.get("backend", cfg) or {}
     name = str(backend_cfg.get("name", "tiny"))
     if name == "tiny":
-        from hermes_agentic_rl.backends.tiny import TinyTokenizer
+        try:
+            from hermes_agentic_rl.backends.tiny import TinyTokenizer as HermesTinyTokenizer
 
-        return TinyTokenizer(extra_chars=str(backend_cfg.get("extra_chars", "")))
+            tokenizer_cls: type = HermesTinyTokenizer  # type: ignore[assignment]
+        except Exception:
+            tokenizer_cls = TinyTokenizer
+
+        return tokenizer_cls(extra_chars=str(backend_cfg.get("extra_chars", "")))
     if name == "hf":
         from transformers import AutoTokenizer
 
@@ -69,7 +118,12 @@ def append_jsonl(path: str | Path, payloads: list[dict[str, Any]]) -> str:
 
 
 def record_to_session_turn_samples(record: Any) -> list[Any]:
-    if isinstance(record, dict) and "task_id" in record and "prompt" in record and "turns_used" in record:
+    if (
+        isinstance(record, dict)
+        and "task_id" in record
+        and "prompt" in record
+        and "turns_used" in record
+    ):
         return trajectory_to_session_turn_samples(trajectory_from_dict(record))
 
     if isinstance(record, dict):
@@ -92,7 +146,9 @@ def record_to_session_turn_samples(record: Any) -> list[Any]:
                 runtime_task_id = runtime_meta.get("task_id") or runtime_meta.get("session_id")
         return collect_session_turn_samples(
             [dict(m) for m in messages if isinstance(m, dict)],
-            session_id=str(record.get("session_id") or runtime_task_id or record.get("task_id") or "session"),
+            session_id=str(
+                record.get("session_id") or runtime_task_id or record.get("task_id") or "session"
+            ),
             task_id=record.get("task_id"),
         )
 

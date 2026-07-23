@@ -96,8 +96,13 @@ def test_trainer_drives_multi_stream_and_reports_per_stream_metrics():
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
     records = []
     cfg = GRPOTrainerConfig(
-        n_iters=3, group_size=3, prompts_per_iter=2, max_new_tokens=4,
-        lr=5e-3, log_every=100, seed=1,
+        n_iters=3,
+        group_size=3,
+        prompts_per_iter=2,
+        max_new_tokens=4,
+        lr=5e-3,
+        log_every=100,
+        seed=1,
         metrics_sink=records.append,
     )
     trainer = GRPOTrainer(policy=backend, env=env, reward_manager=rm, cfg=cfg)

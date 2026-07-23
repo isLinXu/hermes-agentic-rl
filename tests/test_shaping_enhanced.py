@@ -14,7 +14,7 @@ from hermes_agentic_rl.rewards.shaping import (
 
 
 class _FakeRecord:
-    __slots__ = ("reward", "response_ids", "metadata")
+    __slots__ = ("metadata", "response_ids", "reward")
 
     def __init__(
         self,

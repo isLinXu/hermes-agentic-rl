@@ -1,14 +1,15 @@
 """Tests for the new v0.9 additions:
-  - RLOO (Leave-One-Out baseline)
-  - EntropySchedulers (linear / exp / cosine / PID)
-  - PPO asymmetric clip
-  - PrioritizedReplayBuffer
-  - MixedCurriculumEnv
+- RLOO (Leave-One-Out baseline)
+- EntropySchedulers (linear / exp / cosine / PID)
+- PPO asymmetric clip
+- PrioritizedReplayBuffer
+- MixedCurriculumEnv
 """
 
 from __future__ import annotations
 
 import math
+
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -62,9 +63,9 @@ def test_rloo_advantage_default_is_normalized():
 
 
 def test_rloo_algo_end_to_end():
-    torch = pytest.importorskip("torch")
-    from hermes_agentic_rl.algos.rloo import RLOOAlgo, RLOOConfig
+    pytest.importorskip("torch")
     from hermes_agentic_rl.algos.base import RolloutBatch, RolloutRecord
+    from hermes_agentic_rl.algos.rloo import RLOOAlgo, RLOOConfig
     from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 
     b = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=2, seed=42))
@@ -72,13 +73,15 @@ def test_rloo_algo_end_to_end():
     for i in range(4):
         prompt = b.tokenizer.encode("test prompt")
         out = b.generate(prompt, max_new_tokens=3, temperature=1.0, seed=i)
-        records.append(RolloutRecord(
-            prompt_ids=list(prompt),
-            response_ids=list(out.response_ids),
-            old_logprobs=list(out.logprobs),
-            reward=float(i) / 4,
-            group_id="g0",
-        ))
+        records.append(
+            RolloutRecord(
+                prompt_ids=list(prompt),
+                response_ids=list(out.response_ids),
+                old_logprobs=list(out.logprobs),
+                reward=float(i) / 4,
+                group_id="g0",
+            )
+        )
 
     algo = RLOOAlgo(RLOOConfig(clip_eps=0.2, kl_coef=0.0))
     loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
@@ -87,8 +90,7 @@ def test_rloo_algo_end_to_end():
     if loss.requires_grad:
         loss.backward()
     has_grad = any(
-        p.grad is not None and p.grad.abs().sum().item() > 0
-        for p in b.trainable_parameters()
+        p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters()
     )
     assert has_grad, "no gradient for RLOO"
 
@@ -97,9 +99,9 @@ def test_rloo_algo_end_to_end():
 # Entropy Schedulers
 # ---------------------------------------------------------------------------
 from hermes_agentic_rl.algos.entropy_schedule import (
-    LinearEntropySchedule,
-    ExponentialEntropySchedule,
     CosineEntropySchedule,
+    ExponentialEntropySchedule,
+    LinearEntropySchedule,
     TargetEntropyPID,
     make_entropy_scheduler,
 )
@@ -154,17 +156,19 @@ def test_make_entropy_scheduler_factory():
 # PPO asymmetric clip
 # ---------------------------------------------------------------------------
 
+
 def test_ppo_config_has_clip_eps_high():
     from hermes_agentic_rl.algos.ppo import PPOConfig
+
     cfg = PPOConfig()
     assert hasattr(cfg, "clip_eps_high")
     assert cfg.clip_eps_high >= cfg.clip_eps
 
 
 def test_ppo_asymmetric_clip_forward():
-    torch = pytest.importorskip("torch")
-    from hermes_agentic_rl.algos.ppo import PPO, PPOConfig
+    pytest.importorskip("torch")
     from hermes_agentic_rl.algos.base import RolloutBatch, RolloutRecord
+    from hermes_agentic_rl.algos.ppo import PPO, PPOConfig
     from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 
     b = TinyCausalLMBackend(
@@ -174,16 +178,18 @@ def test_ppo_asymmetric_clip_forward():
     prompt = b.tokenizer.encode("ppo test")
     for i in range(3):
         out = b.generate(prompt, max_new_tokens=3, temperature=1.0, seed=i)
-        records.append(RolloutRecord(
-            prompt_ids=list(prompt),
-            response_ids=list(out.response_ids),
-            old_logprobs=list(out.logprobs),
-            reward=float(i),
-            group_id="g0",
-        ))
+        records.append(
+            RolloutRecord(
+                prompt_ids=list(prompt),
+                response_ids=list(out.response_ids),
+                old_logprobs=list(out.logprobs),
+                reward=float(i),
+                group_id="g0",
+            )
+        )
 
     algo = PPO(PPOConfig(clip_eps=0.2, clip_eps_high=0.28, entropy_coef=0.0, kl_coef=0.0))
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.n_records == 3
     assert "value_loss" in stats.extra
 

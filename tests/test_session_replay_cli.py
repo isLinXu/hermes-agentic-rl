@@ -27,12 +27,7 @@ def test_session_replay_cli_exports_replay_buffer_jsonl(tmp_path: Path, monkeypa
     output_path = tmp_path / "replay.jsonl"
     config_path = tmp_path / "session_replay.yaml"
     config_path.write_text(
-        (
-            f"input_path: {session_path}\n"
-            f"output_path: {output_path}\n"
-            "backend:\n"
-            "  name: tiny\n"
-        ),
+        (f"input_path: {session_path}\noutput_path: {output_path}\nbackend:\n  name: tiny\n"),
         encoding="utf-8",
     )
 
@@ -84,12 +79,7 @@ def test_session_replay_cli_accepts_trajectory_payload(tmp_path: Path, monkeypat
     output_path = tmp_path / "trajectory_replay.jsonl"
     config_path = tmp_path / "trajectory_replay.yaml"
     config_path.write_text(
-        (
-            f"input_path: {trajectory_path}\n"
-            f"output_path: {output_path}\n"
-            "backend:\n"
-            "  name: tiny\n"
-        ),
+        (f"input_path: {trajectory_path}\noutput_path: {output_path}\nbackend:\n  name: tiny\n"),
         encoding="utf-8",
     )
 
@@ -421,9 +411,7 @@ def test_session_replay_cli_applies_quality_filters_and_writes_report(
         "quality_filtered_replay_record",
     }
     assert {
-        row["reason"]
-        for row in quarantine_rows
-        if row["kind"] == "quality_filtered_replay_record"
+        row["reason"] for row in quarantine_rows if row["kind"] == "quality_filtered_replay_record"
     } == {"duplicate_record", "response_too_short"}
 
     report = json.loads(report_path.read_text(encoding="utf-8"))

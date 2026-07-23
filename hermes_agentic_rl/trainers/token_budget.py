@@ -100,6 +100,7 @@ class TokenBudgetManager:
             return self.cfg.max_response_tokens
         try:
             import torch
+
             if not torch.cuda.is_available():
                 return self.cfg.max_response_tokens
             total = torch.cuda.get_device_properties(0).total_memory
@@ -223,12 +224,7 @@ class TokenBudgetManager:
     ) -> int:
         """Return a tail start that does not bisect a tool-call block."""
         nominal = max(0, len(ids) - max(0, tail_keep))
-        if (
-            not protect_tool_call_boundaries
-            or tokenizer is None
-            or tail_keep <= 0
-            or nominal <= 0
-        ):
+        if not protect_tool_call_boundaries or tokenizer is None or tail_keep <= 0 or nominal <= 0:
             return nominal
         try:
             full_text = str(tokenizer.decode(list(ids)))
@@ -356,9 +352,7 @@ class TokenBudgetManager:
             "n_dropped": n_dropped,
             "max_resp_tokens_used": max_resp,
             "total_tokens_before": total,
-            "total_tokens_after": sum(
-                len(r.prompt_ids) + len(r.response_ids) for r in kept
-            ),
+            "total_tokens_after": sum(len(r.prompt_ids) + len(r.response_ids) for r in kept),
             "middle_strategy": self.cfg.middle_strategy,
             "total_middle_dropped": total_middle_dropped,
         }

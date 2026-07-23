@@ -20,9 +20,7 @@ from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConf
 
 
 def _make_trainer(out: Path, *, resume_from=None, auto_resume: bool = False, n_iters: int = 4):
-    backend = TinyCausalLMBackend(
-        TinyBackendConfig(dim=12, n_heads=2, n_layers=1, seed=0)
-    )
+    backend = TinyCausalLMBackend(TinyBackendConfig(dim=12, n_heads=2, n_layers=1, seed=0))
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
     cfg = GRPOTrainerConfig(

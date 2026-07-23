@@ -44,7 +44,7 @@ class UnifiedObservable:
         if self.writer is not None:
             self.writer.close()
 
-    def __enter__(self) -> "UnifiedObservable":
+    def __enter__(self) -> UnifiedObservable:
         return self
 
     def __exit__(self, *_exc: object) -> None:

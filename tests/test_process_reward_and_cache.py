@@ -145,9 +145,7 @@ def test_process_reward_outcome_callable_takes_precedence():
 def test_process_reward_clip():
     judge = _vote_judge({"s": 1})
     prm = NextStatePRM(judge)
-    agg = ProcessRewardAggregator(
-        prm, ProcessRewardConfig(outcome_default=5.0, clip=1.0)
-    )
+    agg = ProcessRewardAggregator(prm, ProcessRewardConfig(outcome_default=5.0, clip=1.0))
     traj = _traj({"runtime": {"next_state": "s"}})
     res = asyncio.run(agg.evaluate({}, traj, None))
     assert res.score == 1.0  # clipped from 5+1=6

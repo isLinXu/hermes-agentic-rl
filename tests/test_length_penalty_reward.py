@@ -32,9 +32,7 @@ def _traj(*, prompt_tokens: int = 2, response_tokens: int = 6) -> Trajectory:
 
 
 def test_length_penalty_linear_response_tokens():
-    reward = LengthPenaltyReward(
-        LengthPenaltyConfig(target_len=4, alpha=0.2, mode="linear")
-    )
+    reward = LengthPenaltyReward(LengthPenaltyConfig(target_len=4, alpha=0.2, mode="linear"))
 
     result = asyncio.run(reward.evaluate({}, _traj(response_tokens=6), None))
 
@@ -53,9 +51,7 @@ def test_length_penalty_quadratic_total_tokens():
         )
     )
 
-    result = asyncio.run(
-        reward.evaluate({}, _traj(prompt_tokens=2, response_tokens=4), None)
-    )
+    result = asyncio.run(reward.evaluate({}, _traj(prompt_tokens=2, response_tokens=4), None))
 
     assert result.score == pytest.approx(-0.05)
     assert result.metadata["length"] == 6

@@ -55,7 +55,9 @@ def test_wrapper_can_append_session_logs(tmp_path: Path):
     payload = asyncio.run(wrapper.run("Create x.txt"))
 
     assert session_log_path.exists()
-    lines = [line for line in session_log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [
+        line for line in session_log_path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     assert len(lines) == 1
     record = json.loads(lines[0])
     assert record["final_output"] == "done"
@@ -90,7 +92,7 @@ def test_hermes_adapter_builds_ai_agent_wrapper_when_run_agent_is_injected(monke
                         "content": "",
                         "tool_calls": [{"name": "write_file", "arguments": {"path": "x.txt"}}],
                     },
-                    {"role": "tool", "name": "write_file", "content": "{\"ok\": true}"},
+                    {"role": "tool", "name": "write_file", "content": '{"ok": true}'},
                     {"role": "assistant", "content": "done"},
                 ],
                 "task_id": saved_task_id,

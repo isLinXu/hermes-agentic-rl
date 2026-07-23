@@ -249,13 +249,18 @@ _LEGACY_TOOL_CALL_RE = re.compile(
 
 
 def _safe_json_loads(value: str) -> Any:
+    ok, parsed = _safe_json_loads_with_status(value)
+    return parsed if ok else None
+
+
+def _safe_json_loads_with_status(value: str) -> tuple[bool, Any]:
     stripped = value.strip()
     if not stripped or stripped[0] not in "[{":
-        return None
+        return False, None
     try:
-        return json.loads(stripped)
+        return True, json.loads(stripped)
     except Exception:
-        return None
+        return False, None
 
 
 def _stringify_argument_value(value: Any) -> str:
@@ -267,57 +272,119 @@ def _stringify_argument_value(value: Any) -> str:
         return str(value)
 
 
-def _normalize_tool_arguments(value: Any) -> dict[str, Any]:
-    decoded = _decode_json_string(value)
+def _argument_value_quality(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, str):
+        return 1.0 if value.strip() else 0.0
+    if isinstance(value, bool | int | float):
+        return 1.0
+    if isinstance(value, list):
+        if not value:
+            return 1.0
+        return sum(_argument_value_quality(item) for item in value) / len(value)
+    if isinstance(value, dict):
+        if not value:
+            return 1.0
+        key_scores = [1.0 if str(key).strip() else 0.0 for key in value]
+        value_scores = [_argument_value_quality(item) for item in value.values()]
+        return (sum(key_scores) + sum(value_scores)) / (len(key_scores) + len(value_scores))
+    return 1.0
+
+
+def _normalize_tool_arguments_with_quality(value: Any) -> tuple[dict[str, Any], bool, bool, float]:
+    if isinstance(value, dict):
+        return value, True, True, _argument_value_quality(value)
+    if value is None or value == "":
+        return {}, False, False, 0.0
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return {}, False, False, 0.0
+        try:
+            decoded = json.loads(stripped)
+        except Exception:
+            return {"arg": value}, False, False, 0.0
+    else:
+        decoded = _decode_json_string(value)
     if isinstance(decoded, dict):
-        return decoded
-    if decoded is None or decoded == "":
-        return {}
+        return decoded, True, True, _argument_value_quality(decoded)
     if isinstance(decoded, list):
-        return {"items": decoded}
-    return {"arg": decoded}
+        return {"items": decoded}, True, False, _argument_value_quality(decoded)
+    return {"arg": decoded}, True, False, _argument_value_quality(decoded)
 
 
-def _extract_tool_name_and_arguments(value: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+def _normalize_tool_arguments(value: Any) -> dict[str, Any]:
+    arguments, _, _, _ = _normalize_tool_arguments_with_quality(value)
+    return arguments
+
+
+def _extract_tool_name_and_arguments(
+    value: dict[str, Any],
+) -> tuple[str | None, dict[str, Any], bool, bool, float]:
     function = value.get("function")
     if isinstance(function, dict):
         func_name = function.get("name")
         arguments = function.get("arguments", value.get("arguments"))
+        normalized, args_json_valid, args_object_like, args_value_quality = (
+            _normalize_tool_arguments_with_quality(arguments)
+        )
         return (
             str(func_name).strip() if isinstance(func_name, str) and func_name.strip() else None,
-            _normalize_tool_arguments(arguments),
+            normalized,
+            args_json_valid,
+            args_object_like,
+            args_value_quality,
         )
 
     for name_key in ("name", "tool_name", "tool"):
         name = value.get(name_key)
         if isinstance(name, str) and name.strip():
-            return name.strip(), _normalize_tool_arguments(value.get("arguments", value.get("args")))
-    return None, _normalize_tool_arguments(value.get("arguments", value.get("args")))
+            normalized, args_json_valid, args_object_like, args_value_quality = (
+                _normalize_tool_arguments_with_quality(value.get("arguments", value.get("args")))
+            )
+            return name.strip(), normalized, args_json_valid, args_object_like, args_value_quality
+    normalized, args_json_valid, args_object_like, args_value_quality = (
+        _normalize_tool_arguments_with_quality(value.get("arguments", value.get("args")))
+    )
+    return None, normalized, args_json_valid, args_object_like, args_value_quality
 
 
-def _tool_call_from_object(value: dict[str, Any], *, raw: str) -> dict[str, Any]:
-    name, arguments = _extract_tool_name_and_arguments(value)
+def _tool_call_from_object(
+    value: dict[str, Any],
+    *,
+    raw: str,
+    json_valid: bool = True,
+) -> dict[str, Any]:
+    name, arguments, args_json_valid, args_object_like, args_value_quality = (
+        _extract_tool_name_and_arguments(value)
+    )
+    parse_ok = bool(name) and json_valid and args_json_valid and args_object_like
     return {
         "raw": raw,
         "name": name,
         "arguments": arguments,
-        "parse_ok": bool(name),
+        "parse_ok": parse_ok,
         "object_like": True,
         "format": "json",
+        "json_valid": json_valid,
+        "arguments_json_valid": args_json_valid,
+        "arguments_object_like": args_object_like,
+        "argument_value_quality": args_value_quality,
     }
 
 
 def _tool_calls_from_block(block: str) -> list[dict[str, Any]]:
-    parsed = _safe_json_loads(block)
+    json_valid, parsed = _safe_json_loads_with_status(block)
     if isinstance(parsed, list):
         calls = []
         for item in parsed:
             if isinstance(item, dict):
-                calls.append(_tool_call_from_object(item, raw=block))
+                calls.append(_tool_call_from_object(item, raw=block, json_valid=json_valid))
         if calls:
             return calls
     if isinstance(parsed, dict):
-        return [_tool_call_from_object(parsed, raw=block)]
+        return [_tool_call_from_object(parsed, raw=block, json_valid=json_valid)]
 
     legacy_match = _LEGACY_TOOL_CALL_RE.match(block)
     if legacy_match:
@@ -330,6 +397,10 @@ def _tool_calls_from_block(block: str) -> list[dict[str, Any]]:
                 "parse_ok": True,
                 "object_like": False,
                 "format": "legacy",
+                "json_valid": False,
+                "arguments_json_valid": False,
+                "arguments_object_like": False,
+                "argument_value_quality": _argument_value_quality(arg.strip()),
             }
         ]
 
@@ -341,6 +412,10 @@ def _tool_calls_from_block(block: str) -> list[dict[str, Any]]:
             "parse_ok": False,
             "object_like": False,
             "format": "unknown",
+            "json_valid": False,
+            "arguments_json_valid": False,
+            "arguments_object_like": False,
+            "argument_value_quality": 0.0,
         }
     ]
 
@@ -381,11 +456,7 @@ def _wrap_terminal_command_tool_call(command: str) -> str:
         "arguments": {"command": _terminal_command_from_prediction(command)},
     }
     return (
-        "<think>\n"
-        "</think>\n"
-        "<tool_call>\n"
-        f"{json.dumps(payload, ensure_ascii=False)}\n"
-        "</tool_call>"
+        f"<think>\n</think>\n<tool_call>\n{json.dumps(payload, ensure_ascii=False)}\n</tool_call>"
     )
 
 
@@ -430,8 +501,7 @@ def _argument_value_similarity(pred_args: dict[str, Any], target_args: dict[str,
     common_keys = sorted(set(pred_flat) & set(target_flat))
     if common_keys:
         return sum(
-            _trace_similarity(pred_flat[key], target_flat[key])
-            for key in common_keys
+            _trace_similarity(pred_flat[key], target_flat[key]) for key in common_keys
         ) / len(common_keys)
     return 0.5 * _trace_similarity(
         _stringify_argument_value(pred_args),
@@ -477,18 +547,26 @@ def _score_tool_call_pair(
         "tool_call_parse_ok": 1.0
         if prediction_call.get("parse_ok") and prediction_call.get("object_like")
         else 0.0,
+        "tool_call_json_valid": 1.0 if prediction_call.get("json_valid") else 0.0,
+        "argument_json_valid": 1.0 if prediction_call.get("arguments_json_valid") else 0.0,
+        "argument_schema_ok": 1.0 if prediction_call.get("arguments_object_like") else 0.0,
         "tool_name_match": 1.0
         if pred_name and target_name and pred_name.lower() == target_name.lower()
         else 0.0,
         "argument_key_overlap": _argument_key_overlap(pred_args, target_args),
         "argument_value_similarity": _argument_value_similarity(pred_args, target_args),
+        "argument_value_quality": float(prediction_call.get("argument_value_quality") or 0.0),
     }
     weights = {
-        "tool_call_present": 0.15,
-        "tool_call_parse_ok": 0.20,
-        "tool_name_match": 0.25,
-        "argument_key_overlap": 0.15,
-        "argument_value_similarity": 0.25,
+        "tool_call_present": 0.08,
+        "tool_call_parse_ok": 0.14,
+        "tool_call_json_valid": 0.14,
+        "argument_json_valid": 0.14,
+        "argument_schema_ok": 0.10,
+        "tool_name_match": 0.18,
+        "argument_key_overlap": 0.10,
+        "argument_value_similarity": 0.10,
+        "argument_value_quality": 0.02,
     }
     score = sum(components[key] * weights[key] for key in weights)
     return max(0.0, min(1.0, score)), components
@@ -511,9 +589,13 @@ def _structured_tool_call_score(prediction: str, target: str) -> tuple[float, di
             {
                 "tool_call_present": partial_metadata["partial_open_tag"],
                 "tool_call_parse_ok": 0.0,
+                "tool_call_json_valid": 0.0,
+                "argument_json_valid": 0.0,
+                "argument_schema_ok": 0.0,
                 "tool_name_match": 0.0,
                 "argument_key_overlap": 0.0,
                 "argument_value_similarity": 0.0,
+                "argument_value_quality": 0.0,
                 "partial_tool_call_score": partial_score,
                 **partial_metadata,
             }
@@ -590,7 +672,7 @@ def load_hermes_reasoning_trace_turns(
             rows_api_only=rows_api_only,
             rows_api_timeout=rows_api_timeout,
             rows_api_retries=rows_api_retries,
-    )
+        )
     items: list[dict[str, Any]] = []
     for row_idx, row in enumerate(rows):
         row = _normalize_trace_row(row)
@@ -633,10 +715,14 @@ def load_hermes_reasoning_trace_turns(
             subcategory = row.get("subcategory")
             task = row.get("task")
             if category or subcategory or task:
-                meta_bits = [f"category={category}" if category else None,
-                             f"subcategory={subcategory}" if subcategory else None,
-                             f"task={task}" if task else None]
-                prompt_parts.append("Trace metadata:\n" + "\n".join(bit for bit in meta_bits if bit))
+                meta_bits = [
+                    f"category={category}" if category else None,
+                    f"subcategory={subcategory}" if subcategory else None,
+                    f"task={task}" if task else None,
+                ]
+                prompt_parts.append(
+                    "Trace metadata:\n" + "\n".join(bit for bit in meta_bits if bit)
+                )
             tools_block = _format_tools(tools)
             if tools_block:
                 prompt_parts.append(tools_block)
@@ -794,9 +880,10 @@ class HermesReasoningTraceReward(BaseReward):
                 "HermesReasoningTraceReward reward_mode must be one of "
                 "'similarity', 'tool_call', or 'hybrid'"
             )
-        if self.reward_mode == "hybrid" and (
-            self.tool_call_reward_weight + self.text_reward_weight
-        ) <= 0:
+        if (
+            self.reward_mode == "hybrid"
+            and (self.tool_call_reward_weight + self.text_reward_weight) <= 0
+        ):
             raise ValueError("hybrid reward weights must have a positive sum")
 
     async def evaluate(
@@ -907,9 +994,7 @@ class HermesReasoningTraceEnv(BaseEnv):
             split=str(cfg.get("dataset_split", DEFAULT_SPLIT)),
             dataset_path=cfg.get("dataset_path"),
             limit=(
-                int(cfg["dataset_limit"])
-                if cfg.get("dataset_limit") not in {None, ""}
-                else None
+                int(cfg["dataset_limit"]) if cfg.get("dataset_limit") not in {None, ""} else None
             ),
             shuffle=bool(cfg.get("shuffle", True)),
             seed=int(cfg.get("seed", 0)),
@@ -1006,7 +1091,9 @@ class HermesReasoningTraceEnv(BaseEnv):
         response = str(item.get("target_response") or "")
         response_prefix = str(item.get("response_prefix") or self._assistant_response_prefix or "")
         response_suffix = str(item.get("response_suffix") or self._assistant_response_suffix or "")
-        response_adapter = str(item.get("response_adapter") or self._assistant_response_adapter or "")
+        response_adapter = str(
+            item.get("response_adapter") or self._assistant_response_adapter or ""
+        )
         instruction = self.format_prompt(item)
         if not instruction or not response.strip():
             return []

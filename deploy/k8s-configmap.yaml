@@ -1,0 +1,31 @@
+# Kubernetes ConfigMap
+# 存储训练配置和环境变量（非敏感）
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-rl-config
+  namespace: default
+  labels:
+    app: hermes-agentic-rl
+    version: v1.0.0-rc1
+data:
+  # Python 运行时配置
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+  # 项目路径配置
+  HERMES_AGENT_REPO: "/opt/hermes-agentic-rl/subprojects/hermes-agent"
+  PYTHONPATH: "/opt/hermes-agentic-rl"
+
+  # PyTorch 配置
+  PYTORCH_ENABLE_MPS_FALLBACK: "0"
+
+  # 训练默认配置
+  HERMES_RL_DEFAULT_CONFIG: "configs/echo_grpo_mvp.yaml"
+  HERMES_RL_OUTPUT_DIR: "/opt/hermes-agentic-rl/outputs"
+
+  # 日志配置
+  HERMES_RL_LOG_LEVEL: "INFO"
+  HERMES_RL_METRICS_FORMAT: "jsonl"

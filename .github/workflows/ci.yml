@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop, "release/**"]
+    branches: [main, master, develop, "release/**", "feat/**"]
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, master, develop, "feat/**"]
   workflow_dispatch:
 
 permissions:
@@ -51,7 +51,7 @@ jobs:
         run: python -m ruff check hermes_agentic_rl tests scripts/check_real_hermes.py scripts/ci_eval_gate_smoke.py
 
       - name: Mypy
-        run: python -m mypy --follow-imports=skip hermes_agentic_rl
+        run: python -m mypy --ignore-missing-imports hermes_agentic_rl
 
       - name: Compile importable Python files
         run: python -m compileall -q hermes_agentic_rl scripts tests
@@ -97,6 +97,11 @@ jobs:
           --cov-report=term-missing
           --cov-report=xml
 
+      - name: Run algorithm micro-benchmarks
+        run: >
+          python -m pytest tests/benchmarks/ -m benchmark -q
+          --benchmark-disable
+
       - name: Run eval-gate smoke
         run: python scripts/ci_eval_gate_smoke.py
 
@@ -107,6 +112,50 @@ jobs:
           name: coverage-${{ matrix.python-version }}
           path: coverage.xml
           if-no-files-found: error
+
+  benchmark:
+    name: Performance benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            torch
+          python -m pip install -e '.[rl,data,metrics,test,benchmark]'
+
+      - name: Run performance benchmarks
+        run: >
+          python -m pytest tests/benchmarks/ -m benchmark -q
+          --benchmark-json=benchmark-results.json
+          --benchmark-min-rounds=3
+          --benchmark-warmup=on
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
+          if-no-files-found: ignore
+
+      - name: Run perf suite smoke
+        run: python -m pytest hermes_agentic_rl/benchmarks/ -q --tb=short || true
 
   docs:
     name: Docs

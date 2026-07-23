@@ -1,0 +1,10 @@
+---
+# hermes-agentic-rl Kubernetes Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/version: "1.0.0-rc1"
+    app.kubernetes.io/managed-by: kubectl

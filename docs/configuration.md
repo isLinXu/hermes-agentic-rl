@@ -1,5 +1,36 @@
 # `train-rl` YAML configuration reference
 
+## Config validation (v0.12+)
+
+Configs loaded via `hermes_agentic_rl.config.load_config` are validated
+automatically. Install typed validation with:
+
+```bash
+pip install 'hermes-agentic-rl[config]'
+```
+
+Pydantic models live in `hermes_agentic_rl.config_models`:
+
+| Model | Validates |
+|---|---|
+| `RuntimeConfigModel` | `runtime.integration`, `max_agent_turns`, `enabled_toolsets` |
+| `TrainerConfigModel` | `trainer.algo`, `n_iters`, `lr`, `group_size` |
+| `RewardConfigModel` | `reward.aggregator`, `components` |
+| `HermesRLConfigModel` | Full top-level envelope (unknown keys allowed) |
+
+Programmatic check:
+
+```python
+from hermes_agentic_rl.config import validate_config
+
+validate_config({"runtime": {"integration": "fake", "max_agent_turns": 20}})
+```
+
+When Pydantic is not installed, a lightweight dict validator is used instead.
+See [ROADMAP.md](ROADMAP.md) for API stability boundaries.
+
+---
+
 Top-level keys recognized by `hermes_agentic_rl.cli.train_rl.run_train_rl`:
 
 ```yaml

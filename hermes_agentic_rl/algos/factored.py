@@ -66,10 +66,10 @@ from hermes_agentic_rl.backends.base import LLMBackend
 DEFAULT_HEADS: list[str] = ["action_type", "tool_id", "params", "mem_op", "mem_slot"]
 DEFAULT_WEIGHTS: dict[str, float] = {
     "action_type": 0.30,
-    "tool_id":     0.30,
-    "params":      0.25,
-    "mem_op":      0.10,
-    "mem_slot":    0.05,
+    "tool_id": 0.30,
+    "params": 0.25,
+    "mem_op": 0.10,
+    "mem_slot": 0.05,
 }
 
 
@@ -87,9 +87,7 @@ class FactoredConfig:
     """
 
     heads: list[str] = field(default_factory=lambda: list(DEFAULT_HEADS))
-    head_weights: dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_WEIGHTS)
-    )
+    head_weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     fallback_to_flat: bool = True
     # KL estimator for the per-head reference penalty. Defaults to "k3" to
     # stay consistent with GRPO/RLOO/OPD/GSPO so that, under a Hybrid config,
@@ -137,8 +135,13 @@ class FactoredGRPO(BaseAlgo):
         if not all_records:
             zero = torch.zeros((), dtype=torch.float32)
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
+                mean_reward=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
                 n_records=0,
                 extra={"algo": "factored_grpo", "n_updated": 0},
             )
@@ -185,9 +188,7 @@ class FactoredGRPO(BaseAlgo):
 
         # 4) Flat fallback.
         if flat_records:
-            flat_loss, flat_kl, flat_n = self._flat_grpo_loss(
-                policy, ref_policy, flat_records
-            )
+            flat_loss, flat_kl, flat_n = self._flat_grpo_loss(policy, ref_policy, flat_records)
             flat_weight = len(flat_records) / max(1, len(all_records))
             total_loss = total_loss + flat_weight * flat_loss
             total_kl += flat_kl
@@ -197,7 +198,9 @@ class FactoredGRPO(BaseAlgo):
         mean_a = sum(adv_map.get(id(r), 0.0) for r in all_records) / max(1, len(all_records))
 
         stats = AlgoUpdateStats(
-            loss=float(total_loss.detach().item()) if total_loss.requires_grad else float(total_loss.item()),
+            loss=float(total_loss.detach().item())
+            if total_loss.requires_grad
+            else float(total_loss.item()),
             policy_loss=float(total_loss.detach().item()),
             kl=total_kl,
             entropy=0.0,
@@ -261,9 +264,7 @@ class FactoredGRPO(BaseAlgo):
 
             # Batched forward for this head.
             try:
-                new_logp, mask = policy.score_batch(
-                    prompt_ids_list, resp_ids_list, temperature=1.0
-                )
+                new_logp, mask = policy.score_batch(prompt_ids_list, resp_ids_list, temperature=1.0)
             except Exception:
                 continue  # head scoring failed; skip this head
 
@@ -276,13 +277,16 @@ class FactoredGRPO(BaseAlgo):
                 R_i = int(mask[i].sum().item())
                 if R_i > 0 and olp:
                     chunk = olp[-R_i:]
-                    old_logp[i, :len(chunk)] = torch.tensor(chunk, dtype=dtype, device=device)
+                    old_logp[i, : len(chunk)] = torch.tensor(chunk, dtype=dtype, device=device)
 
             adv_t = torch.tensor(advs_scalar, dtype=dtype, device=device).unsqueeze(-1)
             adv_tensor = adv_t * mask.to(dtype)
 
             head_pol_loss, _ = clipped_surrogate_loss_batched(
-                new_logp, old_logp, adv_tensor, mask,
+                new_logp,
+                old_logp,
+                adv_tensor,
+                mask,
                 clip_eps=cfg.clip_eps,
                 loss_agg=cfg.loss_agg,
                 max_len_for_dr_grpo=cfg.max_len_for_dr_grpo,
@@ -293,11 +297,13 @@ class FactoredGRPO(BaseAlgo):
             # signal is comparable with the other algorithms (default k3).
             if ref_policy is not None and cfg.kl_coef > 0:
                 with torch.no_grad():
-                    ref_logp, ref_mask = ref_policy.score_batch(
+                    ref_logp, _ref_mask = ref_policy.score_batch(
                         prompt_ids_list, resp_ids_list, temperature=1.0
                     )
                 kl_scalar = kl_from_logprobs_batched(
-                    new_logp, ref_logp, mask,
+                    new_logp,
+                    ref_logp,
+                    mask,
                     estimator=self.factored_cfg.kl_estimator,
                 )
                 total = total + w * cfg.kl_coef * kl_scalar

@@ -130,12 +130,8 @@ class MultiTurnAgentLoop(BaseAgentLoop):
             except Exception as exc:  # defensive — tools never crash rollout
                 tool_result_text = f"error:{type(exc).__name__}:{exc}"
             tool_calls_per_turn.append([{"name": tool_name, "arg": tool_arg}])
-            tool_results_per_turn.append(
-                [{"name": tool_name, "result": tool_result_text}]
-            )
-            messages.append(
-                {"role": "tool", "name": tool_name, "content": tool_result_text}
-            )
+            tool_results_per_turn.append([{"name": tool_name, "result": tool_result_text}])
+            messages.append({"role": "tool", "name": tool_name, "content": tool_result_text})
 
             injected = self.tool_result_template.format(result=tool_result_text)
             inject_ids = self.backend.tokenizer.encode(injected)

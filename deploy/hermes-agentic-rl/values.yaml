@@ -1,0 +1,295 @@
+# Default values for hermes-agentic-rl.
+# This is a YAML-formatted file.
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full resource name
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Workload type: job | cronjob | deployment
+# ---------------------------------------------------------------------------
+# job       — one-shot training/evaluation task (Kubernetes Job)
+# cronjob   — scheduled recurring training (Kubernetes CronJob)
+# deployment — long-running service (online-cycle, session-train-worker, etc.)
+# ---------------------------------------------------------------------------
+workloadType: job
+
+# -- Main CLI command to execute (see `hermes-agentic-rl --help`)
+# Common: train-rl, eval-rl, train, rollout, online-cycle,
+#         session-train-worker, self-evolution-batch, etc.
+command: train-rl
+
+# -- Extra CLI arguments appended after the command
+extraArgs: []
+#  - "--limit=100"
+#  - "--seed=42"
+#  - "--once"
+
+# ---------------------------------------------------------------------------
+# Image
+# ---------------------------------------------------------------------------
+image:
+  repository: hermes-agentic-rl
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------
+# Service Account
+# ---------------------------------------------------------------------------
+serviceAccount:
+  # -- Specifies whether a service account should be created
+  create: true
+  # -- Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# ---------------------------------------------------------------------------
+# Pod configuration
+# ---------------------------------------------------------------------------
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534   # nobody
+  fsGroup: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+# -- Node selector for GPU / CPU nodes
+nodeSelector: {}
+#  nvidia.com/gpu.present: "true"
+
+# -- Tolerations for GPU taints
+tolerations: []
+#  - key: nvidia.com/gpu
+#    operator: Exists
+#    effect: NoSchedule
+
+# -- Pod affinity rules
+affinity: {}
+
+# -- Priority class name
+priorityClassName: ""
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+resources:
+  limits:
+    cpu: 4000m
+    memory: 8Gi
+    # nvidia.com/gpu: 1   # uncomment for GPU training
+  requests:
+    cpu: 1000m
+    memory: 2Gi
+    # nvidia.com/gpu: 1   # uncomment for GPU training
+
+# ---------------------------------------------------------------------------
+# Training configuration (mounted as ConfigMap)
+# ---------------------------------------------------------------------------
+config:
+  # -- Inline YAML training config. Overrides the default echo_grpo_mvp.
+  # Set to null to skip ConfigMap creation and mount your own.
+  inline: |
+    backend:
+      name: tiny
+      dim: 32
+      n_heads: 4
+      n_layers: 2
+      max_len: 128
+      seed: 0
+    environment:
+      type: echo
+    train_rl:
+      n_iters: 60
+      group_size: 8
+      prompts_per_iter: 2
+      lr: 0.005
+      max_new_tokens: 8
+      temperature: 1.0
+      update_epochs: 2
+      minibatch_size: 8
+      clip_eps: 0.2
+      kl_coef: 0.0
+      entropy_coef: 0.0
+      use_reference: false
+      log_every: 10
+      save_every: 0
+      seed: 123
+
+  # -- Reference an existing ConfigMap instead of creating one
+  existingConfigMap: ""
+
+  # -- Key inside the ConfigMap that holds the config YAML
+  configMapKey: config.yaml
+
+# ---------------------------------------------------------------------------
+# Persistent storage for outputs / checkpoints
+# ---------------------------------------------------------------------------
+persistence:
+  # -- Enable PVC creation for output data and checkpoints
+  enabled: true
+  # -- Storage class name (empty = default)
+  storageClass: ""
+  # -- Access mode
+  accessMode: ReadWriteOnce
+  # -- PVC size
+  size: 10Gi
+  # -- Use an existing PVC instead of creating one
+  existingClaim: ""
+  # -- Mount path inside the container
+  mountPath: /data
+
+# ---------------------------------------------------------------------------
+# Job-specific settings (workloadType: job)
+# ---------------------------------------------------------------------------
+job:
+  # -- Job restart policy
+  restartPolicy: OnFailure
+  # -- TTL in seconds after Job finishes (auto cleanup)
+  ttlSecondsAfterFinished: 86400
+  # -- Active deadline seconds (0 = unlimited)
+  activeDeadlineSeconds: 0
+  # -- Backoff limit
+  backoffLimit: 3
+  # -- Completions (for parallel Jobs, use with completionMode)
+  completions: 1
+  # -- Parallelism
+  parallelism: 1
+  # -- Completion mode: NonIndexed | Indexed
+  completionMode: NonIndexed
+
+# ---------------------------------------------------------------------------
+# CronJob-specific settings (workloadType: cronjob)
+# ---------------------------------------------------------------------------
+cronjob:
+  # -- Cron schedule expression
+  schedule: "0 2 * * *"
+  # -- Timezone for the schedule
+  timeZone: "UTC"
+  # -- Concurrency policy: Allow | Forbid | Replace
+  concurrencyPolicy: Forbid
+  # -- Suspend the CronJob
+  suspend: false
+  # -- Successful job history limit
+  successfulJobsHistoryLimit: 3
+  # -- Failed job history limit
+  failedJobsHistoryLimit: 1
+  # -- Starting deadline seconds
+  startingDeadlineSeconds: 3600
+  # -- Job settings inherited from job section above
+  jobTemplate:
+    restartPolicy: OnFailure
+    ttlSecondsAfterFinished: 86400
+    backoffLimit: 3
+    activeDeadlineSeconds: 7200
+
+# ---------------------------------------------------------------------------
+# Deployment-specific settings (workloadType: deployment)
+# ---------------------------------------------------------------------------
+deployment:
+  # -- Number of replicas
+  replicaCount: 1
+  # -- Pod disruption budget
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  # -- Strategy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
+
+# ---------------------------------------------------------------------------
+# Service (only used when workloadType = deployment)
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Ingress (optional, for deployment mode)
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: hermes-agentic-rl.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: hermes-agentic-rl-tls
+  #    hosts:
+  #      - hermes-agentic-rl.local
+
+# ---------------------------------------------------------------------------
+# Horizontal Pod Autoscaler (deployment mode only)
+# ---------------------------------------------------------------------------
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+  behavior: {}
+
+# ---------------------------------------------------------------------------
+# Observability
+# ---------------------------------------------------------------------------
+metrics:
+  # -- Enable Prometheus ServiceMonitor
+  enabled: false
+  serviceMonitor:
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+# -- Additional environment variables
+env: []
+#  - name: WANDB_API_KEY
+#    valueFrom:
+#      secretKeyRef:
+#        name: wandb-secret
+#        key: api-key
+#  - name: HF_TOKEN
+#    valueFrom:
+#      secretKeyRef:
+#        name: hf-secret
+#        key: token
+
+# -- Additional volumes
+volumes: []
+#  - name: huggingface-cache
+#    persistentVolumeClaim:
+#      claimName: hf-cache-pvc
+
+# -- Additional volume mounts
+volumeMounts: []
+#  - name: huggingface-cache
+#    mountPath: /root/.cache/huggingface
+
+# -- Init containers
+initContainers: []
+
+# -- Sidecar containers
+sidecars: []

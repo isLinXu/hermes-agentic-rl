@@ -345,9 +345,7 @@ class RewardComposer:
             metadata=meta,
         )
 
-    def _aggregate(
-        self, shaped: list[RewardResult], skipped: list[str]
-    ) -> RewardSummary:
+    def _aggregate(self, shaped: list[RewardResult], skipped: list[str]) -> RewardSummary:
         total_weight = sum(r.weight for r in shaped)
         if total_weight <= 0:
             # Degenerate weighting (all components gated to zero weight, or a

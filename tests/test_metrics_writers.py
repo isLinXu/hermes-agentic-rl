@@ -9,13 +9,13 @@ from types import ModuleType
 
 import pytest
 
+from hermes_agentic_rl.monitor import UnifiedObservable
 from hermes_agentic_rl.monitor.writers import (
     JsonlMetricsWriter,
     MultiMetricsWriter,
     StdoutMetricsWriter,
     build_writer_from_config,
 )
-from hermes_agentic_rl.monitor import UnifiedObservable
 
 
 def test_jsonl_writer_appends(tmp_path: Path) -> None:

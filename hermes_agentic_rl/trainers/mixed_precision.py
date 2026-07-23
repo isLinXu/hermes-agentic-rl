@@ -23,6 +23,7 @@ import torch
 # dtype helpers
 # ---------------------------------------------------------------------------
 
+
 def get_amp_dtype(name: str, device: torch.device | None = None) -> torch.dtype:
     """Resolve a user-facing dtype string to a torch dtype.
 
@@ -89,7 +90,7 @@ class AMPContext:
     ) -> None:
         self.dtype = get_amp_dtype(dtype) if isinstance(dtype, str) else dtype
         self.enabled = bool(enabled) and self.dtype != torch.float32
-        self._scaler = torch.amp.GradScaler(
+        self._scaler = torch.amp.GradScaler(  # type: ignore[attr-defined]
             init_scale=init_scale,
             growth_interval=growth_interval,
             enabled=self.enabled,
@@ -100,7 +101,9 @@ class AMPContext:
         """Autocast context manager for the forward pass."""
         if self.enabled:
             device_type = "cuda" if torch.cuda.is_available() else "cpu"
-            with torch.amp.autocast(device_type=device_type, dtype=self.dtype):
+            with torch.amp.autocast(  # type: ignore[attr-defined]
+                device_type=device_type, dtype=self.dtype
+            ):
                 yield
         else:
             yield

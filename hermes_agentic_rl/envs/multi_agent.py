@@ -30,6 +30,17 @@ from typing import Any
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
 from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
 
+
+def _empty_trajectory() -> Trajectory:
+    return Trajectory(
+        task_id="",
+        prompt="",
+        steps=[],
+        final_output="",
+        finished_naturally=False,
+        turns_used=0,
+    )
+
 # ---------------------------------------------------------------------------
 # Message board (simple shared state for agent-to-agent communication)
 # ---------------------------------------------------------------------------
@@ -38,7 +49,7 @@ from hermes_agentic_rl.envs.base_env import BaseEnv, SupervisedSample
 @dataclass
 class AgentMessage:
     sender: str
-    recipient: str | None   # None = broadcast
+    recipient: str | None  # None = broadcast
     content: str
     step: int
 
@@ -55,10 +66,7 @@ class MessageBoard:
 
     def read(self, agent_id: str) -> list[AgentMessage]:
         """Return messages visible to agent_id (sent to them or broadcast)."""
-        return [
-            m for m in self._messages
-            if m.recipient is None or m.recipient == agent_id
-        ]
+        return [m for m in self._messages if m.recipient is None or m.recipient == agent_id]
 
     def advance(self) -> None:
         self._step += 1
@@ -83,7 +91,7 @@ class MultiAgentItem:
     """
 
     base_item: dict[str, Any]
-    agent_observations: dict[str, str]   # agent_id → observation text
+    agent_observations: dict[str, str]  # agent_id → observation text
     shared_state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -128,8 +136,7 @@ class MultiAgentEnv(BaseEnv):
         agents = self.get_agents()
         agent_id = agents[0] if agents else "agent_0"
         obs = multi.agent_observations.get(agent_id, "")
-        return {"__multi__": multi, "__agent_id__": agent_id, "instruction": obs,
-                **multi.base_item}
+        return {"__multi__": multi, "__agent_id__": agent_id, "instruction": obs, **multi.base_item}
 
     async def compute_reward(
         self,
@@ -191,6 +198,7 @@ class CoopLetterCountingEnv(MultiAgentEnv):
             LetterCountingConfig,
             LetterCountingEnv,
         )
+
         self._inner = LetterCountingEnv(LetterCountingConfig(seed=seed))
         self._rng = random.Random(seed)
         self.team_reward_weight = team_reward_weight
@@ -220,6 +228,7 @@ class CoopLetterCountingEnv(MultiAgentEnv):
 
         def fmt_obs(agent_letters: list[str], counts: dict[str, int]) -> str:
             import json as _json
+
             letters_str = ", ".join(f"'{ch}'" for ch in agent_letters)
             if len(agent_letters) == 1:
                 return (
@@ -290,7 +299,7 @@ class CoopLetterCountingEnv(MultiAgentEnv):
                         credits.append(max(0.0, 1.0 - abs(p - exp) / (exp + 1)))
                     except (ValueError, TypeError):
                         credits.append(0.0)
-                return sum(credits) / len(credits), f"mean={sum(credits)/len(credits):.2f}"
+                return sum(credits) / len(credits), f"mean={sum(credits) / len(credits):.2f}"
 
         for agent_id, traj in trajectories.items():
             is_A = agent_id == "agent_A"
@@ -305,7 +314,9 @@ class CoopLetterCountingEnv(MultiAgentEnv):
             if other_traj and individual_score >= 0.99:
                 other_targets = shared.get("targets_B") if is_A else shared.get("targets_A")
                 other_correct = shared.get("correct_B") if is_A else shared.get("correct_A")
-                other_score, _ = _partial(other_traj.final_output or "", other_targets or [], other_correct or {})
+                other_score, _ = _partial(
+                    other_traj.final_output or "", other_targets or [], other_correct or {}
+                )
                 team_score = 1.0 if other_score >= 0.99 else 0.0
 
             w = self.team_reward_weight
@@ -357,7 +368,9 @@ class DebateEnv(MultiAgentEnv):
         await self._inner.setup()
 
     async def close(self) -> None:
-        await self._inner.close()
+        close_fn = getattr(self._inner, "close", None)
+        if close_fn is not None:
+            await close_fn()
 
     async def get_next_multi_item(self) -> MultiAgentItem:
         item = await self._inner.get_next_item()
@@ -382,8 +395,12 @@ class DebateEnv(MultiAgentEnv):
         board: MessageBoard,
         tool_context: Any,
     ) -> dict[str, RewardResult]:
-        proposer_text = (trajectories.get("proposer") or Trajectory(final_output="")).final_output or ""
-        skeptic_text = (trajectories.get("skeptic") or Trajectory(final_output="")).final_output or ""
+        proposer_text = (
+            trajectories.get("proposer") or _empty_trajectory()
+        ).final_output or ""
+        skeptic_text = (
+            trajectories.get("skeptic") or _empty_trajectory()
+        ).final_output or ""
 
         try:
             judge_score = float(await self._judge(item.base_item, proposer_text, skeptic_text))
@@ -394,11 +411,15 @@ class DebateEnv(MultiAgentEnv):
         # (incentivizes skeptic to find real flaws)
         return {
             "proposer": RewardResult(
-                name="debate_proposer", score=judge_score, weight=1.0,
+                name="debate_proposer",
+                score=judge_score,
+                weight=1.0,
                 reason=f"judge={judge_score:.3f}",
             ),
             "skeptic": RewardResult(
-                name="debate_skeptic", score=1.0 - judge_score, weight=1.0,
-                reason=f"adversarial judge={1-judge_score:.3f}",
+                name="debate_skeptic",
+                score=1.0 - judge_score,
+                weight=1.0,
+                reason=f"adversarial judge={1 - judge_score:.3f}",
             ),
         }

@@ -1,0 +1,82 @@
+# 生产环境 Docker Compose
+#
+# 使用方式：
+#   cd deploy
+#   cp .env.example .env
+#   # 编辑 .env 填入实际值
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# 服务：
+#   - hermes-rl: 主训练/推理服务
+#   - tensorboard: 训练指标可视化 (http://localhost:6006)
+
+name: hermes-agentic-rl-prod
+
+services:
+  hermes-rl:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: runtime
+    image: hermes-agentic-rl:0.12.0
+    container_name: hermes-rl
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      WANDB_API_KEY: ${WANDB_API_KEY:-}
+      NEWAPI_API_KEY: ${NEWAPI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LKEAP_API_KEY: ${LKEAP_API_KEY:-}
+      HERMES_AGENT_REPO: ${HERMES_AGENT_REPO:-/opt/hermes-agentic-rl/subprojects/hermes-agent}
+    volumes:
+      - hermes-rl-data:/opt/hermes-agentic-rl/outputs
+      - hermes-rl-checkpoints:/opt/hermes-agentic-rl/checkpoints
+    healthcheck:
+      test: ["CMD", "python", "-c", "import hermes_agentic_rl; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
+        reservations:
+          cpus: "1.0"
+          memory: 2G
+    networks:
+      - hermes-rl-net
+
+  tensorboard:
+    image: tensorflow/tensorflow:2.15.0
+    container_name: hermes-tensorboard
+    restart: unless-stopped
+    command: >
+      tensorboard
+      --logdir /logs
+      --host 0.0.0.0
+      --port 6006
+    volumes:
+      - hermes-rl-data:/logs:ro
+    ports:
+      - "6006:6006"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6006"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - hermes-rl-net
+
+volumes:
+  hermes-rl-data:
+    driver: local
+  hermes-rl-checkpoints:
+    driver: local
+
+networks:
+  hermes-rl-net:
+    driver: bridge

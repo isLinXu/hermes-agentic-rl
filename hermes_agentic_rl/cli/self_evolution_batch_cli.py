@@ -49,11 +49,7 @@ def _slugify(value: str, *, fallback: str) -> str:
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged = copy.deepcopy(base)
     for key, value in override.items():
-        if (
-            key in merged
-            and isinstance(merged[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
             merged[key] = _deep_merge(merged[key], value)
         else:
             merged[key] = copy.deepcopy(value)
@@ -122,7 +118,9 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
     if not input_path:
         raise ValueError("self-evolution-batch requires `self_evolution_batch.input_path`")
 
-    output_dir = Path(str(batch_cfg.get("output_dir") or cfg.get("output_dir") or "outputs/self_evolution_batch"))
+    output_dir = Path(
+        str(batch_cfg.get("output_dir") or cfg.get("output_dir") or "outputs/self_evolution_batch")
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     raw_directions = batch_cfg.get("directions")
@@ -130,7 +128,9 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
         raise ValueError("self-evolution-batch requires at least one direction")
 
     root_cfg = _root_stage_config(cfg)
-    base_replay_cfg = cfg.get("session_replay", {}) if isinstance(cfg.get("session_replay"), dict) else {}
+    base_replay_cfg = (
+        cfg.get("session_replay", {}) if isinstance(cfg.get("session_replay"), dict) else {}
+    )
     base_worker_cfg = (
         cfg.get("session_train_worker", {})
         if isinstance(cfg.get("session_train_worker"), dict)
@@ -259,7 +259,9 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             "description": direction_cfg.get("description", ""),
             "objective": direction_cfg.get("objective", {}),
             "capability_plan": {
-                "target_metrics": objective_target_metrics if isinstance(objective_target_metrics, list) else [],
+                "target_metrics": objective_target_metrics
+                if isinstance(objective_target_metrics, list)
+                else [],
                 "axes": objective_axes,
             },
             "paths": {
@@ -272,7 +274,9 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
                 "self_evolution_dataset": str(dataset_dir),
             },
             "replay": {
-                "samples_written": int(replay_summary.get("samples_written", _count_jsonl(replay_path))),
+                "samples_written": int(
+                    replay_summary.get("samples_written", _count_jsonl(replay_path))
+                ),
                 "reward_distribution": replay_summary.get("reward_distribution", {}),
                 "quality_filtered": replay_summary.get("quality_filtered", {}),
                 "quarantined": replay_summary.get("quarantined", {}),
@@ -306,9 +310,7 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
     replay_samples_total = sum(
         int(item["replay"]["samples_written"]) for item in direction_summaries
     )
-    worker_updates_total = sum(
-        int(item["worker"]["updates"]) for item in direction_summaries
-    )
+    worker_updates_total = sum(int(item["worker"]["updates"]) for item in direction_summaries)
     batch_summary: dict[str, Any] = {
         "command": "self-evolution-batch",
         "input_path": str(input_path),
@@ -330,20 +332,11 @@ def run_self_evolution_batch_config(cfg: dict[str, Any]) -> int:
             {
                 axis
                 for direction in direction_summaries
-                for axis in (
-                    direction.get("replay", {})
-                    .get("mining", {})
-                    .get("by_axis", {})
-                )
+                for axis in (direction.get("replay", {}).get("mining", {}).get("by_axis", {}))
             }
         ),
         "skill_candidates": sum(
-            int(
-                direction.get("replay", {})
-                .get("mining", {})
-                .get("skill_candidates", 0)
-                or 0
-            )
+            int(direction.get("replay", {}).get("mining", {}).get("skill_candidates", 0) or 0)
             for direction in direction_summaries
         ),
     }

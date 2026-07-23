@@ -49,7 +49,7 @@ def group_normalize_advantage(
     if n == 1:
         return [0.0]
     var = sum((r - mean) ** 2 for r in rewards) / n
-    std = var ** 0.5
+    std = var**0.5
     if std < eps:
         # All rewards identical → advantage = 0 (no learning signal, but that's
         # fine: GRPO just won't update on this group this step).
@@ -73,7 +73,7 @@ def dapo_group_advantage(
         return [0.0]
     mean = sum(rewards) / n
     var = sum((r - mean) ** 2 for r in rewards) / n
-    std = var ** 0.5
+    std = var**0.5
     if std < eps:
         return None
     return [(r - mean) / (std + eps) for r in rewards]

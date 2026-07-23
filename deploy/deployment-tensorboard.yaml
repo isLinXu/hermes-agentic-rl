@@ -1,0 +1,79 @@
+---
+# TensorBoard Deployment for real-time training metrics visualization.
+# Mounts the shared PVC so it can read logs written by training Jobs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-tensorboard
+  namespace: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: tensorboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-agentic-rl
+      app.kubernetes.io/component: tensorboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes-agentic-rl
+        app.kubernetes.io/component: tensorboard
+    spec:
+      serviceAccountName: hermes-training-sa
+      containers:
+        - name: tensorboard
+          image: tensorflow/tensorflow:2.18.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - tensorboard
+            - --logdir
+            - /data/logs
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "6006"
+          ports:
+            - name: http
+              containerPort: 6006
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: 256Mi
+            limits:
+              cpu: "500m"
+              memory: 512Mi
+          volumeMounts:
+            - name: hermes-data
+              mountPath: /data
+              readOnly: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: hermes-data
+          persistentVolumeClaim:
+            claimName: hermes-data
+            readOnly: true

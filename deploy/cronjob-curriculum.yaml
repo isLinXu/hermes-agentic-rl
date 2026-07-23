@@ -1,0 +1,86 @@
+---
+# Curriculum-learning CronJob — schedules periodic online-self-evolve or
+# curriculum-grpo training runs.  Default: daily at 02:07 (off-peak).
+# Adjust the schedule and command via Kustomize patches.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hermes-curriculum
+  namespace: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: curriculum
+spec:
+  schedule: "7 2 * * *"
+  timeZone: UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: hermes-agentic-rl
+            app.kubernetes.io/component: curriculum
+        spec:
+          serviceAccountName: hermes-training-sa
+          restartPolicy: OnFailure
+          containers:
+            - name: curriculum
+              image: hermes-agentic-rl:1.0.0-rc1
+              imagePullPolicy: IfNotPresent
+              workingDir: /opt/hermes-agentic-rl
+              command:
+                - python
+                - -m
+                - hermes_agentic_rl.cli.main
+                - online-self-evolve
+                - --config
+                - configs/curriculum_grpo.yaml
+                - --once
+              env:
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: hermes-secrets
+                      key: HF_TOKEN
+                      optional: true
+                - name: WANDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: hermes-secrets
+                      key: WANDB_API_KEY
+                      optional: true
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 4Gi
+                limits:
+                  cpu: "4"
+                  memory: 8Gi
+              volumeMounts:
+                - name: hermes-data
+                  mountPath: /data
+                - name: hermes-configs
+                  mountPath: /opt/hermes-agentic-rl/configs
+                  readOnly: true
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 65534
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            - name: hermes-data
+              persistentVolumeClaim:
+                claimName: hermes-data
+            - name: hermes-configs
+              configMap:
+                name: hermes-configs

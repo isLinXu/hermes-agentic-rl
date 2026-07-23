@@ -76,15 +76,7 @@ def test_openai_compatible_next_state_judge_parses_vote(monkeypatch):
     def _urlopen(_req, timeout):
         del timeout
         return _FakeHTTPResponse(
-            {
-                "choices": [
-                    {
-                        "message": {
-                            "content": "BAD\n[HINT_START]Return valid JSON.[HINT_END]"
-                        }
-                    }
-                ]
-            }
+            {"choices": [{"message": {"content": "BAD\n[HINT_START]Return valid JSON.[HINT_END]"}}]}
         )
 
     monkeypatch.setattr("urllib.request.urlopen", _urlopen)
@@ -123,17 +115,13 @@ def test_letter_counting_opd_judge_extracts_expected_answer_hint():
         judge.extract_hint("<answer>3</answer>", "Wrong answer. The correct answer is 4.")
     )
 
-    assert hint == (
-        "The expected answer is <answer>4</answer>. Return exactly that answer format."
-    )
+    assert hint == ("The expected answer is <answer>4</answer>. Return exactly that answer format.")
 
 
 def test_letter_counting_next_state_judge_marks_mismatch_bad():
     judge = LetterCountingNextStateJudge()
 
-    vote = asyncio.run(
-        judge.judge("<answer>3</answer>", "Wrong answer. correct answer is 4")
-    )
+    vote = asyncio.run(judge.judge("<answer>3</answer>", "Wrong answer. correct answer is 4"))
 
     assert vote.vote == BAD
     assert vote.hint is not None
@@ -156,10 +144,7 @@ def test_letter_counting_next_state_judge_marks_matching_json_good():
 
 
 def test_letter_counting_expected_answer_extractor_supports_answer_tags():
-    assert (
-        extract_letter_counting_expected_answer("expected: <answer>7</answer>")
-        == "7"
-    )
+    assert extract_letter_counting_expected_answer("expected: <answer>7</answer>") == "7"
 
 
 def test_letter_counting_expected_answer_prefers_correct_marker_over_prior_tag():

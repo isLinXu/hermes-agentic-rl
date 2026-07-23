@@ -12,6 +12,7 @@ sys.path.insert(0, str(PROJECT))
 
 def main():
     import asyncio
+
     from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
     from hermes_agentic_rl.core.reward_manager import RewardManager
     from hermes_agentic_rl.envs.letter_counting import LetterCountingEnv, LetterCountingReward
@@ -21,7 +22,9 @@ def main():
         env = LetterCountingEnv()
         reward = LetterCountingReward(weight=1.0)
         rm = RewardManager([reward])
-        backend = TinyCausalLMBackend(TinyBackendConfig(dim=32, n_heads=4, n_layers=2, max_len=256, seed=42))
+        backend = TinyCausalLMBackend(
+        TinyBackendConfig(dim=32, n_heads=4, n_layers=2, max_len=256, seed=42)
+    )
         return env, rm, backend
 
     env, rm, backend = asyncio.run(_setup())
@@ -31,7 +34,10 @@ def main():
     # verify env works
     async def _smoke():
         item = await env.get_next_item()
-        print(f"Item: text='{item['text'][:30]}...' targets={item['target_letters']} counts={item['correct_counts']}")
+        print(
+            f"Item: text='{item['text'][:30]}...' "
+            f"targets={item['target_letters']} counts={item['correct_counts']}"
+        )
         prompt = env.format_prompt(item)
         print(f"Prompt: {prompt[:100]}...")
         prompt_ids = backend.tokenizer.encode(prompt)
@@ -46,10 +52,22 @@ def main():
             final_output=response,
             finished_naturally=gen.finished,
             turns_used=1,
-            metadata={"runtime": {"rl": {"prompt_ids": prompt_ids, "response_ids": gen.response_ids, "old_logprobs": gen.logprobs}}},
+            metadata={
+                "runtime": {
+                    "rl": {
+                        "prompt_ids": prompt_ids,
+                        "response_ids": gen.response_ids,
+                        "old_logprobs": gen.logprobs,
+                    }
+                }
+            },
         )
         summary = await rm.evaluate(item, traj, tool_context=None)
-        print(f"Reward: {summary.final_score:.4f} ({summary.components[0].reason if summary.components else 'N/A'})")
+        print(
+            f"Reward: {summary.final_score:.4f} ("
+            f"{summary.components[0].reason if summary.components else 'N/A'}"
+            f")"
+        )
     asyncio.run(_smoke())
 
     # short training (train() is sync, uses its own event loop internally)

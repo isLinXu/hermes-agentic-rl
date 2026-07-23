@@ -1,0 +1,52 @@
+# GSPO (Sequence-level Group Stable Policy Optimization) example config.
+#
+# GSPO computes the policy ratio at the sequence level (sum of log-probs)
+# rather than per-token, which is more stable for long/variable-length
+# responses.  Algorithm reference: Yuan et al. 2025.
+#
+# Usage:
+#   python -m hermes_agentic_rl.yaml_config configs/gspo_echo.yaml
+
+algo: gspo
+
+# ── Trainer ──────────────────────────────────────────────────────────
+n_iters: 20
+group_size: 4
+prompts_per_iter: 2
+lr: 1.0e-3
+max_new_tokens: 16
+temperature: 1.0
+use_reference: false
+log_every: 1
+seed: 42
+update_epochs: 1
+minibatch_size: 0
+grad_clip: 1.0
+
+# ── GSPO-specific ────────────────────────────────────────────────────
+clip_eps: 0.2
+clip_eps_high: 0.28
+kl_coef: 0.02
+entropy_coef: 0.0
+advantage_norm: group
+kl_estimator: k3
+log_ratio_clip: 40.0
+
+# ── Backend ──────────────────────────────────────────────────────────
+backend:
+  type: tiny
+  dim: 64
+  n_heads: 4
+  n_layers: 2
+  seed: 42
+
+# ── Environment ──────────────────────────────────────────────────────
+env:
+  type: echo
+  vocab_size: 32
+
+# ── Rewards ──────────────────────────────────────────────────────────
+rewards:
+  components:
+    - type: echo
+      weight: 1.0

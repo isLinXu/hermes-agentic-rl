@@ -79,7 +79,11 @@ class EchoTaskEnv(BaseEnv):
     """
 
     def __init__(self, dataset: list[dict[str, Any]]) -> None:
-        self.dataset = dataset
+        # `eval-rl` expects environments to expose a materialized `items` list so it can
+        # perform deterministic split/group selection. Echo is tiny and fully in-memory,
+        # so keeping a dedicated list is safe and makes the MVP configs runnable end-to-end.
+        self.items = [dict(item) for item in dataset]
+        self.dataset = self.items
         self._index = 0
         self._reward = EchoRewardComponent(weight=1.0)
 

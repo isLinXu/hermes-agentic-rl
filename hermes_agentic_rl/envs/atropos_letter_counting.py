@@ -54,9 +54,7 @@ class AtroposLetterCountingEnv(BaseEnv):
         )
 
         if config_path is None:
-            config_path = str(
-                base / "environments/letter_counting_environment/config.yaml"
-            )
+            config_path = str(base / "environments/letter_counting_environment/config.yaml")
         cfg = LetterCountingConfig.from_yaml(config_path)
         # Override: hermes runs its own generate, no server needed
         cfg.use_wandb = False
@@ -137,16 +135,20 @@ class AtroposLetterCountingReward(BaseReward):
         target_letters = item.get("target_letters", [])
         if not correct_counts or not target_letters:
             return RewardResult(
-                name=self.name, score=0.0, weight=self.weight,
+                name=self.name,
+                score=0.0,
+                weight=self.weight,
                 reason="no correct_counts or target_letters in item",
             )
 
-        response_text = trajectory.final_output
+        response_text = trajectory.final_output or ""
 
         m = re.search(r"<answer>(.*?)</answer>", response_text, re.DOTALL)
         if m is None:
             return RewardResult(
-                name=self.name, score=0.0, weight=self.weight,
+                name=self.name,
+                score=0.0,
+                weight=self.weight,
                 reason="no <answer> tag found",
             )
         content = m.group(1).strip()
@@ -156,7 +158,9 @@ class AtroposLetterCountingReward(BaseReward):
                 pred = int(content)
             except (ValueError, TypeError):
                 return RewardResult(
-                    name=self.name, score=0.0, weight=self.weight,
+                    name=self.name,
+                    score=0.0,
+                    weight=self.weight,
                     reason=f"expected int, got {content!r}",
                 )
             expected = correct_counts[target_letters[0]]
@@ -174,17 +178,20 @@ class AtroposLetterCountingReward(BaseReward):
                 pred_dict = json.loads(content)
             except (json.JSONDecodeError, TypeError):
                 return RewardResult(
-                    name=self.name, score=0.0, weight=self.weight,
+                    name=self.name,
+                    score=0.0,
+                    weight=self.weight,
                     reason=f"invalid json: {content!r}",
                 )
             if not isinstance(pred_dict, dict):
                 return RewardResult(
-                    name=self.name, score=0.0, weight=self.weight,
+                    name=self.name,
+                    score=0.0,
+                    weight=self.weight,
                     reason=f"not a dict: {content!r}",
                 )
             ok = all(
-                pred_dict.get(letter, -1) == correct_counts[letter]
-                for letter in target_letters
+                pred_dict.get(letter, -1) == correct_counts[letter] for letter in target_letters
             )
             return RewardResult(
                 name=self.name,

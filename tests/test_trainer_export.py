@@ -31,7 +31,16 @@ def test_trainer_export_includes_verifier_fields_when_present(tmp_path: Path):
     summary = RewardSummary(
         final_score=1.0,
         components=[
-            RewardResult(name="filesystem_verifier_reward", score=0.0, reason="failed", metadata={"checked_files": 1, "passed_files": 0, "failures": [{"path": "x.txt", "reason": "file missing"}]}),
+            RewardResult(
+                name="filesystem_verifier_reward",
+                score=0.0,
+                reason="failed",
+                metadata={
+                    "checked_files": 1,
+                    "passed_files": 0,
+                    "failures": [{"path": "x.txt", "reason": "file missing"}],
+                },
+            ),
         ],
         metadata={"aggregator": "weighted_sum"},
     )
@@ -44,6 +53,7 @@ def test_trainer_export_includes_verifier_fields_when_present(tmp_path: Path):
     assert payload["verifier_checked_files"] == 1
     assert payload["verifier_passed_files"] == 0
     assert payload["verifier_failures"][0]["reason"] == "file missing"
+
 
 def test_atropos_grpo_trainer_writes_jsonl(tmp_path: Path):
     trajectory = build_trajectory()

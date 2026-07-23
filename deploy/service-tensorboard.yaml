@@ -1,0 +1,21 @@
+---
+# Service exposing TensorBoard inside the cluster.
+# For external access, add an Ingress or use kubectl port-forward.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-tensorboard
+  namespace: hermes-agentic-rl
+  labels:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: tensorboard
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hermes-agentic-rl
+    app.kubernetes.io/component: tensorboard
+  ports:
+    - name: http
+      port: 6006
+      targetPort: 6006
+      protocol: TCP

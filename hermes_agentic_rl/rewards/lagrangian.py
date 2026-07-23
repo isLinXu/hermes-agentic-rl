@@ -31,7 +31,7 @@ class LagrangianConfig:
     cost_limit: float = 0.1
     init_lambda: float = 0.0
     lr_lambda: float = 0.05
-    ema_decay: float = 0.9    # EMA of mean cost (smooths dual updates)
+    ema_decay: float = 0.9  # EMA of mean cost (smooths dual updates)
     max_lambda: float = 100.0
 
 
@@ -69,10 +69,7 @@ class LagrangianController:
             return loss_tensor
         mean_cost = sum(self._iter_costs) / len(self._iter_costs)
         self.state.last_mean_cost = mean_cost
-        ema = (
-            self.cfg.ema_decay * self.state.ema_cost
-            + (1.0 - self.cfg.ema_decay) * mean_cost
-        )
+        ema = self.cfg.ema_decay * self.state.ema_cost + (1.0 - self.cfg.ema_decay) * mean_cost
         self.state.ema_cost = ema
         self.state.total_observed += len(self._iter_costs)
         # penalty is a constant w.r.t. policy params here; it acts as an

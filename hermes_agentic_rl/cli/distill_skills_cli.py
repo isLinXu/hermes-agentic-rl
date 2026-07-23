@@ -19,8 +19,7 @@ def run_distill_skills(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="hermes-agentic-rl distill-skills",
         description=(
-            "Distill installable Skill candidates from raw agent traces. "
-            "No training required."
+            "Distill installable Skill candidates from raw agent traces. No training required."
         ),
     )
     parser.add_argument(

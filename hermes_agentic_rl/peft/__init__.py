@@ -25,5 +25,12 @@ from hermes_agentic_rl.peft.lora import (
     LoRALinear,
     inject_lora,
 )
+from hermes_agentic_rl.peft.lora_hot_reload import LoRAHotReloadManager
 
-__all__ = ["LoRAAdapter", "LoRAConfig", "LoRALinear", "inject_lora"]
+__all__ = [
+    "LoRAAdapter",
+    "LoRAConfig",
+    "LoRAHotReloadManager",
+    "LoRALinear",
+    "inject_lora",
+]

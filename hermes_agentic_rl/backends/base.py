@@ -4,11 +4,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from hermes_agentic_rl._compat import stable
 
+
+@stable
 class BackendUnavailableError(RuntimeError):
     """Raised when a backend's dependencies (torch, model weights...) are missing."""
 
 
+@stable
 @runtime_checkable
 class TokenizerProtocol(Protocol):
     """Minimal tokenizer contract. All backends share this surface."""
@@ -30,6 +34,7 @@ class TokenizerProtocol(Protocol):
     def decode(self, ids: list[int]) -> str: ...
 
 
+@stable
 @dataclass(slots=True)
 class GenerationOutput:
     """Result of a single `generate` call.
@@ -47,6 +52,7 @@ class GenerationOutput:
     metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+@stable
 class LLMBackend(ABC):
     """Unified LLM backend contract for rollout + training.
 

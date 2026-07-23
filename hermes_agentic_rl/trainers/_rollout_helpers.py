@@ -58,7 +58,7 @@ def rollout_temperature_from_meta(
     raw = rl_meta.get("temperature", fallback)
     if isinstance(raw, bool):
         return float(fallback)
-    if isinstance(raw, (int, float)):
+    if isinstance(raw, int | float):
         return float(raw)
     return float(fallback)
 
@@ -138,7 +138,7 @@ def reward_component_payload(component: Any) -> dict[str, Any]:
         numeric_metadata = {
             sanitize_metric_name(str(key)): float(value)
             for key, value in metadata.items()
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            if isinstance(value, int | float) and not isinstance(value, bool)
         }
         if numeric_metadata:
             payload["metadata"] = numeric_metadata
@@ -178,14 +178,14 @@ def grad_l2_norm(params: list[torch.Tensor]) -> float:
         if grad is None:
             continue
         total += float((grad.detach().float() ** 2).sum().item())
-    return total ** 0.5
+    return total**0.5
 
 
 def param_l2_norm(params: list[torch.Tensor]) -> float:
     total = 0.0
     for param in params:
         total += float((param.detach().float() ** 2).sum().item())
-    return total ** 0.5
+    return total**0.5
 
 
 def config_to_dict(cfg: Any) -> dict[str, Any]:
@@ -200,7 +200,7 @@ def config_to_dict(cfg: Any) -> dict[str, Any]:
             continue
         if isinstance(v, Path):
             out[name] = str(v)
-        elif isinstance(v, (str, int, float, bool, type(None))):
+        elif isinstance(v, str | int | float | bool | type(None)):
             out[name] = v
         else:
             out[name] = repr(v)
@@ -264,27 +264,27 @@ def summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
         "final_output_chars": [
             float(rec.metadata["final_output_chars"])
             for rec in batch.records
-            if isinstance(rec.metadata.get("final_output_chars"), (int, float))
+            if isinstance(rec.metadata.get("final_output_chars"), int | float)
         ],
         "turns_used": [
             float(rec.metadata["turns_used"])
             for rec in batch.records
-            if isinstance(rec.metadata.get("turns_used"), (int, float))
+            if isinstance(rec.metadata.get("turns_used"), int | float)
         ],
         "tool_calls_count": [
             float(rec.metadata["tool_calls_count"])
             for rec in batch.records
-            if isinstance(rec.metadata.get("tool_calls_count"), (int, float))
+            if isinstance(rec.metadata.get("tool_calls_count"), int | float)
         ],
         "tool_results_count": [
             float(rec.metadata["tool_results_count"])
             for rec in batch.records
-            if isinstance(rec.metadata.get("tool_results_count"), (int, float))
+            if isinstance(rec.metadata.get("tool_results_count"), int | float)
         ],
         "rollout_temperature": [
             float(rec.metadata["rollout_temperature"])
             for rec in batch.records
-            if isinstance(rec.metadata.get("rollout_temperature"), (int, float))
+            if isinstance(rec.metadata.get("rollout_temperature"), int | float)
             and not isinstance(rec.metadata.get("rollout_temperature"), bool)
         ],
     }
@@ -313,17 +313,17 @@ def summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
                     continue
                 name = sanitize_metric_name(str(component.get("name", "reward")))
                 score = component.get("score")
-                if isinstance(score, (int, float)):
+                if isinstance(score, int | float):
                     reward_component_scores.setdefault(name, []).append(float(score))
                 weight = component.get("weight")
-                if isinstance(weight, (int, float)):
+                if isinstance(weight, int | float):
                     reward_component_weights.setdefault(name, []).append(float(weight))
                 metadata = component.get("metadata")
                 if isinstance(metadata, dict):
                     for key, value in metadata.items():
                         if isinstance(value, bool):
                             continue
-                        if isinstance(value, (int, float)):
+                        if isinstance(value, int | float):
                             safe_key = sanitize_metric_name(str(key))
                             reward_component_metadata.setdefault(name, {}).setdefault(
                                 safe_key, []
@@ -331,10 +331,10 @@ def summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
         reward_meta = rec.metadata.get("reward_summary_metadata")
         if isinstance(reward_meta, dict):
             for key, value in reward_meta.items():
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    reward_summary_numeric.setdefault(
-                        sanitize_metric_name(str(key)), []
-                    ).append(float(value))
+                if isinstance(value, int | float) and not isinstance(value, bool):
+                    reward_summary_numeric.setdefault(sanitize_metric_name(str(key)), []).append(
+                        float(value)
+                    )
 
     if reward_component_scores:
         summary["reward_components"] = {}
@@ -348,9 +348,7 @@ def summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
     if reward_component_metadata:
         summary["reward_component_metadata"] = {
             component_name: {
-                key: series_stats(values)
-                for key, values in sorted(metadata.items())
-                if values
+                key: series_stats(values) for key, values in sorted(metadata.items()) if values
             }
             for component_name, metadata in sorted(reward_component_metadata.items())
         }
@@ -383,7 +381,7 @@ def summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
             values = [
                 float(row[key])
                 for row in turn_credit_rows
-                if isinstance(row.get(key), (int, float))
+                if isinstance(row.get(key), int | float)
             ]
             stats = series_stats(values)
             if stats:
@@ -403,7 +401,7 @@ def summarize_batch_metadata(batch: RolloutBatch) -> dict[str, Any]:
         rollout_final_rewards = [
             float(rec.metadata["rollout_final_reward"])
             for rec in batch.records
-            if isinstance(rec.metadata.get("rollout_final_reward"), (int, float))
+            if isinstance(rec.metadata.get("rollout_final_reward"), int | float)
         ]
         rollout_reward_stats = series_stats(rollout_final_rewards)
         if rollout_reward_stats:

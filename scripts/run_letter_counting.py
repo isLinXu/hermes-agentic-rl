@@ -17,7 +17,6 @@ Configurable via env vars:
     OUTPUT_DIR=path          (default: output/letter_counting)
 """
 
-import asyncio
 import os
 import sys
 import time
@@ -28,8 +27,7 @@ sys.path.insert(0, str(PROJECT))
 
 
 def main():
-    import torch
-    from hermes_agentic_rl.backends.hf import HFCausalLMBackend, HFBackendConfig
+    from hermes_agentic_rl.backends.hf import HFBackendConfig, HFCausalLMBackend
     from hermes_agentic_rl.core.reward_manager import RewardManager
     from hermes_agentic_rl.envs.letter_counting import (
         LetterCountingConfig,
@@ -101,7 +99,7 @@ def main():
         # Full fine-tune
         for p in backend.model.parameters():
             p.requires_grad_(True)
-        print(f"  Full fine-tune mode")
+        print("  Full fine-tune mode")
     trainable = sum(p.numel() for p in backend.trainable_parameters())
     print(f"  Trainable: {trainable:,}  Frozen: {total_params - trainable:,}")
 
@@ -164,7 +162,7 @@ def main():
     print(f"\nTraining complete in {elapsed:.1f}s ({elapsed / n_iters:.1f}s/iter)")
 
     # Final summary
-    print(f"\n=== Final Results ===")
+    print("\n=== Final Results ===")
     print(f"  Iterations: {n_iters}")
     print(f"  First reward: {stats.iters[0]['mean_reward']:.4f}")
     print(f"  Last reward:  {stats.last_reward():.4f}")
@@ -172,7 +170,7 @@ def main():
     print(f"  Delta:        {stats.mean_reward_delta():+.4f}")
 
     # Print reward curve
-    print(f"\n=== Reward Curve ===")
+    print("\n=== Reward Curve ===")
     for rec in stats.iters:
         it = rec["iter"]
         r = rec["mean_reward"]

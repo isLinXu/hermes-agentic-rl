@@ -98,9 +98,7 @@ def test_quality_filter_rejects_short_and_low_info():
     async def judge(_resp: str, next_state: str) -> str:
         return next_state  # echo the signal as the "hint"
 
-    ext = OPDHintExtractor(
-        judge, OPDHintExtractorConfig(min_hint_chars=10, reject_low_info=True)
-    )
+    ext = OPDHintExtractor(judge, OPDHintExtractorConfig(min_hint_chars=10, reject_low_info=True))
     short = _rec(next_state="hi")  # too short
     generic = _rec(next_state="be more helpful")  # low-info
     good = _rec(next_state="use a valid json tool argument with key 'path'")
@@ -202,9 +200,7 @@ def test_trainer_recovers_hint_and_fires_opd():
         OnPolicyTrainerConfig,
     )
 
-    b = TinyCausalLMBackend(
-        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0)
-    )
+    b = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0))
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([_NextStateOnlyReward()])  # type: ignore[list-item]
     cfg = OnPolicyTrainerConfig(
@@ -217,9 +213,7 @@ def test_trainer_recovers_hint_and_fires_opd():
         opd_teacher_fill=True,
         opd_hint_extractor={"type": "rule", "min_hint_chars": 5},
     )
-    trainer = OnPolicyTrainer(
-        policy=b, env=env, reward_manager=rm, algo=HybridAlgo(), cfg=cfg
-    )
+    trainer = OnPolicyTrainer(policy=b, env=env, reward_manager=rm, algo=HybridAlgo(), cfg=cfg)
     stats = trainer.train()
 
     last = stats.iters[-1]

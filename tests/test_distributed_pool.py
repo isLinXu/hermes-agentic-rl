@@ -32,7 +32,10 @@ def _build_worker(ctx: dict):
 
     def _factory(*, backend, seed):
         return PolicyAgentLoop(
-            backend=backend, max_new_tokens=4, temperature=1.0, seed=seed,
+            backend=backend,
+            max_new_tokens=4,
+            temperature=1.0,
+            seed=seed,
         )
 
     return backend, env, rm, _factory
@@ -50,6 +53,7 @@ def test_mp_rollout_pool_runs_and_returns_records():
         import torch as _t
 
         from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
+
         dummy = TinyCausalLMBackend(
             TinyBackendConfig(seed=0, dim=16, n_heads=2, n_layers=1, max_len=32)
         )

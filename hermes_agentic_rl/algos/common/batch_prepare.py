@@ -14,18 +14,19 @@ ensures consistency (e.g., KL estimator, entropy formula) across the board.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import torch
 
 from hermes_agentic_rl.algos.base import RolloutRecord
-from hermes_agentic_rl.algos.common.kl import kl_from_logprobs_batched
+from hermes_agentic_rl.algos.common.kl import KLEstimator, kl_from_logprobs_batched
 from hermes_agentic_rl.backends.base import LLMBackend
 
 # ---------------------------------------------------------------------------
 # 1) Stack old log-probabilities
 # ---------------------------------------------------------------------------
+
 
 def stack_old_logprobs(
     records_with_adv: list[tuple[RolloutRecord, list[float]]],
@@ -55,6 +56,7 @@ def stack_old_logprobs(
 # 2) Build advantage tensor
 # ---------------------------------------------------------------------------
 
+
 def build_advantage_tensor(
     records_with_adv: list[tuple[RolloutRecord, list[float]]],
     B: int,
@@ -78,7 +80,7 @@ def build_advantage_tensor(
             if R_i == 0 or not adv_list:
                 continue
             vals = adv_list[-R_i:] if len(adv_list) >= R_i else adv_list
-            adv_tensor[i, :len(vals)] = torch.tensor(vals, dtype=dtype, device=device)
+            adv_tensor[i, : len(vals)] = torch.tensor(vals, dtype=dtype, device=device)
     else:
         scalars = torch.tensor(
             [float(a[0]) if a else 0.0 for _, a in records_with_adv],
@@ -92,6 +94,7 @@ def build_advantage_tensor(
 # ---------------------------------------------------------------------------
 # 3) Compute KL-to-reference penalty (batched)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class KLPenaltyResult:
@@ -127,7 +130,7 @@ def compute_kl_penalty(
             temperature=score_temperature,
         )
     kl_scalar = kl_from_logprobs_batched(
-        new_logp, ref_logp, mask, estimator=kl_estimator
+        new_logp, ref_logp, mask, estimator=cast(KLEstimator, kl_estimator)
     )
     return KLPenaltyResult(
         kl_scalar=kl_scalar,
@@ -138,6 +141,7 @@ def compute_kl_penalty(
 # ---------------------------------------------------------------------------
 # 4) Compute entropy bonus
 # ---------------------------------------------------------------------------
+
 
 def compute_entropy_bonus(
     new_logp: torch.Tensor,
@@ -164,6 +168,7 @@ def compute_entropy_bonus(
 # ---------------------------------------------------------------------------
 # 5) Mean reward / advantage helpers
 # ---------------------------------------------------------------------------
+
 
 def mean_reward_from_records(records: list[RolloutRecord]) -> float:
     """Compute mean reward from a list of RolloutRecords."""

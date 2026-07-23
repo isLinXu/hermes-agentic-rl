@@ -101,7 +101,7 @@ def rloo_advantage(
 @dataclass(slots=True)
 class RLOOConfig:
     clip_eps: float = 0.2
-    clip_eps_high: float = 0.28        # asymmetric upper clip (same default as GRPO)
+    clip_eps_high: float = 0.28  # asymmetric upper clip (same default as GRPO)
     kl_coef: float = 0.01
     entropy_coef: float = 0.0
     advantage_eps: float = 1e-6
@@ -111,7 +111,7 @@ class RLOOConfig:
     # much larger than GRPO's group-normalised signal and destabilise the
     # update. Set normalize=False to keep absolute magnitudes (e.g. when
     # combining with bounded ±1 PRM signals).
-    normalize: bool = True             # z-score after LOO subtraction
+    normalize: bool = True  # z-score after LOO subtraction
     loss_agg: Literal["mean_token", "sum_token", "dr_grpo"] = "mean_token"
     max_len_for_dr_grpo: int = 256
     kl_estimator: Literal["k1", "k2", "k3"] = "k3"
@@ -143,8 +143,13 @@ class RLOOAlgo(BaseAlgo):
         if not all_records:
             zero = torch.zeros((), dtype=torch.float32)
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
-                mean_reward=0.0, mean_advantage=0.0, clip_frac=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
+                mean_reward=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
                 n_records=0,
                 extra={"algo": "rloo", "n_updated": 0, "approx_kl": 0.0},
             )
@@ -178,15 +183,21 @@ class RLOOAlgo(BaseAlgo):
         score_temperature = rollout_score_temperature([rec for rec, _ in records_with_adv])
 
         new_logp, mask = policy.score_batch(
-            prompt_ids_list, response_ids_list, temperature=score_temperature,
+            prompt_ids_list,
+            response_ids_list,
+            temperature=score_temperature,
         )
         B, T_max = new_logp.shape
         if B == 0 or T_max == 0:
             zero = new_logp.new_zeros(())
             return zero, AlgoUpdateStats(
-                loss=0.0, policy_loss=0.0, kl=0.0, entropy=0.0,
+                loss=0.0,
+                policy_loss=0.0,
+                kl=0.0,
+                entropy=0.0,
                 mean_reward=float(sum(r.reward for r in all_records) / max(1, len(all_records))),
-                mean_advantage=0.0, clip_frac=0.0,
+                mean_advantage=0.0,
+                clip_frac=0.0,
                 n_records=len(all_records),
                 extra={"algo": "rloo", "n_updated": 0, "approx_kl": 0.0},
             )
@@ -199,7 +210,10 @@ class RLOOAlgo(BaseAlgo):
 
         # 4) Clipped surrogate (asymmetric clip).
         pol_loss, loss_stats = clipped_surrogate_loss_batched(
-            new_logp, old_logp, adv_tensor, mask,
+            new_logp,
+            old_logp,
+            adv_tensor,
+            mask,
             clip_eps=cfg.clip_eps,
             clip_eps_high=cfg.clip_eps_high,
             loss_agg=cfg.loss_agg,
@@ -211,9 +225,13 @@ class RLOOAlgo(BaseAlgo):
 
         # 5) KL-to-reference — uses shared compute_kl_penalty.
         kl_result = compute_kl_penalty(
-            new_logp, mask,
-            prompt_ids_list, response_ids_list,
-            score_temperature, ref_policy, cfg.kl_coef,
+            new_logp,
+            mask,
+            prompt_ids_list,
+            response_ids_list,
+            score_temperature,
+            ref_policy,
+            cfg.kl_coef,
             kl_estimator=cfg.kl_estimator,
         )
         if kl_result is not None:

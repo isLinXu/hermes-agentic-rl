@@ -146,6 +146,8 @@ def test_session_eval_export_config_accepts_in_memory_config(tmp_path: Path):
     )
 
     assert exit_code == 0
-    rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines() if line]
+    rows = [
+        json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines() if line
+    ]
     assert len(rows) == 1
     assert rows[0]["source"] == "direct-config"

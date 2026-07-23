@@ -86,11 +86,11 @@ class RejectionSample:
 
 @dataclass(slots=True)
 class BestOfNConfig:
-    n: int = 8                        # number of rollouts per prompt
-    temperature: float = 1.0          # sampling temperature
+    n: int = 8  # number of rollouts per prompt
+    temperature: float = 1.0  # sampling temperature
     max_new_tokens: int = 256
-    seed_base: int = 0                # seeds: seed_base + i for i in range(n)
-    min_response_tokens: int = 1      # skip empty rollouts
+    seed_base: int = 0  # seeds: seed_base + i for i in range(n)
+    min_response_tokens: int = 1  # skip empty rollouts
 
 
 # ---------------------------------------------------------------------------
@@ -165,30 +165,36 @@ class BestOfN:
             old_logprobs=list(rl_meta.get("old_logprobs") or []),
             reward=score,
             group_id=str(seed),
-            metadata={"seed": seed, **traj.metadata},
-            old_seq_logprob=float(sum(rl_meta.get("old_logprobs") or [])),
+            metadata={
+                "seed": seed,
+                "old_seq_logprob": float(sum(rl_meta.get("old_logprobs") or [])),
+                **traj.metadata,
+            },
         )
         return record, score
 
     async def run_all(self, item: dict[str, Any]) -> BestOfNResult:
         """Generate N rollouts, rank by reward, return structured result."""
         cfg = self.cfg
-        tasks = [
-            self._single_rollout(item, cfg.seed_base + i)
-            for i in range(cfg.n)
-        ]
+        tasks = [self._single_rollout(item, cfg.seed_base + i) for i in range(cfg.n)]
         results = await asyncio.gather(*tasks)
         valid = [(rec, score) for r in results if r is not None for rec, score in [r]]
 
         if not valid:
             # Fallback: return empty winner
             empty_record = RolloutRecord(
-                prompt_ids=[], response_ids=[], old_logprobs=[],
-                reward=0.0, group_id="bon_empty",
+                prompt_ids=[],
+                response_ids=[],
+                old_logprobs=[],
+                reward=0.0,
+                group_id="bon_empty",
             )
             return BestOfNResult(
-                item=item, winner=empty_record, winner_score=0.0,
-                all_scores=[], all_records=[],
+                item=item,
+                winner=empty_record,
+                winner_score=0.0,
+                all_scores=[],
+                all_records=[],
             )
 
         valid.sort(key=lambda x: x[1], reverse=True)
@@ -205,9 +211,7 @@ class BestOfN:
         """Convenience wrapper: run_all and return the result."""
         return await self.run_all(item)
 
-    async def preference_pairs(
-        self, item: dict[str, Any]
-    ) -> list[PreferencePair]:
+    async def preference_pairs(self, item: dict[str, Any]) -> list[PreferencePair]:
         """Generate preference pairs (chosen, rejected) for DPO.
 
         Pairs the highest-scoring rollout against each lower-scoring one.
@@ -245,8 +249,8 @@ class BestOfN:
 
 @dataclass(slots=True)
 class RejectionSamplerConfig:
-    threshold: float = 0.5       # minimum reward to accept
-    max_accept: int = 1          # max accepted samples per prompt
+    threshold: float = 0.5  # minimum reward to accept
+    max_accept: int = 1  # max accepted samples per prompt
     percentile_mode: bool = False
     # When percentile_mode=True, threshold is interpreted as the fraction
     # of rollouts to accept (e.g. 0.25 = top 25%).
@@ -297,9 +301,7 @@ class RejectionSampler:
                 break
         return accepted
 
-    async def build_sft_dataset(
-        self, items: list[dict[str, Any]]
-    ) -> list[RejectionSample]:
+    async def build_sft_dataset(self, items: list[dict[str, Any]]) -> list[RejectionSample]:
         """Run rejection sampling over a list of items.
 
         Returns all accepted samples suitable for BC / SFT training.

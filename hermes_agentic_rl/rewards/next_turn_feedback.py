@@ -8,6 +8,7 @@ from hermes_agentic_rl.collectors.trajectory_adapter import (
 )
 from hermes_agentic_rl.core.types import RewardResult, Trajectory
 from hermes_agentic_rl.rewards.base import BaseReward
+from hermes_agentic_rl.rewards.toolcall_reward import score_tool_calls
 
 
 @dataclass(slots=True)
@@ -118,24 +119,14 @@ def score_assistant_toolcall_message(assistant_message: dict[str, Any]) -> tuple
     if not isinstance(tool_calls, list) or not tool_calls:
         return 0.0, "no_tool_calls"
 
-    invalid_calls = 0
-    for call in tool_calls:
-        if not isinstance(call, dict):
-            invalid_calls += 1
-            continue
-        name = call.get("name")
-        if isinstance(name, str) and name.strip():
-            continue
-        func = call.get("function")
-        if isinstance(func, dict):
-            func_name = func.get("name")
-            if isinstance(func_name, str) and func_name.strip():
-                continue
-        invalid_calls += 1
-
-    score = max(0.0, 1.0 - (invalid_calls / len(tool_calls)))
-    if invalid_calls == 0:
+    summary = score_tool_calls(tool_calls)
+    score = float(summary["score"])
+    if int(summary["invalid_calls"]) == 0:
         return score, "valid_tool_calls"
+    if int(summary["invalid_argument_json_calls"]) > 0:
+        return score, "invalid_tool_call_json"
+    if int(summary["invalid_argument_schema_calls"]) > 0:
+        return score, "invalid_tool_call_schema"
     return score, "invalid_tool_calls"
 
 

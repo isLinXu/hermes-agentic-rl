@@ -86,6 +86,9 @@ def test_cli_train_supports_multisample_export_with_fake_runtime(
     payloads = [json.loads(line) for line in lines]
     assert all(p["reward"] == 1.0 for p in payloads)
     assert all(
-        any(c["name"] == "filesystem_verifier_reward" and c["score"] == 1.0 for c in p["reward_components"])
+        any(
+            c["name"] == "filesystem_verifier_reward" and c["score"] == 1.0
+            for c in p["reward_components"]
+        )
         for p in payloads
     )

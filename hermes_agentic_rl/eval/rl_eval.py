@@ -90,7 +90,7 @@ def _jsonl_append(path: Path, payload: dict[str, Any]) -> None:
 def _as_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return 1.0 if value else 0.0
-    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+    if isinstance(value, int | float) and math.isfinite(float(value)):
         return float(value)
     return None
 
@@ -178,10 +178,7 @@ def _metric_delta(
     candidate: dict[str, float],
 ) -> dict[str, float]:
     keys = sorted(set(baseline) | set(candidate))
-    return {
-        key: float(candidate.get(key, 0.0) - baseline.get(key, 0.0))
-        for key in keys
-    }
+    return {key: float(candidate.get(key, 0.0) - baseline.get(key, 0.0)) for key in keys}
 
 
 def _success_metric_score(
@@ -327,10 +324,7 @@ def _normalize_promotion_gate(
         max_capability_regression = float(max_capability_regression_raw)
     raw_capability_thresholds = raw_dict.get("capability_thresholds")
     capability_thresholds = (
-        {
-            str(axis): float(threshold)
-            for axis, threshold in raw_capability_thresholds.items()
-        }
+        {str(axis): float(threshold) for axis, threshold in raw_capability_thresholds.items()}
         if isinstance(raw_capability_thresholds, dict)
         else {}
     )
@@ -456,8 +450,7 @@ def _promotion_readout(
     candidate_mode = str(gate.get("candidate", "best_non_baseline"))
     if candidate_mode != "best_non_baseline":
         raise RuntimeError(
-            "eval_rl.promotion_gate.candidate currently supports only "
-            "`best_non_baseline`"
+            "eval_rl.promotion_gate.candidate currently supports only `best_non_baseline`"
         )
 
     best_non_baseline = next(
@@ -702,7 +695,9 @@ def _expand_policy_specs(
     return expanded
 
 
-def _load_checkpoint_into_backend(backend: Any, checkpoint_path: str | Path, *, base_dir: Path) -> Path:
+def _load_checkpoint_into_backend(
+    backend: Any, checkpoint_path: str | Path, *, base_dir: Path
+) -> Path:
     if not hasattr(backend, "model"):
         raise RuntimeError("checkpoint loading requires backend.model")
     path = _resolve_path(checkpoint_path, base_dir=base_dir)
@@ -898,7 +893,8 @@ def _prepare_eval_items(
     split_info["selected_items_after_limit"] = len(selected)
     if not selected:
         raise RuntimeError(
-            "eval split selected zero items; increase dataset_limit or adjust val_ratio/test_ratio/split"
+            "eval split selected zero items; increase dataset_limit or "
+            "adjust val_ratio/test_ratio/split"
         )
     return selected, split_info
 
@@ -966,7 +962,9 @@ def run_eval_rl(
             if not isinstance(policy_spec, dict):
                 raise RuntimeError("each eval_rl.policies item must be a mapping")
             name = str(policy_spec.get("name") or f"policy_{policy_index}")
-            backend = _build_backend(cfg, need_value_head=bool(policy_spec.get("need_value_head", False)))
+            backend = _build_backend(
+                cfg, need_value_head=bool(policy_spec.get("need_value_head", False))
+            )
             checkpoint_path = policy_spec.get("checkpoint_path")
             loaded_checkpoint: str | None = None
             if checkpoint_path:
@@ -1111,8 +1109,7 @@ def run_eval_rl(
                         report["name"]: report["metrics"] for report in policy_reports
                     },
                     "comparison_metrics": {
-                        comparison["candidate"]: comparison
-                        for comparison in comparisons
+                        comparison["candidate"]: comparison for comparison in comparisons
                     },
                     "best_policy": summary["best_policy"],
                     "artifacts": summary["artifacts"],

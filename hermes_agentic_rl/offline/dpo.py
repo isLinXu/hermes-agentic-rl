@@ -67,9 +67,7 @@ class DPOTrainer:
         if ref_policy is None:
             clone = getattr(policy, "clone_frozen", None)
             if clone is None:
-                raise RuntimeError(
-                    "DPOTrainer needs ref_policy or a backend with clone_frozen()"
-                )
+                raise RuntimeError("DPOTrainer needs ref_policy or a backend with clone_frozen()")
             ref_policy = clone()
         self.ref_policy = ref_policy
         self.logger = logger or (lambda rec: print(self._format_log(rec)))
@@ -81,7 +79,9 @@ class DPOTrainer:
         )
 
     @staticmethod
-    def _seq_logp(backend: LLMBackend, prompt_ids: list[int], resp_ids: list[int], grad: bool) -> torch.Tensor:
+    def _seq_logp(
+        backend: LLMBackend, prompt_ids: list[int], resp_ids: list[int], grad: bool
+    ) -> torch.Tensor:
         if grad:
             logp = backend.score(prompt_ids, resp_ids)
         else:
@@ -114,9 +114,15 @@ class DPOTrainer:
                 correct = 0
                 for p in batch:
                     logp_chosen = self._seq_logp(self.policy, p.prompt_ids, p.chosen_ids, grad=True)
-                    logp_reject = self._seq_logp(self.policy, p.prompt_ids, p.rejected_ids, grad=True)
-                    logp_chosen_ref = self._seq_logp(self.ref_policy, p.prompt_ids, p.chosen_ids, grad=False)
-                    logp_reject_ref = self._seq_logp(self.ref_policy, p.prompt_ids, p.rejected_ids, grad=False)
+                    logp_reject = self._seq_logp(
+                        self.policy, p.prompt_ids, p.rejected_ids, grad=True
+                    )
+                    logp_chosen_ref = self._seq_logp(
+                        self.ref_policy, p.prompt_ids, p.chosen_ids, grad=False
+                    )
+                    logp_reject_ref = self._seq_logp(
+                        self.ref_policy, p.prompt_ids, p.rejected_ids, grad=False
+                    )
                     pref_logit = self.cfg.beta * (
                         (logp_chosen - logp_reject) - (logp_chosen_ref - logp_reject_ref)
                     )

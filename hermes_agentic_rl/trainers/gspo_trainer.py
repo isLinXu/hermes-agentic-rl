@@ -152,3 +152,12 @@ class GSPOTrainer(OnPolicyTrainer):
             lagrangian=lagrangian,
         )
         self._gspo_cfg = cfg
+
+    def _validate_backend(self, policy: LLMBackend) -> None:
+        """GSPO requires a trainable policy backend with score_batch() support."""
+        cls_name = type(policy).__name__
+        if not policy.is_trainable():
+            raise RuntimeError(
+                f"{cls_name} is not trainable. GSPOTrainer requires a backend "
+                f"with trainable_parameters() returning non-empty list."
+            )

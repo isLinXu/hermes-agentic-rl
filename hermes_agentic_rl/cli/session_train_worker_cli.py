@@ -122,11 +122,11 @@ def _save_worker_state(path: str | Path, state: dict[str, Any]) -> None:
     serializable = dict(state)
     raw_fingerprints = serializable.get("seen_pair_fingerprints")
     if isinstance(raw_fingerprints, set):
-        serializable["seen_pair_fingerprints"] = sorted(str(item) for item in raw_fingerprints if item)
-    elif isinstance(raw_fingerprints, list):
-        serializable["seen_pair_fingerprints"] = [
+        serializable["seen_pair_fingerprints"] = sorted(
             str(item) for item in raw_fingerprints if item
-        ]
+        )
+    elif isinstance(raw_fingerprints, list):
+        serializable["seen_pair_fingerprints"] = [str(item) for item in raw_fingerprints if item]
     else:
         serializable["seen_pair_fingerprints"] = []
     serializable["seen_pairs"] = max(
@@ -405,7 +405,7 @@ def run_session_train_worker_config(
     quarantine_path = cfg.get("quarantine_path")
     poll_interval_sec = float(train_cfg.get("poll_interval_sec", 1.0))
     min_reward = float(train_cfg.get("min_reward", 0.0))
-    max_idle_polls = int(train_cfg.get("max_idle_polls", 1 if (once or cfg.get('run_once')) else 0))
+    max_idle_polls = int(train_cfg.get("max_idle_polls", 1 if (once or cfg.get("run_once")) else 0))
     max_records_per_update = int(train_cfg.get("max_records_per_update", 0))
     max_pairs_per_update = int(train_cfg.get("max_pairs_per_update", 0))
     run_once = bool(cfg.get("run_once", False)) or once
@@ -537,15 +537,21 @@ def run_session_train_worker_config(
                     new_offset = _new_offset
 
             valid_records, invalid_records = _normalize_replay_records(records)
-            valid_records, quality_rejected = _apply_record_quality_filters(valid_records, quality_cfg)
+            valid_records, quality_rejected = _apply_record_quality_filters(
+                valid_records, quality_cfg
+            )
             valid_records, metadata_rejected = _apply_replay_metadata_filters(
                 valid_records,
                 replay_filter_cfg,
             )
             total_rejected = scan_rejected + invalid_records + quality_rejected + metadata_rejected
             if total_rejected and wrote_rejects_this_scan:
-                state["invalid_json_lines"] = int(state.get("invalid_json_lines", 0)) + len(scan_rejected)
-                state["invalid_records"] = int(state.get("invalid_records", 0)) + len(invalid_records)
+                state["invalid_json_lines"] = int(state.get("invalid_json_lines", 0)) + len(
+                    scan_rejected
+                )
+                state["invalid_records"] = int(state.get("invalid_records", 0)) + len(
+                    invalid_records
+                )
                 state["quality_filtered_records"] = int(
                     state.get("quality_filtered_records", 0)
                 ) + len(quality_rejected)
@@ -554,7 +560,9 @@ def run_session_train_worker_config(
                 ) + len(metadata_rejected)
                 if quarantine_path:
                     append_jsonl(quarantine_path, total_rejected)
-                    state["quarantined_records"] = int(state.get("quarantined_records", 0)) + len(total_rejected)
+                    state["quarantined_records"] = int(state.get("quarantined_records", 0)) + len(
+                        total_rejected
+                    )
             records = valid_records
             has_update = bool(records)
 
@@ -607,7 +615,9 @@ def run_session_train_worker_config(
                     bc_trainer = BCTrainer(backend, buffer, cfg=bc_cfg)
                     bc_stats = bc_trainer.train()
                     bc_trainer.save_policy(save_path)
-                    state["trained_samples"] = int(state.get("trained_samples", 0)) + len(buffer.samples)
+                    state["trained_samples"] = int(state.get("trained_samples", 0)) + len(
+                        buffer.samples
+                    )
                     state["updates"] = int(state.get("updates", 0)) + 1
                     if bc_stats.steps:
                         state["last_loss"] = float(bc_stats.steps[-1]["nll"])
@@ -673,15 +683,21 @@ def run_session_train_worker_config(
                         pairs = unseen_pairs
                         new_pair_fingerprints = unseen_pair_fingerprints
                 else:
-                    pairs = list(all_pairs[:max_pairs_per_update] if max_pairs_per_update > 0 else all_pairs)
+                    pairs = list(
+                        all_pairs[:max_pairs_per_update] if max_pairs_per_update > 0 else all_pairs
+                    )
                     new_pair_fingerprints = [_pair_fingerprint(pair) for pair in pairs]
                 buffer = ReplayBuffer.from_pairs(pairs)
                 state["trained_samples"] = len(samples)
                 state["candidate_pairs"] = len(all_pairs)
-                state["pending_pairs"] = max(
-                    0,
-                    len(all_pairs) - len(seen_pair_fingerprints) - len(buffer.pairs),
-                ) if train_only_new_pairs else max(0, len(all_pairs) - len(buffer.pairs))
+                state["pending_pairs"] = (
+                    max(
+                        0,
+                        len(all_pairs) - len(seen_pair_fingerprints) - len(buffer.pairs),
+                    )
+                    if train_only_new_pairs
+                    else max(0, len(all_pairs) - len(buffer.pairs))
+                )
                 if buffer.pairs:
                     if algo == "dpo":
                         dpo_trainer = DPOTrainer(backend, buffer, cfg=dpo_cfg)
@@ -706,10 +722,14 @@ def run_session_train_worker_config(
                         int(state.get("seen_pairs", 0)),
                         len(state.get("seen_pair_fingerprints", [])),
                     )
-                    state["pending_pairs"] = max(
-                        0,
-                        len(all_pairs) - len(state.get("seen_pair_fingerprints", [])),
-                    ) if train_only_new_pairs else max(0, len(all_pairs) - len(buffer.pairs))
+                    state["pending_pairs"] = (
+                        max(
+                            0,
+                            len(all_pairs) - len(state.get("seen_pair_fingerprints", [])),
+                        )
+                        if train_only_new_pairs
+                        else max(0, len(all_pairs) - len(buffer.pairs))
+                    )
                     print(
                         "[session-train-worker] "
                         f"algo={algo} update={state['updates']} records={len(records)} "

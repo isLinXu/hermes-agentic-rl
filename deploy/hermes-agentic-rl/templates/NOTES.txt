@@ -1,0 +1,88 @@
+Thank you for installing {{ .Chart.Name }} v{{ .Chart.Version }}.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  hermes-agentic-rl  —  Agentic RL on Kubernetes
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Release name : {{ .Release.Name }}
+Namespace    : {{ .Release.Namespace }}
+Workload type: {{ .Values.workloadType }}
+Command      : {{ .Values.command }}
+
+{{- if eq .Values.workloadType "job" }}
+
+📋  One-shot Job deployed
+
+  Check status:
+    kubectl get jobs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+  View logs:
+    kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} --tail=100 -f
+
+{{- else if eq .Values.workloadType "cronjob" }}
+
+⏰  CronJob scheduled
+
+  Schedule   : {{ .Values.cronjob.schedule }}
+  Timezone   : {{ .Values.cronjob.timeZone }}
+  Suspend    : {{ .Values.cronjob.suspend }}
+
+  Check status:
+    kubectl get cronjobs -n {{ .Release.Namespace }} {{ include "hermes-agentic-rl.fullname" . }}
+
+  Trigger manually:
+    kubectl create job -n {{ .Release.Namespace }} --from=cronjob/{{ include "hermes-agentic-rl.fullname" . }} {{ include "hermes-agentic-rl.fullname" . }}-manual
+
+{{- else if eq .Values.workloadType "deployment" }}
+
+🚀  Long-running Deployment deployed
+
+  Replicas   : {{ .Values.deployment.replicaCount }}
+
+  Check status:
+    kubectl get deployments -n {{ .Release.Namespace }} {{ include "hermes-agentic-rl.fullname" . }}
+
+  View logs:
+    kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} --tail=100 -f
+
+{{- end }}
+
+{{- if .Values.persistence.enabled }}
+
+💾  Persistent storage
+  Mount path : {{ .Values.persistence.mountPath }}
+{{- if .Values.persistence.existingClaim }}
+  PVC        : {{ .Values.persistence.existingClaim }} (existing)
+{{- else }}
+  PVC        : {{ include "hermes-agentic-rl.pvcName" . }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.config.inline }}
+
+⚙️   Config mounted at /etc/hermes/{{ .Values.config.configMapKey }}
+{{- else if .Values.config.existingConfigMap }}
+
+⚙️   Config from existing ConfigMap: {{ .Values.config.existingConfigMap }}
+{{- end }}
+
+{{- if .Values.resources.limits }}
+
+🔧  Resource limits
+{{- range $k, $v := .Values.resources.limits }}
+  {{ $k }}: {{ $v }}
+{{- end }}
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Quick start commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Port-forward (deployment mode)
+kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "hermes-agentic-rl.fullname" . }} 8080:{{ .Values.service.port }}
+
+# Copy outputs from pod to local
+kubectl cp -n {{ .Release.Namespace }} $(kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -o jsonpath='{.items[0].metadata.name}'):{{ .Values.persistence.mountPath }}/outputs ./outputs
+
+# Uninstall
+helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}

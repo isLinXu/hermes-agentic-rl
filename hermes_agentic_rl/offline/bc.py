@@ -61,9 +61,7 @@ class BCTrainer:
     def _format_log(self, r: dict[str, Any]) -> str:
         return f"[bc] step={r['step']} epoch={r['epoch']} nll={r['nll']:.4f} n={r['n']}"
 
-    def _iter_batches(
-        self, samples: list[TrainSample]
-    ) -> list[list[TrainSample]]:
+    def _iter_batches(self, samples: list[TrainSample]) -> list[list[TrainSample]]:
         rng = random.Random(self.cfg.seed)
         order = list(range(len(samples)))
         if self.cfg.shuffle:

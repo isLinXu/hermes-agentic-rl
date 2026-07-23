@@ -83,12 +83,14 @@ def test_gspo_sequence_ratio_uses_old_seq_logprob_metadata():
 
 class _PassthroughReward(BaseReward):
     """Always give score 0.5 so BestOfN can score valid rollouts."""
+
     name = "passthrough"
 
-    async def evaluate(
-        self, item: dict, traj: Trajectory, tool_context: Any
-    ) -> RewardResult:
-        return RewardResult(score=0.5, weight=1.0, name=self.name, reason="fixed")
+    def __init__(self, weight: float = 1.0) -> None:
+        self.weight = weight
+
+    async def evaluate(self, item: dict, traj: Trajectory, tool_context: Any) -> RewardResult:
+        return RewardResult(score=0.5, weight=self.weight, name=self.name, reason="fixed")
 
 
 # EchoTaskEnv items need {"instruction": "...", "target": "..."}
@@ -102,9 +104,7 @@ def _make_bon(n: int = 3, max_new_tokens: int = 8) -> BestOfN:
     pytest.importorskip("torch")
     from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 
-    backend = TinyCausalLMBackend(
-        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=42)
-    )
+    backend = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=42))
     env = EchoTaskEnv(_ECHO_ITEMS)
     rm = RewardManager([_PassthroughReward()])
     return BestOfN(
@@ -148,9 +148,7 @@ def test_best_of_n_empty_valid_fallback():
     pytest.importorskip("torch")
     from hermes_agentic_rl.backends.tiny import TinyBackendConfig, TinyCausalLMBackend
 
-    backend = TinyCausalLMBackend(
-        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=42)
-    )
+    backend = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=42))
     env = EchoTaskEnv(_ECHO_ITEMS)
     rm = RewardManager([_PassthroughReward()])
     bon = BestOfN(
@@ -232,14 +230,16 @@ def _make_factored_records(b: TinyCausalLMBackend, n: int = 4) -> list[RolloutRe
                 "old_logprobs": list(out.logprobs),
             },
         }
-        records.append(RolloutRecord(
-            prompt_ids=list(prompt),
-            response_ids=list(out.response_ids),
-            old_logprobs=list(out.logprobs),
-            reward=float(i) / n,
-            group_id="g0",
-            metadata={"factored": factored_meta},
-        ))
+        records.append(
+            RolloutRecord(
+                prompt_ids=list(prompt),
+                response_ids=list(out.response_ids),
+                old_logprobs=list(out.logprobs),
+                reward=float(i) / n,
+                group_id="g0",
+                metadata={"factored": factored_meta},
+            )
+        )
     return records
 
 
@@ -266,8 +266,7 @@ def test_factored_grpo_with_factored_records():
     if loss.requires_grad:
         loss.backward()
     has_grad = any(
-        p.grad is not None and p.grad.abs().sum().item() > 0
-        for p in b.trainable_parameters()
+        p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters()
     )
     assert has_grad
 
@@ -286,7 +285,7 @@ def test_factored_grpo_flat_fallback_for_missing_metadata():
         for i in range(3)
     ]
     algo = FactoredGRPO()
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.extra["n_flat_fallback"] == 3
     assert stats.extra["n_factored"] == 0
 
@@ -314,16 +313,18 @@ def test_factored_grpo_mixed_records():
                     "old_logprobs": list(out.logprobs),
                 }
             }
-        records.append(RolloutRecord(
-            prompt_ids=list(prompt),
-            response_ids=list(out.response_ids),
-            old_logprobs=list(out.logprobs),
-            reward=float(i),
-            group_id="g0",
-            metadata=meta,
-        ))
+        records.append(
+            RolloutRecord(
+                prompt_ids=list(prompt),
+                response_ids=list(out.response_ids),
+                old_logprobs=list(out.logprobs),
+                reward=float(i),
+                group_id="g0",
+                metadata=meta,
+            )
+        )
     algo = FactoredGRPO()
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.extra["n_factored"] == 2
     assert stats.extra["n_flat_fallback"] == 2
 
@@ -379,14 +380,16 @@ def _make_opd_records(
         meta: dict[str, Any] = {}
         if with_hints:
             meta["teacher_logprobs"] = [lp + 0.1 for lp in out.logprobs]
-        records.append(RolloutRecord(
-            prompt_ids=list(prompt),
-            response_ids=list(out.response_ids),
-            old_logprobs=list(out.logprobs),
-            reward=float(i),
-            group_id="g0",
-            metadata=meta,
-        ))
+        records.append(
+            RolloutRecord(
+                prompt_ids=list(prompt),
+                response_ids=list(out.response_ids),
+                old_logprobs=list(out.logprobs),
+                reward=float(i),
+                group_id="g0",
+                metadata=meta,
+            )
+        )
     return records
 
 
@@ -399,8 +402,7 @@ def test_opd_algo_with_hints_produces_gradient():
     if loss.requires_grad:
         loss.backward()
     has_grad = any(
-        p.grad is not None and p.grad.abs().sum().item() > 0
-        for p in b.trainable_parameters()
+        p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters()
     )
     assert has_grad
 
@@ -409,7 +411,7 @@ def test_opd_algo_skip_missing_hints():
     b = _make_tiny()
     records = _make_opd_records(b, n=3, with_hints=False)
     algo = OPDAlgo(OPDConfig(skip_missing_hints=True))
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.extra.get("n_opd_records", 0) == 0
 
 
@@ -417,14 +419,14 @@ def test_opd_algo_fallback_without_hints():
     b = _make_tiny()
     records = _make_opd_records(b, n=3, with_hints=False)
     algo = OPDAlgo(OPDConfig(skip_missing_hints=False, kl_coef=0.0))
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.n_records == 3
 
 
 def test_opd_algo_empty_batch():
     b = _make_tiny()
     algo = OPDAlgo()
-    loss, stats = algo.compute_loss(b, None, RolloutBatch([]))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch([]))
     assert stats.n_records == 0
 
 
@@ -445,24 +447,28 @@ def _make_hybrid_records(
 
     for i in range(n_grpo):
         out = b.generate(prompt, max_new_tokens=3, seed=i)
-        records.append(RolloutRecord(
-            prompt_ids=list(prompt),
-            response_ids=list(out.response_ids),
-            old_logprobs=list(out.logprobs),
-            reward=float(i + 1),
-            group_id="g0",
-        ))
+        records.append(
+            RolloutRecord(
+                prompt_ids=list(prompt),
+                response_ids=list(out.response_ids),
+                old_logprobs=list(out.logprobs),
+                reward=float(i + 1),
+                group_id="g0",
+            )
+        )
 
     for j in range(n_opd):
         out = b.generate(prompt, max_new_tokens=3, seed=n_grpo + j)
-        records.append(RolloutRecord(
-            prompt_ids=list(prompt),
-            response_ids=list(out.response_ids),
-            old_logprobs=list(out.logprobs),
-            reward=0.0,
-            group_id="g1",
-            metadata={"teacher_logprobs": [lp + 0.05 for lp in out.logprobs]},
-        ))
+        records.append(
+            RolloutRecord(
+                prompt_ids=list(prompt),
+                response_ids=list(out.response_ids),
+                old_logprobs=list(out.logprobs),
+                reward=0.0,
+                group_id="g1",
+                metadata={"teacher_logprobs": [lp + 0.05 for lp in out.logprobs]},
+            )
+        )
 
     return records
 
@@ -471,7 +477,7 @@ def test_hybrid_algo_partitions_records():
     b = _make_tiny()
     records = _make_hybrid_records(b, n_grpo=3, n_opd=2)
     algo = HybridAlgo()
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.n_records == 5
     assert "n_grpo" in stats.extra and "n_opd" in stats.extra
     assert stats.extra["n_grpo"] >= 3
@@ -481,12 +487,11 @@ def test_hybrid_algo_gradient_flows():
     b = _make_tiny()
     records = _make_hybrid_records(b, n_grpo=3, n_opd=2)
     algo = HybridAlgo()
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    loss, _stats = algo.compute_loss(b, None, RolloutBatch(records))
     if loss.requires_grad:
         loss.backward()
     has_grad = any(
-        p.grad is not None and p.grad.abs().sum().item() > 0
-        for p in b.trainable_parameters()
+        p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters()
     )
     assert has_grad
 
@@ -505,7 +510,7 @@ def test_hybrid_algo_grpo_only_when_no_hints():
         for i in range(3)
     ]
     algo = HybridAlgo()
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.extra["n_opd"] == 0
     assert stats.extra["n_grpo"] == 3
 
@@ -522,7 +527,7 @@ def test_hybrid_algo_w_rl_zero():
     b = _make_tiny()
     records = _make_hybrid_records(b, n_grpo=3, n_opd=2)
     algo = HybridAlgo(HybridConfig(w_rl=0.0, w_opd=1.0))
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.extra["n_grpo"] == 0
 
 
@@ -530,7 +535,7 @@ def test_hybrid_algo_w_opd_zero():
     b = _make_tiny()
     records = _make_hybrid_records(b, n_grpo=3, n_opd=2)
     algo = HybridAlgo(HybridConfig(w_rl=1.0, w_opd=0.0))
-    loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
+    _loss, stats = algo.compute_loss(b, None, RolloutBatch(records))
     assert stats.extra["n_opd"] == 0
 
 
@@ -615,7 +620,7 @@ def test_next_state_prm_hint_passthrough():
 
 def test_next_state_prm_missing_next_state():
     prm = NextStatePRM(_make_judge(GOOD), NextStatePRMConfig(at_least_one=True))
-    score, hint = asyncio.run(prm.score("resp", None))
+    score, _hint = asyncio.run(prm.score("resp", None))
     assert score == 0
 
 

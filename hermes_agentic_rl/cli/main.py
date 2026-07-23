@@ -9,15 +9,10 @@ import shutil
 from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from hermes_agentic_rl import __version__
-from hermes_agentic_rl.config import load_config
-from hermes_agentic_rl.core.trajectory import trajectory_to_dict
-from hermes_agentic_rl.datasets.jsonl_loader import load_jsonl_dataset
-from hermes_agentic_rl.framework import build_framework
 from hermes_agentic_rl.runtime.errors import RuntimeUnavailableError
-from hermes_agentic_rl.trainers.atropos_grpo import AtroposGrpoTrainer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -158,6 +153,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run_rollout(config_path: str, output_path: str | None) -> int:
+    from hermes_agentic_rl.config import load_config
+    from hermes_agentic_rl.core.trajectory import trajectory_to_dict
+    from hermes_agentic_rl.datasets.jsonl_loader import load_jsonl_dataset
+    from hermes_agentic_rl.framework import build_framework
+
     config = load_config(config_path)
     dataset = load_jsonl_dataset(config["environment"]["dataset_path"])
     item = dataset[0]
@@ -178,7 +178,9 @@ def _run_rollout(config_path: str, output_path: str | None) -> int:
     return 0
 
 
-def _select_items(dataset: list[dict[str, Any]], limit: int | None, seed: int | None) -> list[dict[str, Any]]:
+def _select_items(
+    dataset: list[dict[str, Any]], limit: int | None, seed: int | None
+) -> list[dict[str, Any]]:
     items = list(dataset)
     if seed is not None:
         random.Random(seed).shuffle(items)
@@ -247,7 +249,8 @@ def _clean_workdir_base(base_cwd: Path, workdir_base: Path) -> None:
 
     if not resolved.is_relative_to(outputs_root):
         raise RuntimeError(
-            f"refusing to clean workdir_base outside outputs/: workdir_base={resolved} outputs_root={outputs_root}"
+            f"refusing to clean workdir_base outside outputs/: "
+            f"workdir_base={resolved} outputs_root={outputs_root}"
         )
 
     if not resolved.exists():
@@ -281,6 +284,12 @@ def _run_train(
     print_effective_config: bool,
     print_effective_config_only: bool,
 ) -> int:
+    from hermes_agentic_rl.config import load_config
+    from hermes_agentic_rl.datasets.jsonl_loader import load_jsonl_dataset
+    from hermes_agentic_rl.framework import build_framework
+    from hermes_agentic_rl.trainers.atropos_grpo import AtroposGrpoTrainer
+    from hermes_agentic_rl.trainers.base import BaseTrainer
+
     base_cwd = Path.cwd()
     config = load_config(config_path)
 
@@ -314,10 +323,14 @@ def _run_train(
 
     if workdir_clean:
         if effective_workdir_base is None:
-            raise RuntimeError("--workdir-clean requires workdir_base to be set (via --workdir-base or config)")
+            raise RuntimeError(
+                "--workdir-clean requires workdir_base to be set (via --workdir-base or config)"
+            )
         _clean_workdir_base(base_cwd=base_cwd, workdir_base=effective_workdir_base)
 
-    effective_dataset_path = Path(dataset_path) if dataset_path is not None else Path(environment_cfg["dataset_path"])
+    effective_dataset_path = (
+        Path(dataset_path) if dataset_path is not None else Path(environment_cfg["dataset_path"])
+    )
     if not effective_dataset_path.is_absolute():
         effective_dataset_path = (base_cwd / effective_dataset_path).resolve()
 
@@ -339,7 +352,9 @@ def _run_train(
         "environment": {"dataset_path": str(effective_dataset_path)},
         "trainer": {
             "export_training_path": str(effective_export_path),
-            "workdir_base": str(effective_workdir_base) if effective_workdir_base is not None else None,
+            "workdir_base": str(effective_workdir_base)
+            if effective_workdir_base is not None
+            else None,
             "overwrite": bool(effective_overwrite),
             "max_samples": int(effective_limit) if effective_limit is not None else None,
             "seed": effective_seed,
@@ -364,7 +379,10 @@ def _run_train(
     def _make_framework() -> Any:
         return build_framework(
             config,
-            trainer=AtroposGrpoTrainer(output_path=effective_export_path),
+            trainer=cast(
+                BaseTrainer,
+                AtroposGrpoTrainer(output_path=effective_export_path),
+            ),
             build_sidecar=False,
         )
 
@@ -414,7 +432,11 @@ def _run_train(
                             verifier_passed += 1
                         else:
                             verifier_failed_samples += 1
-                            failures = comp.metadata.get("failures") if isinstance(comp.metadata, dict) else None
+                            failures = (
+                                comp.metadata.get("failures")
+                                if isinstance(comp.metadata, dict)
+                                else None
+                            )
                             if isinstance(failures, list):
                                 verifier_failures_total += len(failures)
                                 for failure in failures:
@@ -425,9 +447,7 @@ def _run_train(
                         break
         mean_reward = (sum(rewards) / len(rewards)) if rewards else 0.0
         nonzero_ratio = (nonzero_count / len(rewards)) if rewards else 0.0
-        verifier_pass_ratio = (
-            (verifier_passed / verifier_total) if verifier_total > 0 else 0.0
-        )
+        verifier_pass_ratio = (verifier_passed / verifier_total) if verifier_total > 0 else 0.0
         return {
             "samples": len(rewards),
             "mean_reward": mean_reward,
@@ -473,10 +493,14 @@ def _run_train(
         )
         return 3
 
-    if stats.get("verifier_total", 0) > 0 and stats["verifier_pass_ratio"] < effective_min_verifier_pass_ratio:
+    if (
+        stats.get("verifier_total", 0) > 0
+        and stats["verifier_pass_ratio"] < effective_min_verifier_pass_ratio
+    ):
         print(
             "train quality gate failed: "
-            f"verifier_pass_ratio {stats['verifier_pass_ratio']:.4f} < {effective_min_verifier_pass_ratio:.4f}"
+            f"verifier_pass_ratio {stats['verifier_pass_ratio']:.4f} "
+            f"< {effective_min_verifier_pass_ratio:.4f}"
         )
         return 4
 
@@ -655,15 +679,15 @@ def main() -> int:
         if args.command == "atropos-preflight":
             from hermes_agentic_rl.integrations.atropos_preflight import run_atropos_preflight
 
-            result = run_atropos_preflight(Path.cwd())
-            print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
-            return 0 if not result.missing else 1
+            atropos_result = run_atropos_preflight(Path.cwd())
+            print(json.dumps(atropos_result.as_dict(), ensure_ascii=False, indent=2))
+            return 0 if not atropos_result.missing else 1
         if args.command == "hermes-preflight":
             from hermes_agentic_rl.integrations.hermes_preflight import run_hermes_preflight
 
-            result = run_hermes_preflight(Path.cwd())
-            print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
-            return 0 if not result.missing else 1
+            hermes_result = run_hermes_preflight(Path.cwd())
+            print(json.dumps(hermes_result.as_dict(), ensure_ascii=False, indent=2))
+            return 0 if not hermes_result.missing else 1
     except RuntimeUnavailableError as exc:
         print(f"runtime unavailable: {exc}")
         return 2
@@ -672,7 +696,6 @@ def main() -> int:
         return 1
     print(f"command {args.command} is wired but not yet implemented")
     return 0
-
 
 
 if __name__ == "__main__":

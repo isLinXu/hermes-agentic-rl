@@ -8,7 +8,6 @@ from hermes_agentic_rl.integrations.hermes_repo import (
     HERMES_AGENT_REPO_ENV,
     resolve_hermes_repo,
 )
-from hermes_agentic_rl.runtime.hermes_adapter import HermesRuntimeAdapter
 
 
 def _write_fake_hermes_repo(repo_path: Path) -> None:
@@ -108,7 +107,10 @@ def test_cli_rollout_works_with_local_repo_path_even_if_availability_probe_is_fa
     monkeypatch.delitem(importlib.sys.modules, "run_agent", raising=False)
     monkeypatch.delitem(importlib.sys.modules, "environments", raising=False)
     monkeypatch.delitem(importlib.sys.modules, "environments.agent_loop", raising=False)
-    monkeypatch.setattr(HermesRuntimeAdapter, "is_available", lambda self: False)
+    monkeypatch.setattr(
+        "hermes_agentic_rl.runtime.hermes_adapter.HermesRuntimeAdapter.is_available",
+        lambda self: False,
+    )
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -144,6 +146,29 @@ def test_hermes_preflight_detects_local_subproject(tmp_path: Path):
     assert "python:environments.agent_loop" not in result.missing
 
 
+def test_run_hermes_preflight_reports_probe_errors_as_structured_missing(
+    tmp_path: Path,
+    monkeypatch,
+):
+    fake_repo = tmp_path / "subprojects" / "hermes-agent"
+    fake_repo.mkdir(parents=True)
+    _write_fake_hermes_repo(fake_repo)
+    (fake_repo / "environments" / "__init__.py").write_text(
+        "raise RuntimeError('boom')\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delitem(importlib.sys.modules, "run_agent", raising=False)
+    monkeypatch.delitem(importlib.sys.modules, "environments", raising=False)
+    monkeypatch.delitem(importlib.sys.modules, "environments.agent_loop", raising=False)
+
+    result = run_hermes_preflight(tmp_path)
+
+    assert result.repo_source == "subproject"
+    assert result.python_ok["environments.agent_loop"] is False
+    assert "python_probe_error:environments.agent_loop:RuntimeError" in result.missing
+
+
 def test_cli_hermes_preflight_command_prints_json(tmp_path: Path, monkeypatch, capsys):
     fake_repo = tmp_path / "subprojects" / "hermes-agent"
     fake_repo.mkdir(parents=True)
@@ -156,3 +181,19 @@ def test_cli_hermes_preflight_command_prints_json(tmp_path: Path, monkeypatch, c
 
     assert exit_code == 0
     assert '"repo_source": "subproject"' in captured.out
+
+
+def test_run_hermes_preflight_returns_structured_result_for_repo_root():
+    workspace_root = Path(__file__).resolve().parent.parent
+
+    result = run_hermes_preflight(workspace_root)
+    payload = result.as_dict()
+
+    assert isinstance(result.python_ok, dict)
+    assert isinstance(result.missing, list)
+    assert result.repo_source in {None, "config", "env", "subproject"}
+    assert payload["base_dir"] == str(workspace_root.resolve())
+    assert payload["repo_source"] == result.repo_source
+    assert payload["repo_path"] == (str(result.repo_path) if result.repo_path else None)
+    assert payload["python_ok"] == result.python_ok
+    assert payload["missing"] == result.missing

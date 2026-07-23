@@ -17,6 +17,32 @@ _TINKER_ATROPOS_RELATIVE_PATHS = (
 
 
 @dataclass(frozen=True, slots=True)
+class AtroposMissingDetail:
+    """Structured detail for a single preflight missing item."""
+
+    kind: str
+    repo: str | None = None
+    path: Path | None = None
+    module: str | None = None
+    required: bool | None = None
+    reason: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"kind": self.kind}
+        if self.repo is not None:
+            payload["repo"] = self.repo
+        if self.path is not None:
+            payload["path"] = str(self.path)
+        if self.module is not None:
+            payload["module"] = self.module
+        if self.required is not None:
+            payload["required"] = self.required
+        if self.reason is not None:
+            payload["reason"] = self.reason
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
 class AtroposPreflightResult:
     """Preflight result for local Atropos/Tinker-Atropos integration."""
 
@@ -25,6 +51,7 @@ class AtroposPreflightResult:
     tinker_atropos_dir: Path | None
     python_ok: dict[str, bool]
     missing: list[str]
+    missing_details: list[AtroposMissingDetail]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -33,11 +60,19 @@ class AtroposPreflightResult:
             "tinker_atropos_dir": str(self.tinker_atropos_dir) if self.tinker_atropos_dir else None,
             "python_ok": dict(self.python_ok),
             "missing": list(self.missing),
+            "missing_details": [detail.as_dict() for detail in self.missing_details],
         }
 
 
 def _module_exists(name: str) -> bool:
-    return importlib.util.find_spec(name) is not None
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ValueError:
+        return True
+    except ModuleNotFoundError:
+        return False
+    except Exception:
+        return False
 
 
 def _maybe_add_sys_path(path: Path) -> None:
@@ -85,16 +120,55 @@ def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
     }
 
     missing: list[str] = []
+    missing_details: list[AtroposMissingDetail] = []
     if atropos_dir is None:
         missing.append("local_dir:subprojects/atropos")
+        missing_details.append(
+            AtroposMissingDetail(
+                kind="local_dir_missing",
+                repo="atropos",
+                path=(base_dir / "subprojects" / "atropos").resolve(),
+            )
+        )
     if tinker_atropos_dir is None:
         missing.append("local_dir:subprojects/tinker-atropos")
+        missing_details.append(
+            AtroposMissingDetail(
+                kind="local_dir_missing",
+                repo="tinker-atropos",
+                path=(base_dir / "subprojects" / "tinker-atropos").resolve(),
+            )
+        )
     if not python_ok["atroposlib"]:
         missing.append("python:atroposlib")
+        missing_details.append(
+            AtroposMissingDetail(
+                kind="python_module_missing",
+                module="atroposlib",
+                required=True,
+                reason="required for local Atropos integration",
+            )
+        )
     if not python_ok["tinker_atropos.config"]:
-        missing.append("python:tinker_atropos")
+        missing.append("python:tinker_atropos.config")
+        missing_details.append(
+            AtroposMissingDetail(
+                kind="python_module_missing",
+                module="tinker_atropos.config",
+                required=True,
+                reason="required for local tinker-atropos config import",
+            )
+        )
     if not python_ok["tinker"]:
-        missing.append("python:tinker (required for TinkerAtroposTrainer)")
+        missing.append("python:tinker")
+        missing_details.append(
+            AtroposMissingDetail(
+                kind="python_module_missing",
+                module="tinker",
+                required=True,
+                reason="required for TinkerAtroposTrainer",
+            )
+        )
 
     return AtroposPreflightResult(
         base_dir=base_dir,
@@ -102,4 +176,5 @@ def run_atropos_preflight(base_dir: Path) -> AtroposPreflightResult:
         tinker_atropos_dir=tinker_atropos_dir,
         python_ok=python_ok,
         missing=missing,
+        missing_details=missing_details,
     )

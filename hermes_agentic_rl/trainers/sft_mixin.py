@@ -7,12 +7,19 @@ Extracted from ``on_policy.py`` to isolate SFT-related logic
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn.functional as F
 
 from hermes_agentic_rl.envs.base_env import SupervisedSample
+
+if TYPE_CHECKING:
+    import torch.optim
+
+    from hermes_agentic_rl.backends.base import LLMBackend
+    from hermes_agentic_rl.envs.base_env import BaseEnv
+    from hermes_agentic_rl.trainers.on_policy_config import OnPolicyTrainerConfig
 
 
 class SFTMixin:
@@ -31,6 +38,17 @@ class SFTMixin:
       - ``self._policy_max_sequence_length()`` -> int | None
       - ``self._forward_model_logits(inp)`` -> Tensor
     """
+
+    if TYPE_CHECKING:
+        cfg: OnPolicyTrainerConfig
+        env: BaseEnv
+        optim: torch.optim.Optimizer
+        stats: Any
+        policy: LLMBackend
+        _trainable_params: list[Any]
+        _prompt_encoder: Any
+        _minibatch_rng: Any
+        _update_ema_rollout: Any
 
     def _maybe_run_interleaved_sft(self, iter_idx: int) -> dict[str, Any]:
         every = max(0, int(self.cfg.interleave_sft_every))
@@ -144,7 +162,6 @@ class SFTMixin:
                             max_norm=self.cfg.grad_clip,
                         )
                     self.optim.step()
-                    self._update_ema_rollout()
                     losses.append(float(loss.detach().item()))
                     n_steps += 1
         finally:
@@ -199,9 +216,26 @@ class SFTMixin:
         for source in (cfg, getattr(self.policy, "model", None)):
             if source is None:
                 continue
-            max_len = getattr(source, "max_len", None)
-            if isinstance(max_len, int) and max_len > 0:
-                return max_len
+            for attr in ("max_len", "max_new_tokens", "n_positions", "max_position_embeddings"):
+                max_len = getattr(source, attr, None)
+                if isinstance(max_len, int) and max_len > 0:
+                    return max_len
+            # Check model.config for HF models
+            model_config = getattr(source, "config", None)
+            if model_config is not None:
+                for attr in ("n_positions", "max_position_embeddings", "max_length"):
+                    max_len = getattr(model_config, attr, None)
+                    if isinstance(max_len, int) and max_len > 0:
+                        return max_len
+        return None
+        cfg = getattr(self.policy, "cfg", None)
+        for source in (cfg, getattr(self.policy, "model", None)):
+            if source is None:
+                continue
+            for attr in ("max_len", "max_new_tokens", "n_positions", "max_position_embeddings"):
+                max_len = getattr(source, attr, None)
+                if isinstance(max_len, int) and max_len > 0:
+                    return max_len
         return None
 
     def _forward_model_logits(self, inp: torch.Tensor) -> torch.Tensor:

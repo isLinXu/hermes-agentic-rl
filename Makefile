@@ -1,7 +1,7 @@
-.PHONY: help install install-dev test test-fast lint format typecheck typecheck-strict audit ci clean docker docker-test smoke
+.PHONY: help install install-dev test test-fast benchmark lint format typecheck typecheck-strict audit ci clean docker docker-test smoke
 
 PYTHON ?= python
-IMG ?= hermes-agentic-rl:0.6
+IMG ?= hermes-agentic-rl:0.11
 STRICT_MYPY_TARGETS := \
 	hermes_agentic_rl/collectors/replay_quality.py \
 	hermes_agentic_rl/rewards/toolcall_reward.py \
@@ -13,6 +13,7 @@ help:
 	@echo "  make install-dev   - pip install -e '.[rl,dev]' + pre-commit install"
 	@echo "  make test          - run full test suite (pytest)"
 	@echo "  make test-fast     - run tests in parallel (needs pytest-xdist)"
+	@echo "  make benchmark     - run algorithm micro-benchmarks (pytest-benchmark)"
 	@echo "  make lint          - ruff check + ruff format --check"
 	@echo "  make format        - ruff check --fix + ruff format"
 	@echo "  make typecheck     - mypy (non-blocking in CI)"
@@ -36,6 +37,12 @@ test:
 
 test-fast:
 	$(PYTHON) -m pytest tests -q -n auto
+
+benchmark:
+	$(PYTHON) -m pytest tests/benchmarks/ -m benchmark -q --benchmark-disable
+
+benchmark-compare:
+	$(PYTHON) -m pytest tests/benchmarks/ -m benchmark --benchmark-only
 
 lint:
 	$(PYTHON) -m ruff check hermes_agentic_rl tests

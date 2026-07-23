@@ -183,8 +183,7 @@ def test_filled_records_drive_opd_gradient():
     if loss.requires_grad:
         loss.backward()
     assert any(
-        p.grad is not None and p.grad.abs().sum().item() > 0
-        for p in b.trainable_parameters()
+        p.grad is not None and p.grad.abs().sum().item() > 0 for p in b.trainable_parameters()
     )
 
 
@@ -244,7 +243,11 @@ def test_trainer_closed_loop_fills_and_fires_opd():
         opd_capability_axis_weights={"tool_use_reliability": 2.0},
     )
     trainer = OnPolicyTrainer(
-        policy=b, env=env, reward_manager=rm, algo=HybridAlgo(), cfg=cfg,
+        policy=b,
+        env=env,
+        reward_manager=rm,
+        algo=HybridAlgo(),
+        cfg=cfg,
     )
     stats = trainer.train()
 

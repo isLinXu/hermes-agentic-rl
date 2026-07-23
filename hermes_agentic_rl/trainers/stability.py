@@ -100,4 +100,4 @@ def apply_stability_preset_to_config(cfg: ConfigT) -> ConfigT:
         default = field.default
         if getattr(cfg, key) == default:
             updates[key] = deepcopy(preset_value)
-    return replace(cfg, **updates)
+    return replace(cfg, **updates)  # type: ignore

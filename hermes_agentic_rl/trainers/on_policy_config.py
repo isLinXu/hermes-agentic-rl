@@ -158,6 +158,19 @@ class OnPolicyTrainerConfig:
     # allow_regression (bool), regression_factor (float),
     # stages (optional list of CurriculumStage dicts).
     curriculum: dict[str, Any] | None = None
+    # --- Staleness-adaptive TIS (dynamic rho_clip based on observed staleness) ---
+    # When set, a StalenessAdaptiveTIS controller is created that observes
+    # the pipeline/replay staleness each iter and dynamically adjusts the
+    # TIS rho_clip. Dict keys: max_rho_clip, min_rho_clip, max_staleness,
+    # interpolation ("linear"|"exp"), rho_floor, window_size, enabled.
+    # Overrides the algo's fixed tis_rho_clip when active.
+    staleness_adaptive_tis: dict[str, Any] | None = None
+    # --- LoRA hot-reload (merge LoRA deltas → vLLM sync without full retrain) ---
+    # When set, a LoRAHotReloadManager is created that merges LoRA adapter
+    # deltas into shadow base weights and pushes to vLLM after each optimizer
+    # step. Dict keys: rank, alpha, target_patterns, sync_every, shadow_device.
+    # Requires vllm_rollout_model to be set.
+    lora_hot_reload: dict[str, Any] | None = None
 
 
 def build_shared_on_policy_config(source: Any) -> OnPolicyTrainerConfig:
@@ -230,4 +243,16 @@ def validate_on_policy_config(cfg: OnPolicyTrainerConfig) -> list[str]:
                 "adaptive_kl_I_max <= 0; PID integral anti-windup will be "
                 "ineffective — set a positive value (default 2.0)"
             )
+    if cfg.lora_hot_reload and not cfg.vllm_rollout_model:
+        warnings.append(
+            "lora_hot_reload requires vllm_rollout_model to be set — "
+            "LoRA deltas are merged and synced to vLLM"
+        )
+    if cfg.staleness_adaptive_tis and not (
+        cfg.pipeline_rollouts or cfg.replay_buffer
+    ):
+        warnings.append(
+            "staleness_adaptive_tis has no effect without pipeline_rollouts "
+            "or replay_buffer — staleness is always 0 in synchronous mode"
+        )
     return warnings

@@ -203,9 +203,7 @@ def test_skill_export_quality_gate_detects_source_turn_negative_feedback(
                 "metadata": {
                     "capability_axes": ["tool_use_reliability"],
                     "source_turn": {
-                        "prompt_messages": [
-                            {"role": "user", "content": "Create a report file."}
-                        ],
+                        "prompt_messages": [{"role": "user", "content": "Create a report file."}],
                         "assistant_message": {
                             "role": "assistant",
                             "content": "I created the file.",

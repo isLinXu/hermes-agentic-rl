@@ -11,15 +11,12 @@ from hermes_agentic_rl.envs.echo_task_env import (
     EchoTaskEnv,
     build_default_echo_dataset,
 )
-from hermes_agentic_rl.runtime.errors import RuntimeConfigurationError
 from hermes_agentic_rl.trainers.ema import EMAModel
 from hermes_agentic_rl.trainers.grpo_trainer import GRPOTrainer, GRPOTrainerConfig
 
 
 def test_ema_model_blends_parameters() -> None:
-    policy = TinyCausalLMBackend(
-        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0)
-    )
+    policy = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0))
     ema = EMAModel(policy, tau=0.5)
     shadow_param = next(ema.shadow.model.parameters()).detach().clone()
 
@@ -33,9 +30,7 @@ def test_ema_model_blends_parameters() -> None:
 
 
 def test_grpo_trainer_uses_ema_backend_for_local_rollout() -> None:
-    policy = TinyCausalLMBackend(
-        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0)
-    )
+    policy = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0))
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
 
@@ -63,13 +58,13 @@ def test_grpo_trainer_uses_ema_backend_for_local_rollout() -> None:
 
 
 def test_ema_rollout_rejects_vllm_rollout_mix() -> None:
-    policy = TinyCausalLMBackend(
-        TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0)
-    )
+    policy = TinyCausalLMBackend(TinyBackendConfig(dim=16, n_heads=2, n_layers=1, seed=0))
     env = EchoTaskEnv(build_default_echo_dataset())
     rm = RewardManager([EchoRewardComponent(weight=1.0)])
 
-    with pytest.raises(RuntimeConfigurationError, match="EMA rollout"):
+    # The cross-field validation in GRPOTrainerConfig.__post_init__ raises
+    # ValueError before the trainer constructor can produce its own error.
+    with pytest.raises(ValueError, match=r"ema_rollout.*incompatible"):
         GRPOTrainer(
             policy=policy,
             env=env,

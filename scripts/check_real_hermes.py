@@ -87,7 +87,10 @@ def check_adapter_build(
     if (major, minor) < (3, 11):
         return {
             "status": "error",
-            "details": f"adapter build skipped: Python {major}.{minor}.{patch} does not satisfy Python 3.11+",
+            "details": (
+                f"adapter build skipped: Python {major}.{minor}.{patch} "
+                "does not satisfy Python 3.11+"
+            ),
         }
 
     adapter_builder = adapter_builder or default_adapter_builder
@@ -132,8 +135,9 @@ def run_checks() -> dict[str, Any]:
         workspace_root / "data" / "minimal_terminal_tasks.jsonl",
         "sample_dataset",
     )
+    repo_ok = repo_resolution.is_present and repo_resolution.has_run_agent
     repo_result = {
-        "status": "ok" if repo_resolution.is_present and repo_resolution.has_run_agent else "warning",
+        "status": "ok" if repo_ok else "warning",
         "details": (
             f"hermes repo: {repo_resolution.repo_path}"
             if repo_resolution.repo_path

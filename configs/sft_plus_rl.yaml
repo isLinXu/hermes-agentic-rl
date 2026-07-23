@@ -1,0 +1,56 @@
+# SFT + RL Hybrid Training Configuration
+# ========================================
+# Demonstrates bootstrap SFT (warm-start) + interleaved SFT (stabilisation).
+#
+# Usage: python -m hermes_agentic_rl.yaml_config --config configs/sft_plus_rl.yaml
+
+# ── Backend ──
+backend: tiny
+model_name: Qwen/Qwen2.5-1.5B-Instruct
+max_new_tokens: 32
+
+# ── Training ──
+n_iters: 10
+group_size: 4
+prompts_per_iter: 2
+lr: 0.001
+temperature: 1.0
+clip_eps: 0.2
+kl_coef: 0.0
+log_every: 1
+save_every: 0
+output_dir: output/sft_plus_rl
+
+# ── Bootstrap SFT (warm-start before RL) ──
+# Runs N rounds of supervised fine-tuning before iteration 0.
+# The environment must provide supervised samples (item["target"]).
+bootstrap_sft_rounds: 3
+bootstrap_sft_samples: 16
+bootstrap_sft_lr: 0.05
+
+# ── Interleaved SFT (stabilise during RL) ──
+# Inserts an SFT round every N RL iterations to prevent forgetting.
+interleave_sft_every: 2
+interleave_sft_samples: 8
+interleave_sft_lr: 0.001
+
+# ── Environment ──
+env:
+  type: sim_tool
+  n_samples: 50
+  seed: 42
+
+# ── Rewards ──
+rewards:
+  components:
+    - type: OutcomeReward
+      weight: 1.0
+  composer:
+    normalize:
+      outcome_reward: true
+    parallel: true
+
+# ── Metrics ──
+metrics:
+  jsonl: true
+  stdout: true

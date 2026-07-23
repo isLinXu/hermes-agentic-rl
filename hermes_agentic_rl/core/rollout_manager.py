@@ -72,14 +72,10 @@ class RolloutManager:
                     turn_index=index,
                     assistant_message=None,
                     tool_calls=(
-                        tool_calls_per_turn[index]
-                        if index < len(tool_calls_per_turn)
-                        else []
+                        tool_calls_per_turn[index] if index < len(tool_calls_per_turn) else []
                     ),
                     tool_results=(
-                        tool_results_per_turn[index]
-                        if index < len(tool_results_per_turn)
-                        else []
+                        tool_results_per_turn[index] if index < len(tool_results_per_turn) else []
                     ),
                 )
             )
